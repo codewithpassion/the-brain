@@ -1,0 +1,26 @@
+{
+  "name": "@brain/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "check": "biome check . && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@brain/db": "workspace:*",
+    "@brain/shared": "workspace:*",
+    "drizzle-orm": "^0.44.6"
+  },
+  "devDependencies": {
+    "@brain/tsconfig": "workspace:*",
+    "@cloudflare/vitest-pool-workers": "^0.16.19",
+    "@cloudflare/workers-types": "^4.20260530.1",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.104.0"
+  }
+}

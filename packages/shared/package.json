@@ -1,5 +1,5 @@
 {
-  "name": "@brain/_smoke",
+  "name": "@brain/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,9 @@
     "check": "biome check . && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "biome check ."
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*"

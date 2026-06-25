@@ -1,25 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "the-brain strict base",
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "moduleDetection": "force",
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true,
-    "noEmit": true
-  }
+  "comment": "Thin re-export of the single source of truth in `packages/tsconfig/base.json` (see the note there). Kept so existing `../../tsconfig.base.json` references stay valid.",
+  "extends": "./packages/tsconfig/base.json"
 }

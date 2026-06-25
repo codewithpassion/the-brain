@@ -1,5 +1,26 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "@brain/tsconfig base",
-  "extends": "../../tsconfig.base.json"
+  "comment": "The single source of truth for the strict compiler options. Kept self-contained (no `extends`) on purpose: this file is consumed via the `@brain/tsconfig` node_modules symlink, and a relative `extends` here resolves against the symlink path (not its realpath) under non-tsc tooling such as Vite/oxc, which fails to load. The repo-root `tsconfig.base.json` thinly re-exports this.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
 }

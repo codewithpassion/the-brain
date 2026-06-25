@@ -7,7 +7,16 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!sources", "!reviews", "!scripts", "!workflows", "!**/*.html"]
+    "includes": [
+      "**",
+      "!sources",
+      "!reviews",
+      "!scripts",
+      "!workflows",
+      "!**/*.html",
+      "!**/worker-configuration.d.ts",
+      "!**/.wrangler"
+    ]
   },
   "formatter": {
     "enabled": true,

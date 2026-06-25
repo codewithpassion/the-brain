@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "brain-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ── Bindings ────────────────────────────────────────────────────────────────
+  // ONLY bindings whose backing has working LOCAL emulation (miniflare) are declared
+  // here, so the harness boots green against real workerd. Names mirror the frozen
+  // hand-written ENV interface (`packages/db/src/env.ts`, `BrainBindings`).
+  //
+  // The single shared D1 — the tenancy spine (PRD §9). `database_id` is a local
+  // placeholder UUID; miniflare emulates D1 in-process. `migrations_dir` points at the
+  // frozen Drizzle migrations (also applied manually into the test D1 — see vitest.config.ts).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "brain",
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "../../packages/db/drizzle"
+    }
+  ],
+  // KV for the `@cloudflare/workers-oauth-provider` store (PRD §7.2/§9). Fully emulated.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "oauth_kv_local" }],
+  // R2 for tenant-prefixed bodies/transcripts/audit ndjson (PRD §9). Fully emulated.
+  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "brain-bodies" }]
+
+  // ── Deploy-only / FAKED-in-tests bindings (deliberately NOT declared here) ────
+  // CHUNK_INDEX + ENTITY_INDEX (Vectorize V2, 1024d) and AI (Workers AI) have NO local
+  // emulation. Binding them here would break local boot/typegen, so they are added at
+  // DEPLOY time only and FAKED in tests (see test/isolation.canary.test.ts, which drives
+  // an adversarial fake Vectorize through the mandatory D1 re-check). The string bindings
+  // AI_GATEWAY_ID / CLERK_FRONTEND_API / DEVICE_FLOW_SECRET are set as vars/secrets at
+  // deploy. Durable Object / Workflows / Queue bindings land in later phases once their
+  // backing classes exist (declaring them now would fail typegen/boot).
+}
