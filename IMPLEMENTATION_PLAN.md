@@ -112,6 +112,9 @@ Blocking (decided by human):
 - **Machine token (`bdev_`):** one token per tenant, `tenantId` baked in at mint time; the token alone identifies the tenant (no separate selector for machine tokens).
 - **Promotion to `instruction`:** a `member` MAY promote facts within their own `allowedScopes`; owner/admin promote anywhere. A human-confirmed `memory_review` row is ALWAYS required (agent writeback still hard-wired to `evidence`).
 
+Ratified divergence from PRD (security):
+- **MCP Durable Object keying:** the PRD §9 said "pin the DO per (tenant, slug)". Built instead as **one DO per MCP session** (`streamable-http:${sessionId}`). Reason: McpAgent stores the resolved `Principal` in per-DO `this.props`; sharing one DO across concurrent sessions of the same tenant lets connection B's `onStart` overwrite A's props, so A's later tool calls execute as B (B's `userId` → `visibilityPredicate` could expose B's private rows to A) — and the D1 re-check can't catch it because it runs with the contaminated principal. Per-session keying isolates props. The slug still selects the tenant at the edge; the DO stays protocol-instance-only (isolation rests on the D1 re-check, unchanged). Proven by the two-tenant MCP canary.
+
 Non-blocking (defaulted):
 - Custom-domain hostnames → workers.dev for v1 (deferred).
 - Per-tenant cost-ceiling overrides → flat $400, no per-tenant override in v1.

@@ -104,6 +104,17 @@
     ]
   },
 
+  // ── Durable Objects (PRD §9.2) ───────────────────────────────────────────────
+  // `BrainMCP` — the McpAgent protocol instance (one DO per MCP session). It is the agent-facing
+  // MCP surface at `/mcp/:slug`; it is NEVER the system of record (invariant 3 — isolation rests
+  // on the per-call D1 re-check, not the DO). SQLite-backed, so it is declared via the
+  // `new_sqlite_classes` migration below. PROBED: pool-workers boots the DO locally (real
+  // workerd) with the `agents` SDK bundled — the class MUST be exported from `main`.
+  "durable_objects": {
+    "bindings": [{ "name": "BRAIN_MCP", "class_name": "BrainMCP" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BrainMCP"] }],
+
   // ── Cron triggers ────────────────────────────────────────────────────────────
   // Every 5 minutes the `scheduled()` handler runs the P5 idle-promotion + audit-export
   // sweeps and the P3 re-embed sweep. (No local cron emulation in the test harness.)
@@ -117,5 +128,5 @@
   // DEPLOY time only and FAKED in tests (see test/isolation.canary.test.ts, which drives
   // an adversarial fake Vectorize through the mandatory D1 re-check). The string bindings
   // AI_GATEWAY_ID / CLERK_FRONTEND_API / DEVICE_FLOW_SECRET are set as vars/secrets at
-  // deploy. The MCP Durable Object lands in Phase 6.
+  // deploy.
 }

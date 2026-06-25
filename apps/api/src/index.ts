@@ -51,6 +51,7 @@ import {
 import type { ApiBindings } from "./bindings"
 import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
+import { isMcpPath, mountMcp } from "./mcp/routes"
 import { makeBudgetPort, makeRecallSink, recordThinkSpend } from "./ports"
 import {
   handleAuditExport,
@@ -161,8 +162,11 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   const app = new Hono<AppEnv>()
 
   // ── Edge auth (invariant 17): resolve ONCE, attach the Principal, 401 on failure. ──
+  //    The MCP transports (`/mcp`, `/mcp/:slug`) OWN their (slug-aware) edge auth — the `:slug` is
+  //    the active-tenant selector, which this generic resolver cannot see — so they are skipped
+  //    here and resolve their own Principal in `mountMcp` (still `resolvePrincipal` at the edge).
   app.use("*", async (c, next) => {
-    if (c.req.path === "/health") return next()
+    if (c.req.path === "/health" || isMcpPath(c.req.path)) return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
       ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
     })
@@ -171,6 +175,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   })
 
   app.get("/health", (c) => c.json({ status: "ok" }))
+
+  // ── MCP transports (PRD §9.2): agent-facing op-registry catalog over the resolved Principal. ──
+  mountMcp(app, { ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}) })
 
   // ── tRPC typed surface (dashboard + CLI) — the generated `appRouter` mounted under the SAME
   //    edge-resolved Principal (invariant 17). The router is built from the single op-registry
@@ -463,5 +470,7 @@ export default {
 // Every Workflow class the wrangler `workflows` bindings reference MUST be exported from `main`.
 export { EnumeratorWorkflow } from "./backfill"
 export { EntityExtractionWorkflow } from "./entity-extraction"
+// The MCP Durable Object class the wrangler `durable_objects` binding references (PRD §9.2).
+export { BrainMCP } from "./mcp/agent"
 export { SessionPromoteWorkflow } from "./sessions"
 export { BatchIngestWorkflow } from "./workflow"

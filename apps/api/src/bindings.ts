@@ -19,4 +19,11 @@ export type ApiBindings = BrainBindings & {
   BATCH_INGEST?: Workflow<BatchIngestWorkflowParams>
   /** Deploy-only Workflows binding for Phase-4 KG extraction; absent locally. */
   ENTITY_EXTRACTION?: Workflow<EntityExtractionWorkflowParams>
+  /**
+   * The `BrainMCP` Durable Object namespace (PRD §9.2). Declared in `wrangler.jsonc` and emulated
+   * locally by pool-workers, so it is PRESENT in tests (unlike the Workflows bindings). The
+   * `McpAgent.serve`/`serveSSE` handlers resolve it from `env` by binding name (`"BRAIN_MCP"`).
+   * `DurableObjectNamespace` is not a boundary-lint-banned raw-binding type.
+   */
+  BRAIN_MCP: DurableObjectNamespace
 }
