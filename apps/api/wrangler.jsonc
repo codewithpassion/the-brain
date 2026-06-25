@@ -2,6 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brain-api",
   "main": "src/index.ts",
+  "account_id": "a12823016aa16d0a8dd2678b258bd751",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
 
@@ -16,15 +17,24 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "brain",
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_name": "the-brain",
+      "database_id": "597cc1a7-bca6-4687-8b1a-f9bb1082b37d",
       "migrations_dir": "../../packages/db/drizzle"
     }
   ],
   // KV for the `@cloudflare/workers-oauth-provider` store (PRD §7.2/§9). Fully emulated.
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "oauth_kv_local" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "3d8b770bd7424fca8f692667a756f416" }],
   // R2 for tenant-prefixed bodies/transcripts/audit ndjson (PRD §9). Fully emulated.
-  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "brain-bodies" }],
+  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "the-brain-bodies" }],
+
+  // ── Workers AI + Vectorize (deploy-only; no local emulation) ─────────────────
+  // Added for the real end-to-end measurement deploy. `AI` routes through AI Gateway;
+  // the two 1024d cosine indexes are the chunk + entity vector spaces (PRD §5/§7.3).
+  "ai": { "binding": "AI" },
+  "vectorize": [
+    { "binding": "CHUNK_INDEX", "index_name": "brain-chunks" },
+    { "binding": "ENTITY_INDEX", "index_name": "brain-entities" }
+  ],
 
   // ── Plain string vars (non-secret) ───────────────────────────────────────────
   // Clerk Frontend API host — the OAuth 2.1 upstream IdP (PRD §7.2). `createClerkVerifier`
@@ -35,7 +45,8 @@
   // here. Set it locally via `.env` (repo convention: `.env`, NOT `.dev.vars`), which
   // `wrangler dev` auto-loads; in prod set it with `wrangler secret put DEVICE_FLOW_SECRET`.
   "vars": {
-    "CLERK_FRONTEND_API": "clerk.the-brain.local"
+    "CLERK_FRONTEND_API": "clerk.the-brain.local",
+    "AI_GATEWAY_ID": "default"
   },
 
   // ── Workflows ────────────────────────────────────────────────────────────────

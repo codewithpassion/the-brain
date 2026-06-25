@@ -1,14 +1,18 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brain-dashboard",
+  "account_id": "a12823016aa16d0a8dd2678b258bd751",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
-  // The Cloudflare Workers entry for a TanStack Start app. ACTIVE ONLY once the Workers deploy step
-  // is wired (see the note in ./vite.config.ts): add `@cloudflare/vite-plugin` to vite.config.ts,
-  // then `vite build` emits the Worker that this `main` points at. v1 builds the default
-  // (node/Nitro) target so the `bun check` gate (biome + tsc + bun test) stays green off the heavy
-  // Workers adapter. Set BRAIN_API_URL (the apps/api origin) + the CLERK_* vars as Worker secrets.
+  // TanStack Start on Workers: `@cloudflare/vite-plugin` (vite.config.ts, `ssr` env) bundles this
+  // entry into the deployable Worker at `vite build`; `assets` is omitted on purpose — the plugin
+  // auto-points the Worker at the emitted client build output.
   "main": "@tanstack/react-start/server-entry",
-  "assets": { "directory": "./dist/client" },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Server-side runtime env (read via process.env under nodejs_compat).
+  // CLERK_PUBLISHABLE_KEY is non-secret (pk_test_…); CLERK_SECRET_KEY is set via `wrangler secret put`.
+  "vars": {
+    "CLERK_PUBLISHABLE_KEY": "pk_test_ZWxlY3RyaWMtYm9uZWZpc2gtNzAuY2xlcmsuYWNjb3VudHMuZGV2JA",
+    "BRAIN_API_URL": "https://brain-api.dominik-fretz.workers.dev"
+  }
 }

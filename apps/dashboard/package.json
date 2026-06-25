@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*",
+    "@cloudflare/vite-plugin": "^1.42.3",
     "@tailwindcss/vite": "^4.3.1",
     "@tanstack/router-cli": "^1.167.17",
     "@types/node": "^22.10.0",
@@ -35,6 +36,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "tailwindcss": "^4.3.1",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "wrangler": "^4.105.0"
   }
 }
