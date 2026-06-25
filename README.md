@@ -10,15 +10,51 @@ A unified, multi-tenant "company brain" memory platform built entirely on Cloudf
 
 ## Status
 
-Specification phase. The PRD was hardened over **8 adversarial review→integrate rounds**
-(three lenses: Cloudflare-primitive correctness, completeness/consistency, multi-tenant
-security/isolation), landing at **78/100** — cf-correctness 83 / completeness 79 / security 71,
-all "accept-with-changes". v1 is right-sized to the confirmed target: **1–2 tenants** (internal
-dogfood), single D1, horizontal scale-out deferred to Phase-N, Clerk auth, Workers Paid plan,
-`MONTHLY_COST_CEILING_USD = 400`.
+**v1 skeleton built** against the PRD (Turborepo + Bun monorepo). All phases land green under a
+single `bun check` gate (Biome strictest + tsc strict + every test + a boundary-lint). Isolation
+is proven by canary suites running in **real workerd D1** (`@cloudflare/vitest-pool-workers`):
+cross-tenant reads, FTS-arm leaks, scope/visibility, break-glass, the composed `think` pipeline,
+graph BFS hops, sessions/recall, and MCP sessions are each shown unable to cross a tenant boundary.
 
-This is a **draft for human architectural review** — the next step is building the v1 skeleton
-against it and measuring real numbers, not more automated review.
+v1 is right-sized to the confirmed target: **1–2 tenants** (internal dogfood), single D1, horizontal
+scale-out deferred to Phase-N, Clerk auth, Workers Paid plan, `MONTHLY_COST_CEILING_USD = 400`.
+
+What's built (see `IMPLEMENTATION_PLAN.md` for the task DAG, invariants, and decisions):
+
+- **`packages/shared`** — frozen contract: `Principal` (scope vs capability axes), enums, constants,
+  graph `EdgeSpec`, the Zod op-registry that single-sources MCP tools / tRPC procedures / CLI commands.
+- **`packages/db`** — Drizzle D1 schema (32 tables + FTS5) + migrations; the `Scoped*` isolation
+  chokepoints (mandatory drop-don't-error D1 re-check; `namespace=tenantId`; tenant-prefixed R2); the
+  tenant-injecting write path with audit-in-same-batch; `embed/gen/rerank` chokepoints; `resolvePrincipal`
+  (Clerk JWT → `bdev_` → `bk_`); hybrid-search + cited-synthesis (`think`); graph traverse/search;
+  sessions + governance; backfill; admin ops.
+- **`packages/ingest`** — pure extraction/chunking + importers (ChatGPT, Claude-Code).
+- **`packages/surface`** — the op-registry → MCP/tRPC/CLI generators (drift-guarded).
+- **`apps/api`** — the single Worker: Hono REST + tRPC + the `BrainMCP` Durable Object MCP server +
+  all Workflows + Queue consumers + cron.
+- **`apps/cli`** — the `brain` CLI (Commander, typed tRPC client, `--token` + device-flow auth).
+- **`apps/dashboard`** — TanStack Start + shadcn (Search/Think, Documents, Admin/Stats real).
+
+**Measured against real Cloudflare primitives:** pending — the CI tier proves pipeline correctness with
+stubbed Workers AI / Vectorize. The README's "measure real numbers" milestone (provision real
+D1 + Vectorize + R2, run `think` over a real doc through real Workers AI) is the next step.
+
+Build / verify:
+
+```bash
+bun install
+bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, across the monorepo
+```
+
+### Deferred (Phase-N / follow-ups)
+
+- D1 / Vectorize shard fan-out (`tenant_shards` columns present, resolve to one shard).
+- Frozen-snapshot injection (`get_session_context(snapshotId)` accepted but stubbed).
+- CLI OAuth device-flow **server** endpoints (client done; `--token` works now).
+- Dashboard Cloudflare build/co-location (`@cloudflare/vite-plugin`) + a few stubbed screens
+  (graph/sessions/audit/jobs) + a `list_documents` op.
+- Cross-session semantic entity dedup; BYO/openai-compatible provider routing (seam only);
+  AI Gateway spend enforcement (attribution only in v1).
 
 ## Read this first
 
