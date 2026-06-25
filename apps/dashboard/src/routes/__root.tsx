@@ -8,10 +8,11 @@
  * bearer + the server-pinned tenant live ONLY in the `createServerFn` handlers (src/server/brain.ts)
  * — never in client code, never in a loader's client output.
  */
-import { ClerkProvider, SignInButton, UserButton, useUser } from "@clerk/tanstack-react-start"
+import { ClerkProvider, Show, UserButton } from "@clerk/tanstack-react-start"
 import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { TenantIndicator } from "../components/TenantIndicator"
+import { getClientEnv } from "../env"
 import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
@@ -37,13 +38,28 @@ const NAV: readonly { to: string; label: string }[] = [
 ]
 
 function AuthControl() {
-  const { isSignedIn } = useUser()
-  return isSignedIn ? <UserButton /> : <SignInButton mode="modal" />
+  return (
+    <>
+      <Show when="signed-in">
+        <UserButton />
+      </Show>
+      <Show when="signed-out">
+        <Link
+          to="/sign-in/$"
+          params={{ _splat: "" }}
+          className="rounded-md bg-neutral-900 px-3 py-1.5 font-medium text-sm text-white hover:bg-neutral-700"
+        >
+          Sign in
+        </Link>
+      </Show>
+    </>
+  )
 }
 
 function RootComponent() {
+  const { VITE_CLERK_PUBLISHABLE_KEY } = getClientEnv()
   return (
-    <ClerkProvider>
+    <ClerkProvider publishableKey={VITE_CLERK_PUBLISHABLE_KEY}>
       <RootDocument>
         <Outlet />
       </RootDocument>

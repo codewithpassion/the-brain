@@ -6,6 +6,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
+import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
@@ -14,7 +15,11 @@ import { think } from "../server/fns"
 import type { ThinkResult } from "../server/types"
 
 export const Route = createFileRoute("/")({
-  component: SearchPage,
+  component: () => (
+    <RequireAuth>
+      <SearchPage />
+    </RequireAuth>
+  ),
 })
 
 function SearchPage() {

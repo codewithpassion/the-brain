@@ -6,6 +6,7 @@
  * any op — shown as an honest placeholder rather than a fabricated number.
  */
 import { createFileRoute } from "@tanstack/react-router"
+import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
 import { getMemberships, getSessionInfo, getTokenSpend } from "../server/fns"
@@ -17,7 +18,11 @@ export const Route = createFileRoute("/stats")({
     members: await getMemberships(),
     session: await getSessionInfo(),
   }),
-  component: StatsPage,
+  component: () => (
+    <RequireAuth>
+      <StatsPage />
+    </RequireAuth>
+  ),
 })
 
 function StatsPage() {

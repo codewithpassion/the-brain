@@ -7,6 +7,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
+import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
@@ -15,7 +16,11 @@ import { listDocuments } from "../server/fns"
 import type { DerivedDocument } from "../server/types"
 
 export const Route = createFileRoute("/documents")({
-  component: DocumentsPage,
+  component: () => (
+    <RequireAuth>
+      <DocumentsPage />
+    </RequireAuth>
+  ),
 })
 
 function DocumentsPage() {
