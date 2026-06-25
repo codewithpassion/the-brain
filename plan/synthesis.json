@@ -1,0 +1,189 @@
+{
+  "v1Scope": "v1 is a runnable, measurable single-Worker \"company brain\" for 1-2 internal-dogfood tenants on ONE shared D1 and two provisioned Vectorize V2 indexes (brain-chunks, brain-entities, both bge-m3/1024d). The FULL multi-tenant isolation model ships (org\u2192team\u2192user\u2192scope, Scoped* chokepoints, D1 re-check, namespace=tenantId) and is proven by a blocking isolation canary suite; horizontal scale-out is deferred (tenant_shards columns present but resolve to one shard, no fan-out logic). v1 delivers: document + session ingestion (extract\u2192chunk\u2192embed\u2192KG-extract\u2192dual-index), hybrid search (FTS5 bm25 \u2225 Vectorize \u2192 RRF \u2192 bge-reranker \u2192 token-budget-guarded cited synthesis via `think`), the two-graph model (pages/doc_links + entities/entity_relations bridged by entity_mentions) with BFS traversal, governed memory (trust grades, append-only audit + recall traces, human-only promotion to instruction), Clerk OAuth 2.1 auth, and four thin surfaces (Hono REST/tRPC API, MCP server, brain CLI, TanStack dashboard) over a single Zod op-registry. App-level token_spend 429 pre-check is the enforcing cost cap (MONTHLY_COST_CEILING_USD default 400). DEFERRED out of v1: D1/Vectorize shard fan-out, frozen-snapshot injection (brain_snapshots/get_session_context snapshot_id accepted but stubbed/omitted), Phase-3.5 cross-session semantic entity dedup, DO-per-tenant working memory, BYO/openai-compatible provider routing (seam only), AI Gateway spend enforcement (attribution only). Success = `think` returns cited evidence over an ingested doc AND the isolation canary suite is green.",
+  "monorepo": [
+    {
+      "path": "packages/shared",
+      "kind": "library",
+      "purpose": "Single source of truth: canonical Principal contract, Zod tool/op schemas, model constants (EMBEDDING_MODEL/DIMS, GENERATION/RERANK/EXTRACT), graph contracts (GraphNode/GraphPath/EdgeSpec + DOC_GRAPH/ENTITY_GRAPH consts), IngestionParams.",
+      "dependsOn": []
+    },
+    {
+      "path": "packages/db",
+      "kind": "library",
+      "purpose": "Drizzle D1 schema + migrations + FTS5 trigger DDL; the ONLY module allowed to import raw env.DB/Vectorize/R2; houses ScopedDB/ScopedVectorize/ScopedR2, hybrid-search helpers (fts/vector/rrf/rerank/synthesis-budget), embed()/gen()/rerank() chokepoints, ai-gateway + ops-metrics wrappers.",
+      "dependsOn": [
+        "packages/shared"
+      ]
+    },
+    {
+      "path": "packages/ingest",
+      "kind": "library",
+      "purpose": "Platform-neutral Importer SDK (begin/nextBatch/finalize, runImporterContract) lifted from openbrains minus Convex; fingerprint/normalize, source adapters (gmail, ob1, github, net-new chatgpt + claude-code), workers-ai embeddings wrapper.",
+      "dependsOn": [
+        "packages/shared",
+        "packages/db"
+      ]
+    },
+    {
+      "path": "apps/api",
+      "kind": "worker-app",
+      "purpose": "The single deployed Worker: Hono REST + tRPC router, MCP Durable Object (BrainMCP/McpAgent), webhook /ingest, OAuth transport, all Workflow classes (Enumerator/BatchIngest/EntityExtraction/SessionPromote), all Queue consumers (brain-backfill/brain-reembed +DLQs), scheduled() cron. resolvePrincipal at the edge.",
+      "dependsOn": [
+        "packages/shared",
+        "packages/db",
+        "packages/ingest"
+      ]
+    },
+    {
+      "path": "apps/cli",
+      "kind": "cli",
+      "purpose": "`brain` Commander program acting as a tRPC client over appRouter; OAuth 2.1 device-flow auth, --tenant/-t selector, --json output.",
+      "dependsOn": [
+        "packages/shared"
+      ]
+    },
+    {
+      "path": "apps/dashboard",
+      "kind": "frontend-app",
+      "purpose": "TanStack Start + shadcn dashboard; co-located in apps/api Worker for v1 (no Service Binding), createServerFn data layer calling scoped services directly; Clerk auth, server-side session-pinned tenant.",
+      "dependsOn": [
+        "packages/shared"
+      ]
+    }
+  ],
+  "buildOrder": [
+    {
+      "phase": 1,
+      "name": "Frozen foundation: tenancy, isolation, auth (M0)",
+      "tasks": [
+        "packages/shared: Principal contract, Zod op/tool schemas, model constants, EdgeSpec/graph contracts, IngestionParams",
+        "packages/db: full Drizzle D1 schema + migrations (orgs/teams/memberships/scopes/api_keys/cli_*/tenant_shards, documents/chunks/chunks_fts, pages/doc_links/entities/entity_relations/entity_mentions/entity_fts, facts/facts_fts, sessions/session_turns, memory_* sidecars, token_spend/backfill_runs/sources/ingest_log/mcp_request_log) + FTS5 trigger DDL",
+        "packages/db: ScopedDB (tenant_id + scopePredicate + visibilityPredicate injection, getChunksByIds/hydrateChunks/readFacts, no raw-SQL passthrough), ScopedVectorize (hard-wired namespace=tenantId, foldPartitionFilter, topK cap 100), ScopedR2 (${tenantId}/ prefix)",
+        "resolvePrincipal edge resolver chain (Clerk JWT \u2192 bdev_ HMAC \u2192 bk_ API key) + principalFromMembership + active-tenant selector (slug/X-Brain-Tenant/session-pin, 401 if unspecified); mint-time allowed_scopes = intersect(request, minter)",
+        "Provision Vectorize indexes + metadata indexes (scope/team_id/visibility/embedding_model) BEFORE any filtered upsert; wrangler.jsonc binding manifest; Clerk app + JWKS wiring",
+        "ESLint banned-import rule (raw bindings only in packages/db) + reranker-output-shape gate + 15-canary isolation CI suite (cross-tenant read, FTS-arm leak, BFS cross-tenant hop, Vectorize re-check, cross-scope, intra-tenant visibility, break-glass) all green as merge precondition"
+      ],
+      "parallelizable": false
+    },
+    {
+      "phase": 2,
+      "name": "Ingestion + hybrid search vertical slice (M1)",
+      "tasks": [
+        "packages/ingest: embed()/fingerprint/normalize, document dedup gate, toMarkdown extraction",
+        "apps/api BatchIngestWorkflow: status\u2192extract\u2192persist-body(R2)\u2192chunk\u2192store-chunks-batch(10)+FTS\u2192embed-batch(50)\u2192KG-batch(5)\u2192finalize; deterministic id ingest-${tenantId}-${fingerprint}; 1MiB step-output workaround via R2 staging",
+        "POST /ingest webhook + multipart upload \u2192 R2 \u2192 trigger workflow",
+        "packages/db hybrid pipeline: FTS bm25 arm (JOIN re-check), vector arm (namespace + foldPartitionFilter + D1 re-check), rrfFusion(K=60), trust+title boosts, rerank (degrade-to-RRF), synthesis-budget guard",
+        "search/query/think ops + token_spend 429 pre-check + memory_recall_traces writes (off read path)"
+      ],
+      "parallelizable": false
+    },
+    {
+      "phase": 3,
+      "name": "Backfill spine + re-embed migration (M2)",
+      "tasks": [
+        "EnumeratorWorkflow (per tenant,sourceId; cursor/anchor; references-only enqueue)",
+        "brain-backfill Queue consumer (+DLQ; per-message ack/retry; Principal from message tenant_id; spawn BatchIngest for heavy items)",
+        "brain-reembed Queue + cron sweep (stale/wrong-model rows \u2192 re-embed same vector id; surface='migration' tag; budgeted/resumable, cost into backfill_runs)",
+        "sources backoff + idle-source re-enqueue"
+      ],
+      "parallelizable": true
+    },
+    {
+      "phase": 4,
+      "name": "Graph extraction + traversal + entity search (M3)",
+      "tasks": [
+        "EntityExtractionWorkflow (clear-prior-extraction \u2192 extract-kg-batch(5) llama-3.1-8b \u2192 upsert entities/relate/mention \u2192 embed-entities \u2192 finalize; counts-only step outputs; non-fatal)",
+        "Generalized BFS traverse() over EdgeSpec (DOC_GRAPH/ENTITY_GRAPH) with nodeGate on both endpoints, seed nodeVisible check",
+        "search_entities (ScopedVectorize over brain-entities + entity_fts RRF + D1 re-check)",
+        "Graph MCP tools (traverse/links/backlinks/tags/timeline/versions/entities/orphans)"
+      ],
+      "parallelizable": true
+    },
+    {
+      "phase": 5,
+      "name": "Sessions + hot memory + governance (M4)",
+      "tasks": [
+        "capture_turn / finalize_session / get_session_context (snapshot deferred); sessions.last_activity_at refresh; turn R2 offload",
+        "SessionPromoteWorkflow (extract-facts \u2192 writeback clean-replace by source_session_id in one db.batch \u2192 chunk+embed) + idle-promotion cron keyed on last_activity_at",
+        "recall / forget_fact ops (readFacts visibilityPredicate, FTS JOIN re-check)",
+        "Governance: memory_writeback (trust_grade hard-wired evidence), memory_review (only path to instruction), break-glass admin read (audited + alerted, fails closed), audit-export cron to R2 ndjson",
+        "ChatGPT + Claude-Code importers (after reading \u00a74.7.1 input schemas)"
+      ],
+      "parallelizable": true
+    },
+    {
+      "phase": 6,
+      "name": "Surfaces: full MCP catalog, CLI, dashboard, ops (M5)",
+      "tasks": [
+        "Complete MCP tool catalog from op-registry (buildToolDefs); read-tool-always / write-tool-if-!readOnly registration",
+        "brain CLI commands (auth/tenant/doc/search/graph/session/facts/source/backfill/key) as tRPC client",
+        "apps/dashboard routes (search/documents/inspector/graph/audit/sessions/jobs/admin/stats) co-located in apps/api",
+        "Analytics Engine ops metrics; scale-headroom observability panels; admin tools (mint_api_key/get_token_spend/memberships)"
+      ],
+      "parallelizable": true
+    }
+  ],
+  "verticalSlice": [
+    "Provision env: apply D1 migrations, create brain-chunks + brain-entities Vectorize indexes and their metadata indexes, create R2 bucket + KV + Queues, wire Clerk JWKS; seed one org (tenant) + one membership (user) with allowedScopes='*'.",
+    "Authenticate: brain CLI device-flow login \u2192 resolvePrincipal resolves Clerk JWT + active tenant \u2192 Principal bound to the one tenant.",
+    "Ingest: POST /ingest (or doc upload) a markdown document for the tenant \u2192 handler fingerprints, writes body to R2 under ${tenantId}/, inserts documents row (status pending), triggers BatchIngestWorkflow id ingest-${tenantId}-${fingerprint}.",
+    "Workflow: extract \u2192 chunk \u2192 store chunks (tenant_id/scope/visibility=world, FTS5 via triggers) \u2192 embed-batch via bge-m3 (assert 1024d) \u2192 ScopedVectorize.upsert namespace=tenantId \u2192 KG-extract entities \u2192 finalize status indexed.",
+    "Search: call MCP `think` (or tRPC) with a question \u2192 embed(query) \u2192 FTS bm25 arm \u2225 Vectorize arm (namespace=tenant) \u2192 both id sets JOIN back through ScopedDB and re-checked (cross-tenant/out-of-scope dropped) \u2192 RRF fuse \u2192 trust/title boost \u2192 bge-reranker \u2192 token-budget-guarded cited synthesis.",
+    "Measurable result: `think` returns {answer, evidence[], citations[]} citing the ingested document's slug, one memory_recall_trace row written per kept hit; AND the 15-canary isolation suite (a second tenant's colliding-slug content is never returned across vector/FTS/recall arms) is green."
+  ],
+  "invariants": [
+    "Every isolatable D1 row carries tenant_id NOT NULL; every vector is namespace=tenantId (never userId); every R2 key is ${tenantId}/-prefixed \u2014 no single-tenant shortcuts even with one user.",
+    "All tenant data is reached ONLY through ScopedDB/ScopedVectorize/ScopedR2; raw env.DB/Vectorize/R2 bindings are importable ONLY inside packages/db, enforced by a blocking ESLint banned-import rule.",
+    "Isolation does NOT rest on the Vectorize namespace (CF doesn't document it as a security boundary): it rests on (a) un-omittable hard-wired ScopedVectorize wiring and (b) the mandatory D1 row re-check after every vector AND FTS hit, which silently DROPS cross-tenant / out-of-scope / deleted / out-of-visibility ids (drop-don't-error, no existence leak).",
+    "FTS5 external-content tables (chunks_fts/entity_fts/facts_fts) carry NO tenant_id; MATCH stays pure text and every result JOINs back to the tenant-scoped base table before any row leaves the keyword arm \u2014 a MATCH-then-unscoped-read is a forbidden leak path.",
+    "Two axes never conflated: allowedScopes (DATA partition, read by ScopedDB/ScopedVectorize) vs capabilities read/write/admin (read by scopeSatisfied/readOnly); separately sourced, separately consumed.",
+    "trust_grade is NEVER a chunks column nor a Vectorize metadata field \u2014 it lives only in the memory_use_policy sidecar, LEFT-JOINed at read (default 'evidence'); a trust promotion never rewrites a chunk or re-upserts a vector.",
+    "trust_grade and visibility stay orthogonal: trust_grade\u2208{instruction,evidence,draft} (agent behaviour) vs visibility\u2208{private,team,world} (access control).",
+    "visibilityPredicate is un-omittable at the chokepoint on every default read of a visibility-bearing row (facts AND chunks): world OR (team AND team_id\u2208teamIds) OR (private AND user_id=p.userId); owner/admin do NOT bypass it except via audited+alerted break-glass that fails closed for non-admins and never bypasses tenant_id.",
+    "Agent writeback CANNOT set instruction (hard-wired evidence, no arg exists); promotion to instruction flows exclusively through a human-confirmed memory_review row.",
+    "memory_audit and memory_recall_traces are append-only (no UPDATE/DELETE in app code); audit row is written in the SAME db.batch as the change it records; recall-trace writes are off the synchronous read path (ctx.waitUntil) because D1 is single-writer.",
+    "No interactive cross-await D1 transactions \u2014 atomicity is via db.batch([...]) only; D1 batches respect the 100 bound-param cap (CHUNK_DB_BATCH_SIZE=10).",
+    "bge-m3 1024d is locked; a dim-changing model swap is refused at the embed() assertion; foreign-dimension vectors (qwen3, OB1/OpenAI 1536d) are RE-EMBEDDED never copied (same-dimension is not interchangeability).",
+    "Bodies/transcripts live ONLY in R2 (body_r2_key/r2_key); D1 holds index+lean rows + preview (markdown_preview \u22642000) only \u2014 a correctness requirement for the single shared D1 under its byte budget.",
+    "embed()/gen()/rerank() NEVER throw \u2014 they return null/RRF-order/[] and degrade to keyword-only or evidence-without-synthesis; write-path embed failure throws to trigger Workflow retry (never silently indexes un-embedded chunks).",
+    "Deterministic Workflow ids (ingest-${tenantId}-${fingerprint}, promote-${tenantId}-${sessionId}, kg-${tenantId}-${documentId}) make re-triggers/at-least-once delivery idempotent; durable dedup correctness rests on the (tenant_id,scope,fingerprint) UNIQUE index, not the instance id.",
+    "token_spend pre-check returns 429+Retry-After BEFORE env.AI.run (the enforcing cost cap); AI Gateway spend limits are attribution-only for the all-@cf/ v1 model set, though every call is still proxied with tenant_id metadata.",
+    "No bare token below the edge: resolvePrincipal runs once at the edge and a Principal is threaded everywhere below; tenant comes from the pinned mechanism (slug/header/session-pin), never the JWT alone, and 401 (never a silent first-membership default) when unspecified.",
+    "No shared internal HTTP secret: internal Worker\u2194Workflow/Queue hops use native bindings; handlers still reconstruct a Principal from explicit tenant_id and go through Scoped*; consumers validate message tenant_id vs a real orgs row (fail-closed to DLQ).",
+    "pages is the ONLY doc-graph node space (doc_links.from_id/to_id are always pages.id); the KG is a separate graph; the two are joined only by the entity_mentions bridge \u2014 never a single polymorphic nodes/edges table; entities are {team,world} only (no private tier) with scope partitioned into the dedup key.",
+    "Reranker index\u2192chunk remap is a hard blocking CI/deploy gate; until green for a Workers AI version, rerank degrades to RRF order (a wrong remap mis-attributes a citation = correctness bug).",
+    "Idle-session promotion keys on last_activity_at (refreshed every capture_turn), NOT ended_at (which may stay NULL on a missed Stop-hook); re-finalizing a session is a clean replace (soft-expire prior promoted facts for source_session_id, preserve lineage), never an append.",
+    "tenant_shards columns ship but resolve to ONE shard; Vectorize ceilings (10M vectors / 50k namespaces) and the D1 6 GB trigger are NON-BINDING documented Phase-N triggers with no sharding logic in v1."
+  ],
+  "mustAskDecisions": [
+    "Tenant/solo-user onboarding model: auto-provision an org on first Clerk login (org==user) vs admin-provisioned only / explicit create-join. This shapes the phase-1 frozen tenancy schema and resolvePrincipal, so it must be decided before phase 1 freezes.",
+    "Machine-token (bdev_) tenancy model: one tenant-baked token per tenant vs tenantId as a per-request selector against an authenticated Clerk JWT. This touches the frozen resolvePrincipal resolution chain.",
+    "Production custom-domain hostnames (api.brain.example.com / staging are placeholders) \u2014 needed before the production deploy in the runbook.",
+    "Per-tenant MONTHLY_COST_CEILING_USD override values (the $400 default exists; per-tenant overrides do not) \u2014 needed before any env.AI.run path is exercised against a real budget.",
+    "Promotion-to-instruction authority: strictly owner/admin governance, or may a 'member' promote within their own scope? Shapes the governance gate and memory_review write path."
+  ],
+  "stack": [
+    "Cloudflare Workers Paid plan ($5/mo; Workers AI billed in Neurons) \u2014 single deployed Worker apps/api owning Hono REST router + MCP DO + all Workflows + all Queue consumers + scheduled() cron; compatibility_date 2026-06-01, nodejs_compat.",
+    "Monorepo: Turborepo + Bun workspaces (apps/* + packages/*).",
+    "API: Hono (REST: webhooks, upload, OAuth, MCP transport) + tRPC on Workers (dashboard\u2194API + CLI; protectedProcedure/writeProcedure chokepoints) + Zod single op-registry generating MCP tools, tRPC procedures, and CLI commands so they cannot drift.",
+    "MCP: @modelcontextprotocol McpAgent Durable Object at /mcp/:slug (stateful/SSE, primary) + stateless Streamable-HTTP /mcp as compatibility fallback; DO is protocol instance only, never system of record; DO key pinned per (tenant, slug).",
+    "CLI: `brain` via Commander as a tRPC client; OAuth 2.1 device flow (RFC 8628); tokens in ~/.config/brain/config.json with auto-refresh.",
+    "Frontend: TanStack Start + shadcn deployed on Workers, co-located in apps/api for v1 (no Service Binding); createServerFn data layer; Clerk auth, server-side session-pinned tenant.",
+    "Auth: Clerk as OAuth 2.1 / OIDC upstream IdP (jose jwtVerify vs Clerk JWKS, issuer-checked) + @cloudflare/workers-oauth-provider (KV-backed); machine tokens bdev_ (HMAC-SHA256 via WebCrypto) and API keys bk_ (SHA-256 hashed).",
+    "Data: D1 (single shared SQLite DB, Drizzle ORM + migrations, FTS5 external-content trigger-synced tables, db.batch, 100 bound-param cap) + Vectorize V2 (two 1024d cosine indexes, namespace=tenantId, metadata-index filtering, topK max 100) + R2 (tenant-prefixed bodies/transcripts + audit ndjson) + KV (OAUTH_KV) + Durable Objects (BrainMCP, SQLite-backed).",
+    "Durable execution: Cloudflare Workflows (Enumerator, BatchIngest, EntityExtraction, SessionPromote; step.do, retries exponential) + Queues (brain-backfill, brain-reembed, each +DLQ) + Cron triggers (*/5).",
+    "AI: Workers AI via AI Gateway (env.AI.run gateway option, tenant_id custom metadata) \u2014 @cf/baai/bge-m3 (embed 1024d), @cf/meta/llama-3.3-70b-instruct-fp8-fast (synthesis ~24k ctx), @cf/baai/bge-reranker-base (rerank), @cf/meta/llama-3.1-8b-instruct (extract); all behind embed()/gen()/rerank() chokepoints with an AI_PROVIDER=openai-compatible seam reserved (not built).",
+    "Quality/ops: ESLint banned-import rule; @cloudflare/vitest-pool-workers isolation canary suite + reranker-shape gate as required CI merge checks; Analytics Engine ops metrics; single GitHub Actions pipeline (lint\u2192typecheck\u2192unit\u2192workerd integration/isolation).",
+    "Constants: K=60 RRF, COSINE_FLOOR 0.5 / related 0.85, TRUST_BOOST{instruction:2.0,evidence:1.0,draft:0.6}, title boost 1.25x, top-40 candidates / top-k 8-12 (think=12), CHUNK_DB_BATCH_SIZE=10, EMBED_BATCH_SIZE=50, KG_BATCH_SIZE=5, MAX_CHUNKS_PER_DOC=4000, MAX_BODY_BYTES=8MiB, TURN_INLINE_MAX=2KB, /ingest 256KB cap, SYNTHESIS_TOKEN_BUDGET~20000, MONTHLY_COST_CEILING_USD=400."
+  ],
+  "risks": [
+    "Security (lowest-scored, 71): the entire isolation guarantee rests on the D1 re-check + un-omittable Scoped* wiring + FTS JOIN-back; any new surface or hand-built WHERE that bypasses a chokepoint silently re-opens cross-tenant/cross-scope/visibility leaks. Mitigation is the blocking ESLint banned-import rule + 15-canary suite gating EVERY merge \u2014 these MUST be green at end of phase 1 before any parallel feature work.",
+    "Reranker output shape (bge-reranker-base {id,score} indexing) is unpinned by CF docs; a wrong index\u2192chunk remap mis-attributes citations (a correctness bug). Must be locked by a staging integration gate; degrade to RRF order until green.",
+    "FTS5 isolation foot-gun: external-content tables have no tenant_id, so copying cf-graph's `MATCH ... AND workspace_id=?` is a leak. The mandatory JOIN re-check on the base table is easy to forget on any new search arm.",
+    "D1 single-writer + 6 GB byte budget under audit/recall-trace/chunks-content growth (not bodies, which are offloaded to R2); recall-trace writes must stay off the read path and bodies must stay in R2 or the single shared DB becomes the bottleneck before the deferred shard-out is built.",
+    "Workflow step caps: 1 MiB non-stream step.do() output and 10k-step budget force the R2-staging + references-only enumeration patterns; oversized docs must split on chunk boundaries (MAX_CHUNKS_PER_DOC) or a single ingest blows the budget.",
+    "Re-embed / foreign-dimension migration: same-dimension is not interchangeability \u2014 qwen3/OpenAI 1536d vectors must be re-embedded not copied; the budgeted resumable sweep can starve interactive think traffic if not paced (surface='migration' tag + Queue back-pressure).",
+    "Workers AI request-rate ceilings are conservative assumptions unverified until staging; chokepoints must degrade-or-queue rather than 429 the interactive user, and the real ceilings are a Phase-N scale trigger to confirm.",
+    "Cross-section contract drift: \u00a73/\u00a74/\u00a75/\u00a76/\u00a77/\u00a78 each claim authority over overlapping DDL/algorithms; the frozen packages/shared + packages/db schema in phase 1 must reconcile them before parallel phases build against diverging assumptions (e.g. memory_* sidecar target_id polymorphism, importer input schemas in \u00a74.7.1)."
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "extends": "@brain/tsconfig/base.json",
+  "include": ["src"]
+}
