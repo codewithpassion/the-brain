@@ -9,14 +9,15 @@ import { createFileRoute } from "@tanstack/react-router"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
-import { getMemberships, getSessionInfo, getTokenSpend } from "../server/fns"
-import type { BrainSessionInfo, MembershipsResult, TokenSpend } from "../server/types"
+import { getBrainStats, getMemberships, getSessionInfo, getTokenSpend } from "../server/fns"
+import type { BrainSessionInfo, BrainStats, MembershipsResult, TokenSpend } from "../server/types"
 
 export const Route = createFileRoute("/stats")({
   loader: async () => ({
     spend: await getTokenSpend(),
     members: await getMemberships(),
     session: await getSessionInfo(),
+    stats: await getBrainStats(),
   }),
   component: () => (
     <RequireAuth>
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/stats")({
 })
 
 function StatsPage() {
-  const { spend, members, session } = Route.useLoaderData()
+  const { spend, members, session, stats } = Route.useLoaderData()
   return (
     <div className="flex flex-col gap-6">
       <header>
@@ -38,7 +39,7 @@ function StatsPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <SpendCard spend={spend} session={session.ok ? session.data : null} />
-        <HeadroomCard />
+        <StatsCountsCard stats={stats} />
       </div>
 
       <MembersCard members={members} />
@@ -90,18 +91,25 @@ function SpendCard({
   )
 }
 
-function HeadroomCard() {
+function StatsCountsCard({ stats }: { stats: Maybe<BrainStats> }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Scale headroom</CardTitle>
-        <CardDescription>D1 size · vector-index counts</CardDescription>
+        <CardDescription>Corpus counts from get_stats</CardDescription>
       </CardHeader>
       <CardContent>
-        <p className="text-neutral-500 text-sm">
-          Not yet exposed by an op (no metrics endpoint in v1). Coming in a follow-up — the API
-          would surface D1 row/byte counts and per-index vector totals here.
-        </p>
+        {stats.ok ? (
+          <div className="flex flex-col gap-1 text-sm">
+            <Row label="Documents" value={stats.data.documents.toLocaleString()} />
+            <Row label="Chunks" value={stats.data.chunks.toLocaleString()} />
+            <Row label="Entities" value={stats.data.entities.toLocaleString()} />
+            <Row label="Sessions" value={stats.data.sessions.toLocaleString()} />
+            <Row label="Facts" value={stats.data.facts.toLocaleString()} />
+          </div>
+        ) : (
+          <p className="text-neutral-500 text-sm">Unavailable: {stats.error}</p>
+        )}
       </CardContent>
     </Card>
   )

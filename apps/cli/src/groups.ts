@@ -16,10 +16,11 @@ export const GROUP_ORDER = ["search", "graph", "session", "facts", "key", "admin
 export type Group = (typeof GROUP_ORDER)[number]
 
 const GROUP_BY_OP: Record<string, Group> = {
-  // search
+  // search / content
   search: "search",
   query: "search",
   think: "search",
+  list_documents: "search",
   // graph
   traverse_graph: "graph",
   get_links: "graph",
@@ -33,6 +34,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   capture_turn: "session",
   finalize_session: "session",
   get_session_context: "session",
+  list_sessions: "session",
   // facts / governed memory
   recall: "facts",
   forget_fact: "facts",
@@ -44,6 +46,9 @@ const GROUP_BY_OP: Record<string, Group> = {
   memberships: "admin",
   break_glass_read: "admin",
   audit_export: "admin",
+  list_audit: "admin",
+  list_backfill_runs: "admin",
+  get_stats: "admin",
 }
 
 /** The help group an op belongs to, or `undefined` if unmapped (a new op — caught by the test). */

@@ -58,3 +58,100 @@ export interface BrainSessionInfo {
   tenant: string
   userId: string
 }
+
+// --- Graph types ---
+
+export interface Entity {
+  id: string
+  name: string
+  kind: string
+  mentionCount: number
+}
+
+export interface ListEntitiesResult {
+  entities: Entity[]
+}
+
+export interface TraversalNeighbor {
+  id: string
+  name: string
+  kind: string
+  relation: string
+}
+
+export interface TraversalResult {
+  neighbors: TraversalNeighbor[]
+}
+
+export interface FindOrphansResult {
+  orphans: Entity[]
+}
+
+// --- Session types ---
+
+export interface SessionRow {
+  id: string
+  client: string
+  title: string
+  status: string
+  turnCount: number
+  lastActivityAt: string
+  startedAt: string
+}
+
+export interface ListSessionsResult {
+  sessions: SessionRow[]
+}
+
+export interface RecallFact {
+  id: string
+  content: string
+  score?: number
+}
+
+export interface RecallResult {
+  facts: RecallFact[]
+}
+
+// --- Audit types ---
+
+export interface AuditEntry {
+  id: string
+  userId: string
+  action: string
+  targetId: string
+  at: string
+}
+
+export interface ListAuditResult {
+  entries: AuditEntry[]
+}
+
+// --- Jobs types ---
+
+export interface BackfillRun {
+  id: string
+  sourceId: string
+  kind: string
+  direction: string
+  status: string
+  attempts: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ListBackfillRunsResult {
+  runs: BackfillRun[]
+}
+
+// --- Aggregate stats ---
+
+export interface BrainStats {
+  documents: number
+  chunks: number
+  entities: number
+  sessions: number
+  facts: number
+  tokenSpendNeurons: number
+  monthlyCeilingUsd: number
+}

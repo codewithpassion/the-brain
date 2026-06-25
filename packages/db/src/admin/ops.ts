@@ -22,14 +22,24 @@ import {
   type Principal,
   scopeSatisfied,
 } from "@brain/shared"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { z } from "zod"
 import { AuthError } from "../auth/errors"
 import { mintApiKey } from "../auth/mint"
 import type { BrainBindings } from "../env"
-import { memberships as membershipsTable } from "../schema"
+import {
+  backfillRuns,
+  chunks,
+  documents,
+  entities,
+  facts,
+  memberships as membershipsTable,
+  memoryAudit,
+  sessions as sessionsTable,
+} from "../schema"
 import { type BrainDrizzle, ScopedDB } from "../scoped/db"
+import { scopePredicate } from "../scoped/predicates"
 import { monthlyWindow, USD_PER_NEURON } from "../search/ports"
 
 /** The per-request deps an admin handler builds from (`env` + the resolved `Principal`). */
@@ -212,8 +222,363 @@ export const membershipsOp: AdminBoundOp<{ userId?: string }, { memberships: Mem
     handler: (ctx, input) => membershipsCore(drizzle(ctx.env.DB), ctx.principal, input),
   }
 
+// ── Shared limit schema for list ops ──────────────────────────────────────
+const listLimitInput = z.object({
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .default(50)
+    .transform((v) => Math.min(v, 200)),
+})
+
+// ── LIST_DOCUMENTS_OP ─────────────────────────────────────────────────────
+
+/** `list_documents` — newest-first tenant doc list for the dashboard. */
+export const LIST_DOCUMENTS_OP = defineOp({
+  name: "list_documents",
+  description: "List this tenant's documents, newest first (dashboard read view).",
+  capability: "read",
+  readOnly: true,
+  input: listLimitInput,
+  output: z.object({
+    documents: z.array(
+      z.object({
+        id: z.string(),
+        slug: z.string(),
+        title: z.string().nullable(),
+        status: z.string(),
+        chunkCount: z.number().int(),
+        createdAt: z.string().nullable(),
+      }),
+    ),
+  }),
+})
+
+export type ListDocumentsRow = {
+  id: string
+  slug: string
+  title: string | null
+  status: string
+  chunkCount: number
+  createdAt: string | null
+}
+
+export const listDocumentsCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { limit?: number },
+): Promise<{ documents: ListDocumentsRow[] }> => {
+  const limit = input.limit ?? 50
+  const rows = await db
+    .select({
+      id: documents.id,
+      slug: documents.slug,
+      title: documents.title,
+      status: documents.status,
+      chunkCount: documents.chunkCount,
+      createdAt: documents.createdAt,
+    })
+    .from(documents)
+    .where(
+      and(eq(documents.tenantId, principal.tenantId), scopePredicate(principal, documents.scope)),
+    )
+    .orderBy(desc(documents.createdAt))
+    .limit(limit)
+  return {
+    documents: rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      title: r.title ?? null,
+      status: r.status,
+      chunkCount: r.chunkCount ?? 0,
+      createdAt: r.createdAt ?? null,
+    })),
+  }
+}
+
+export const listDocumentsOp: AdminBoundOp<{ limit?: number }, { documents: ListDocumentsRow[] }> =
+  {
+    def: LIST_DOCUMENTS_OP,
+    handler: (ctx, input) => listDocumentsCore(drizzle(ctx.env.DB), ctx.principal, input),
+  }
+
+// ── LIST_SESSIONS_OP ──────────────────────────────────────────────────────
+
+/** `list_sessions` — newest-activity-first tenant session list for the dashboard (admin only). */
+export const LIST_SESSIONS_OP = defineOp({
+  name: "list_sessions",
+  description:
+    "List this tenant's sessions, newest activity first (admin dashboard view — returns all users' sessions).",
+  capability: "admin",
+  readOnly: true,
+  input: listLimitInput,
+  output: z.object({
+    sessions: z.array(
+      z.object({
+        id: z.string(),
+        client: z.string(),
+        title: z.string().nullable(),
+        status: z.string(),
+        turnCount: z.number().int(),
+        lastActivityAt: z.string(),
+        startedAt: z.string(),
+      }),
+    ),
+  }),
+})
+
+export type ListSessionRow = {
+  id: string
+  client: string
+  title: string | null
+  status: string
+  turnCount: number
+  lastActivityAt: string
+  startedAt: string
+}
+
+export const listSessionsCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { limit?: number },
+): Promise<{ sessions: ListSessionRow[] }> => {
+  assertAdmin(principal)
+  const limit = input.limit ?? 50
+  const rows = await db
+    .select({
+      id: sessionsTable.id,
+      client: sessionsTable.client,
+      title: sessionsTable.title,
+      status: sessionsTable.status,
+      turnCount: sessionsTable.turnCount,
+      lastActivityAt: sessionsTable.lastActivityAt,
+      startedAt: sessionsTable.startedAt,
+    })
+    .from(sessionsTable)
+    .where(
+      and(
+        eq(sessionsTable.tenantId, principal.tenantId),
+        scopePredicate(principal, sessionsTable.scope),
+      ),
+    )
+    .orderBy(desc(sessionsTable.lastActivityAt))
+    .limit(limit)
+  return { sessions: rows.map((r) => ({ ...r, title: r.title ?? null })) }
+}
+
+export const listSessionsOp: AdminBoundOp<{ limit?: number }, { sessions: ListSessionRow[] }> = {
+  def: LIST_SESSIONS_OP,
+  handler: (ctx, input) => listSessionsCore(drizzle(ctx.env.DB), ctx.principal, input),
+}
+
+// ── LIST_BACKFILL_RUNS_OP ─────────────────────────────────────────────────
+
+/** `list_backfill_runs` — newest-first tenant job/sync run list for the dashboard. */
+export const LIST_BACKFILL_RUNS_OP = defineOp({
+  name: "list_backfill_runs",
+  description: "List this tenant's backfill/sync runs, newest first (jobs dashboard view).",
+  capability: "read",
+  readOnly: true,
+  input: listLimitInput,
+  output: z.object({
+    runs: z.array(
+      z.object({
+        id: z.string(),
+        sourceId: z.string(),
+        kind: z.string(),
+        direction: z.string(),
+        status: z.string(),
+        attempts: z.number().int(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      }),
+    ),
+  }),
+})
+
+export type ListBackfillRunRow = {
+  id: string
+  sourceId: string
+  kind: string
+  direction: string
+  status: string
+  attempts: number
+  createdAt: string
+  updatedAt: string
+}
+
+export const listBackfillRunsCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { limit?: number },
+): Promise<{ runs: ListBackfillRunRow[] }> => {
+  const limit = input.limit ?? 50
+  const rows = await db
+    .select({
+      id: backfillRuns.id,
+      sourceId: backfillRuns.sourceId,
+      kind: backfillRuns.kind,
+      direction: backfillRuns.direction,
+      status: backfillRuns.status,
+      attempts: backfillRuns.attempts,
+      createdAt: backfillRuns.createdAt,
+      updatedAt: backfillRuns.updatedAt,
+    })
+    .from(backfillRuns)
+    .where(eq(backfillRuns.tenantId, principal.tenantId))
+    .orderBy(desc(backfillRuns.createdAt))
+    .limit(limit)
+  return { runs: rows }
+}
+
+export const listBackfillRunsOp: AdminBoundOp<{ limit?: number }, { runs: ListBackfillRunRow[] }> =
+  {
+    def: LIST_BACKFILL_RUNS_OP,
+    handler: (ctx, input) => listBackfillRunsCore(drizzle(ctx.env.DB), ctx.principal, input),
+  }
+
+// ── LIST_AUDIT_OP ─────────────────────────────────────────────────────────
+
+/** `list_audit` — newest-first tenant memory audit log for the dashboard (admin only). */
+export const LIST_AUDIT_OP = defineOp({
+  name: "list_audit",
+  description:
+    "List this tenant's memory audit entries, newest first (admin dashboard view — returns all users' audit entries).",
+  capability: "admin",
+  readOnly: true,
+  input: listLimitInput,
+  output: z.object({
+    entries: z.array(
+      z.object({
+        id: z.string(),
+        userId: z.string(),
+        action: z.string(),
+        targetId: z.string().nullable(),
+        at: z.number().int(),
+      }),
+    ),
+  }),
+})
+
+export type ListAuditEntry = {
+  id: string
+  userId: string
+  action: string
+  targetId: string | null
+  at: number
+}
+
+export const listAuditCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { limit?: number },
+): Promise<{ entries: ListAuditEntry[] }> => {
+  assertAdmin(principal)
+  const limit = input.limit ?? 50
+  const rows = await db
+    .select({
+      id: memoryAudit.id,
+      userId: memoryAudit.userId,
+      action: memoryAudit.action,
+      targetId: memoryAudit.targetId,
+      at: memoryAudit.at,
+    })
+    .from(memoryAudit)
+    .where(eq(memoryAudit.tenantId, principal.tenantId))
+    .orderBy(desc(memoryAudit.at))
+    .limit(limit)
+  return { entries: rows.map((r) => ({ ...r, targetId: r.targetId ?? null })) }
+}
+
+export const listAuditOp: AdminBoundOp<{ limit?: number }, { entries: ListAuditEntry[] }> = {
+  def: LIST_AUDIT_OP,
+  handler: (ctx, input) => listAuditCore(drizzle(ctx.env.DB), ctx.principal, input),
+}
+
+// ── GET_STATS_OP ──────────────────────────────────────────────────────────
+
+/** `get_stats` — full tenant aggregate counts + current-month spend vs ceiling (admin only). */
+export const GET_STATS_OP = defineOp({
+  name: "get_stats",
+  description:
+    "Tenant-wide aggregate counts (docs/chunks/entities/sessions/facts) + current-month token spend vs ceiling (admin only).",
+  capability: "admin",
+  readOnly: true,
+  input: z.object({}),
+  output: z.object({
+    documents: z.number().int(),
+    chunks: z.number().int(),
+    entities: z.number().int(),
+    sessions: z.number().int(),
+    facts: z.number().int(),
+    tokenSpendNeurons: z.number(),
+    monthlyCeilingUsd: z.number(),
+  }),
+})
+
+export interface GetStatsOutput {
+  documents: number
+  chunks: number
+  entities: number
+  sessions: number
+  facts: number
+  tokenSpendNeurons: number
+  monthlyCeilingUsd: number
+}
+
+export const getStatsCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+): Promise<GetStatsOutput> => {
+  assertAdmin(principal)
+  const tid = principal.tenantId
+  const [docsRes, chunksRes, entitiesRes, sessionsRes, factsRes] = await Promise.all([
+    db.select({ count: sql<number>`COUNT(*)` }).from(documents).where(eq(documents.tenantId, tid)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(chunks)
+      .where(and(eq(chunks.tenantId, tid), isNull(chunks.deletedAt))),
+    db.select({ count: sql<number>`COUNT(*)` }).from(entities).where(eq(entities.tenantId, tid)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(sessionsTable)
+      .where(eq(sessionsTable.tenantId, tid)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(facts)
+      .where(and(eq(facts.tenantId, tid), isNull(facts.expiredAt))),
+  ])
+  const tokenSpendNeurons = await new ScopedDB(db, principal).readWindowSpendNeurons(
+    monthlyWindow(),
+  )
+  return {
+    documents: Number(docsRes[0]?.count ?? 0),
+    chunks: Number(chunksRes[0]?.count ?? 0),
+    entities: Number(entitiesRes[0]?.count ?? 0),
+    sessions: Number(sessionsRes[0]?.count ?? 0),
+    facts: Number(factsRes[0]?.count ?? 0),
+    tokenSpendNeurons,
+    monthlyCeilingUsd: MONTHLY_COST_CEILING_USD,
+  }
+}
+
+export const getStatsOp: AdminBoundOp<Record<string, never>, GetStatsOutput> = {
+  def: GET_STATS_OP,
+  handler: (ctx, _input) => getStatsCore(drizzle(ctx.env.DB), ctx.principal),
+}
+
 /** Every bound admin op. */
-export const ADMIN_OPS = [mintApiKeyOp, getTokenSpendOp, membershipsOp] as const
+export const ADMIN_OPS = [
+  mintApiKeyOp,
+  getTokenSpendOp,
+  membershipsOp,
+  listDocumentsOp,
+  listSessionsOp,
+  listBackfillRunsOp,
+  listAuditOp,
+  getStatsOp,
+] as const
 
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */
 export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
