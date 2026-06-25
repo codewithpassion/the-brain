@@ -20,14 +20,101 @@
  * cross-await transaction, no raw passthrough. This file ships the read chokepoints only.
  */
 import type { Principal } from "@brain/shared"
-import { CHUNK_DB_BATCH_SIZE } from "@brain/shared"
+import { CHUNK_DB_BATCH_SIZE, EMBEDDING_DIMS, EMBEDDING_MODEL } from "@brain/shared"
 import { and, eq, inArray, isNull, sql } from "drizzle-orm"
+import type { BatchItem } from "drizzle-orm/batch"
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
-import { chunks, documents, facts, memoryUsePolicy } from "../schema"
+import {
+  chunks,
+  documents,
+  facts,
+  memoryAudit,
+  memoryRecallTraces,
+  memoryUsePolicy,
+} from "../schema"
 import { scopePredicate, visibilityPredicate } from "./predicates"
 
 /** Both `drizzle-orm/d1` (async) and `drizzle-orm/bun-sqlite` (sync) satisfy this. */
 export type BrainDrizzle = BaseSQLiteDatabase<"sync" | "async", unknown>
+
+/** A runnable Drizzle insert/update/delete statement, for atomic batch execution. */
+type BatchStatement = BatchItem<"sqlite">
+
+/**
+ * The atomicity primitive (invariant 11). D1 exposes `.batch([...])`, which runs all the
+ * statements in ONE all-or-nothing transaction — the only sanctioned way to write (no
+ * interactive cross-await transaction). The portable read base type does not declare it;
+ * the runtime D1 binding and the workerd canary's `drizzle(env.DB)` both have it natively,
+ * and the bun:sqlite unit tests inject an equivalent `.batch` shim (a synchronous
+ * `db.transaction`) so the SAME all-or-nothing semantics hold there.
+ */
+interface BatchCapable {
+  batch(statements: [BatchStatement, ...BatchStatement[]]): Promise<unknown>
+}
+
+/** What `batchWithAudit` stamps into the `memory_audit` row written in the same batch. */
+interface AuditSpec {
+  action: string
+  targetId?: string | null
+  diff?: string | null
+}
+
+/** `insertDocument` input — `tenantId` is NEVER accepted; the chokepoint forces it. */
+export interface InsertDocumentInput {
+  id?: string
+  slug: string
+  fingerprint: string
+  title?: string | null
+  scope?: string | null
+  teamId?: string | null
+  contentType?: string | null
+  bodyR2Key?: string | null
+  markdownPreview?: string | null
+  status?: string
+  sourceId?: string | null
+  sourceKind?: string | null
+  sourceUri?: string | null
+  ingestedVia?: string | null
+}
+
+/** `insertChunks` per-row input — `tenantId` is NEVER accepted; the chokepoint forces it. */
+export interface InsertChunkInput {
+  id: string
+  documentId: string
+  chunkIndex: number
+  content: string
+  scope?: string | null
+  teamId?: string | null
+  userId?: string | null
+  visibility?: string
+  headingPath?: string | null
+  tokenCount?: number | null
+  chunkSource?: string | null
+}
+
+/** `updateChunkEmbedding` patch — marks a chunk embedded (or records an embed failure). */
+export interface UpdateChunkEmbeddingInput {
+  embeddingModel: string
+  embeddedAt: string
+  embedError?: string | null
+}
+
+/** `upsertMemoryPolicy` input — `trust_grade` lives ONLY here (invariant 6). */
+export interface UpsertMemoryPolicyInput {
+  trustGrade: string
+  scopes: readonly string[]
+  expiresAt?: string | null
+}
+
+/** `appendRecallTrace` input — append-only; `tenantId`/`userId`/`at` are stamped here. */
+export interface RecallTraceInput {
+  query: string
+  targetId: string
+  score: number
+  clientId: string
+  /** Epoch-ms; defaults to `Date.now()` at write time. */
+  at?: number
+}
 
 /** A chunk row after the re-check JOIN-back (the citation-bearing projection). */
 export interface ScopedChunk {
@@ -322,6 +409,212 @@ export class ScopedDB {
       return rows.map((row) => row.id)
     } catch {
       return []
+    }
+  }
+
+  // ── WRITE PATH (invariants 1, 10, 11) ────────────────────────────────────────
+  // tenant_id is ALWAYS forced from the Principal, NEVER read from the caller's payload.
+  // Every MUTATING method funnels through `batchWithAudit`, so its `memory_audit` row is
+  // physically un-skippable — written in the SAME `db.batch` as its change (invariant 10),
+  // all-or-nothing (invariant 11). There is NO generic `exec`/raw `batch` passthrough: the
+  // only writes are the typed methods below, so an un-scoped or un-audited write is
+  // impossible by construction. The lone audit-exempt path is the append-only recall trace
+  // (`appendRecallTrace*`), which IS itself the audit-grade record (invariant 10) — it
+  // carries no separate audit row and is not gated by `readOnly` (a read-only principal's
+  // `think` still emits traces off the read path).
+
+  /** Authorize an EXPLICIT scope on a write; `'*'` may name any scope, else it must be granted. */
+  private assertScopeAllowed(scope: string): void {
+    if (this.p.allowedScopes === "*") {
+      return
+    }
+    if (!this.p.allowedScopes.includes(scope)) {
+      throw new Error(`scope '${scope}' not in this principal's allowedScopes`)
+    }
+  }
+
+  /** Run statements atomically (invariant 11). See `BatchCapable` for the D1/test seam. */
+  private async commitBatch(statements: BatchStatement[]): Promise<void> {
+    const [first, ...rest] = statements
+    if (first === undefined) {
+      return
+    }
+    await (this.db as unknown as BatchCapable).batch([first, ...rest])
+  }
+
+  /**
+   * The single funnel for every mutating write (invariant 10). Rejects a read-only
+   * principal, builds the `memory_audit` row with `tenant_id` + actor `user_id` FORCED
+   * from the Principal (never the caller), and commits it in the SAME batch as the change
+   * — so the change and its audit either both land or neither does.
+   */
+  private async batchWithAudit(statements: BatchStatement[], audit: AuditSpec): Promise<void> {
+    if (this.p.readOnly) {
+      throw new Error("write denied: read-only principal")
+    }
+    const auditStatement = this.db.insert(memoryAudit).values({
+      id: crypto.randomUUID(),
+      tenantId: this.p.tenantId, // forced — never caller-supplied
+      userId: this.p.userId, // forced actor
+      action: audit.action,
+      targetId: audit.targetId ?? null,
+      at: Date.now(),
+      diff: audit.diff ?? null,
+    })
+    await this.commitBatch([...statements, auditStatement])
+  }
+
+  /**
+   * Insert a `documents` row with `tenant_id` + authorship `user_id` forced; returns the id.
+   * An explicit `scope`/`teamId` is authorized against the Principal first. Audited in-batch.
+   */
+  async insertDocument(doc: InsertDocumentInput): Promise<string> {
+    if (doc.scope) {
+      this.assertScopeAllowed(doc.scope)
+    }
+    if (doc.teamId && !this.p.teamIds.includes(doc.teamId)) {
+      throw new Error(`team '${doc.teamId}' not in this principal's teamIds`)
+    }
+    const id = doc.id ?? crypto.randomUUID()
+    const now = new Date().toISOString()
+    const insert = this.db.insert(documents).values({
+      id,
+      tenantId: this.p.tenantId, // forced
+      userId: this.p.userId, // authorship forced
+      teamId: doc.teamId ?? null,
+      scope: doc.scope ?? null,
+      slug: doc.slug,
+      title: doc.title ?? null,
+      contentType: doc.contentType ?? null,
+      bodyR2Key: doc.bodyR2Key ?? null,
+      markdownPreview: doc.markdownPreview ?? null,
+      status: doc.status ?? "pending",
+      fingerprint: doc.fingerprint,
+      sourceId: doc.sourceId ?? null,
+      sourceKind: doc.sourceKind ?? null,
+      sourceUri: doc.sourceUri ?? null,
+      ingestedVia: doc.ingestedVia ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    await this.batchWithAudit([insert], { action: "document.insert", targetId: id })
+    return id
+  }
+
+  /**
+   * Insert `chunks` rows with `tenant_id` forced, in batches of `CHUNK_DB_BATCH_SIZE` (10).
+   * Each row is its OWN insert statement (~15 bound params), so every statement stays well
+   * under D1's per-statement 100-param cap; a batch is 10 inserts + 1 audit row. The
+   * `chunks_fts` shadow is kept in step by the DB triggers — never written here. Embedding
+   * columns are seeded to the locked model/dims; `embedded_at` stays NULL until
+   * `updateChunkEmbedding`. Returns the inserted ids in order.
+   */
+  async insertChunks(rows: InsertChunkInput[]): Promise<string[]> {
+    if (rows.length === 0) {
+      return []
+    }
+    const now = new Date().toISOString()
+    for (let i = 0; i < rows.length; i += CHUNK_DB_BATCH_SIZE) {
+      const slice = rows.slice(i, i + CHUNK_DB_BATCH_SIZE)
+      const statements = slice.map((row) =>
+        this.db.insert(chunks).values({
+          id: row.id,
+          tenantId: this.p.tenantId, // forced
+          documentId: row.documentId,
+          scope: row.scope ?? null,
+          teamId: row.teamId ?? null,
+          userId: row.userId ?? null,
+          visibility: row.visibility ?? "world",
+          chunkIndex: row.chunkIndex,
+          content: row.content,
+          headingPath: row.headingPath ?? null,
+          tokenCount: row.tokenCount ?? null,
+          chunkSource: row.chunkSource ?? null,
+          embeddingModel: EMBEDDING_MODEL,
+          embeddingDims: EMBEDDING_DIMS,
+          updatedAt: now,
+        }),
+      )
+      await this.batchWithAudit(statements, {
+        action: "chunk.insert",
+        targetId: slice[0]?.documentId ?? null,
+        diff: JSON.stringify({ count: slice.length }),
+      })
+    }
+    return rows.map((row) => row.id)
+  }
+
+  /**
+   * Mark a chunk embedded (or record an embed failure). The WHERE is `tenant_id`-scoped, so
+   * the update can never touch another tenant's chunk. Audited in-batch.
+   */
+  async updateChunkEmbedding(chunkId: string, patch: UpdateChunkEmbeddingInput): Promise<void> {
+    const update = this.db
+      .update(chunks)
+      .set({
+        embeddingModel: patch.embeddingModel,
+        embeddedAt: patch.embeddedAt,
+        embedError: patch.embedError ?? null,
+      })
+      .where(and(eq(chunks.id, chunkId), eq(chunks.tenantId, this.p.tenantId)))
+    await this.batchWithAudit([update], { action: "chunk.embed", targetId: chunkId })
+  }
+
+  /**
+   * Write the `memory_use_policy` sidecar for a target (invariant 6 — the ONLY home of
+   * `trust_grade`). There is no unique index on `(tenant_id, target_id)`, so the upsert is a
+   * clean atomic replace: a `tenant_id`-scoped DELETE of any prior policy + the new INSERT,
+   * both in ONE batch with the audit row. The DELETE carries `tenant_id` so it can never
+   * clear another tenant's policy.
+   */
+  async upsertMemoryPolicy(targetId: string, policy: UpsertMemoryPolicyInput): Promise<void> {
+    const remove = this.db
+      .delete(memoryUsePolicy)
+      .where(
+        and(eq(memoryUsePolicy.tenantId, this.p.tenantId), eq(memoryUsePolicy.targetId, targetId)),
+      )
+    const insert = this.db.insert(memoryUsePolicy).values({
+      id: crypto.randomUUID(),
+      tenantId: this.p.tenantId, // forced
+      targetId,
+      trustGrade: policy.trustGrade,
+      scopes: JSON.stringify(policy.scopes),
+      expiresAt: policy.expiresAt ?? null,
+    })
+    await this.batchWithAudit([remove, insert], { action: "usePolicy.upsert", targetId })
+  }
+
+  /** Append-only single recall trace (invariant 10). See `appendRecallTraces`. */
+  async appendRecallTrace(trace: RecallTraceInput): Promise<void> {
+    await this.appendRecallTraces([trace])
+  }
+
+  /**
+   * Append-only recall traces (invariant 10). Called OFF the synchronous read path by the
+   * caller (via `ctx.waitUntil`); this method only does the append. `tenant_id` + the recall
+   * author `user_id` are FORCED from the Principal; `at` is epoch-ms. NO audit row and NO
+   * `readOnly` gate — the trace IS the audit-grade record, and a read-only principal's
+   * `think` must still emit traces. Batched (≤10/statement-group) to respect the param cap.
+   */
+  async appendRecallTraces(traces: RecallTraceInput[]): Promise<void> {
+    if (traces.length === 0) {
+      return
+    }
+    for (let i = 0; i < traces.length; i += CHUNK_DB_BATCH_SIZE) {
+      const slice = traces.slice(i, i + CHUNK_DB_BATCH_SIZE)
+      const statements = slice.map((trace) =>
+        this.db.insert(memoryRecallTraces).values({
+          id: crypto.randomUUID(),
+          tenantId: this.p.tenantId, // forced
+          userId: this.p.userId, // recall author forced
+          query: trace.query,
+          targetId: trace.targetId,
+          score: trace.score,
+          clientId: trace.clientId,
+          at: trace.at ?? Date.now(),
+        }),
+      )
+      await this.commitBatch(statements)
     }
   }
 }

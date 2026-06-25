@@ -3,9 +3,14 @@ export type {
   BrainDrizzle,
   BreakGlassAudit,
   BreakGlassEvent,
+  InsertChunkInput,
+  InsertDocumentInput,
+  RecallTraceInput,
   ScopedChunk,
   ScopedDocument,
   ScopedFact,
+  UpdateChunkEmbeddingInput,
+  UpsertMemoryPolicyInput,
 } from "./db"
 export { ScopedDB } from "./db"
 export type { VisibilityColumns } from "./predicates"

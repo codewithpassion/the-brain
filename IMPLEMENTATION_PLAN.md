@@ -115,3 +115,4 @@ Blocking (decided by human):
 Non-blocking (defaulted):
 - Custom-domain hostnames → workers.dev for v1 (deferred).
 - Per-tenant cost-ceiling overrides → flat $400, no per-tenant override in v1.
+- **Cloudflare account for provisioning/deploy:** `Dominik.fretz@gmail.com's Account`, account_id `a12823016aa16d0a8dd2678b258bd751` (wrangler is logged in via OAuth as dominik.fretz@gmail.com; token has workers/d1/ai/queues/kv write). Verify Vectorize is creatable under this token at provisioning; re-`wrangler login` if a scope is missing.

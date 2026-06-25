@@ -4,6 +4,7 @@ import {
   type ClerkIdentity,
   type ClerkVerifier,
   createScopedServices,
+  type InsertDocumentInput,
   resolvePrincipal,
   ScopedDB,
   ScopedVectorize,
@@ -406,15 +407,100 @@ describe("resolvePrincipal end-to-end (invariant 17) — real workerd, injected 
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Canary 8 (HONESTY): boundaries that need LATER features are present as visible
-// todos tagged with their phase — the suite must SHOW what is not yet proven.
+// Canary 8: WRITE PATH (invariants 1, 10, 11) — real local D1 `db.batch` in workerd.
+// Phase-2a converts the Phase-1 write-path todos into live canaries: tenant_id is
+// forced on every write, the memory_audit row commits in the SAME db.batch as its
+// change (all-or-nothing), and a tenant-A write is invisible to tenant B.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("write-path tenant injection + audit-in-batch (invariants 1, 10) — real D1 batch", () => {
+  test("a tenant-A write forces tenant_id, lands its audit in the SAME batch, is invisible to tenant B", async () => {
+    await seedOrg("wpA", "wp-a")
+    await seedOrg("wpB", "wp-b")
+    const sdb = new ScopedDB(drizzle(env_.DB), principal({ tenantId: "wpA", userId: "wpUserA" }))
+
+    // Smuggle a foreign tenant_id in the payload — the chokepoint MUST override it with wpA.
+    const rogue = { slug: "wp-doc", fingerprint: "wp-fp", tenantId: "wpB" }
+    const docId = await sdb.insertDocument(rogue as InsertDocumentInput)
+
+    const doc = await env_.DB.prepare("SELECT tenant_id, user_id FROM documents WHERE id = ?")
+      .bind(docId)
+      .first<{ tenant_id: string; user_id: string }>()
+    expect(doc?.tenant_id).toBe("wpA") // forced, NOT the smuggled "wpB"
+    expect(doc?.user_id).toBe("wpUserA") // authorship forced
+
+    // The audit row landed in the SAME batch, tenant-scoped to wpA (the actor's tenant).
+    const audit = await env_.DB.prepare(
+      "SELECT tenant_id, action FROM memory_audit WHERE target_id = ?",
+    )
+      .bind(docId)
+      .first<{ tenant_id: string; action: string }>()
+    expect(audit?.action).toBe("document.insert")
+    expect(audit?.tenant_id).toBe("wpA")
+
+    // Tenant B (through the chokepoint) cannot see tenant A's document nor its audit trail.
+    const sdbB = new ScopedDB(drizzle(env_.DB), principal({ tenantId: "wpB" }))
+    expect((await sdbB.listDocuments()).some((d) => d.id === docId)).toBe(false)
+    const bAudit = await env_.DB.prepare(
+      "SELECT count(*) AS n FROM memory_audit WHERE tenant_id = 'wpB'",
+    ).first<{ n: number }>()
+    expect(bAudit?.n).toBe(0)
+  })
+
+  test("a batch failure rolls back BOTH the change and its audit row (D1 batch atomicity)", async () => {
+    await seedOrg("wpAtom", "wp-atom")
+    await seedDoc({ id: "wp-atom-doc", tenantId: "wpAtom", slug: "wp-atom-doc" })
+    // Pre-seed a chunk so a second insert with the SAME primary key fails at the DB layer.
+    await seedChunk({ id: "wp-dup", tenantId: "wpAtom", documentId: "wp-atom-doc" })
+    const sdb = new ScopedDB(drizzle(env_.DB), principal({ tenantId: "wpAtom" }))
+
+    await expect(
+      sdb.insertChunks([
+        { id: "wp-fresh", documentId: "wp-atom-doc", chunkIndex: 1, content: "fresh" },
+        { id: "wp-dup", documentId: "wp-atom-doc", chunkIndex: 2, content: "dup" }, // dup PK → throws
+      ]),
+    ).rejects.toThrow()
+
+    // All-or-nothing: the fresh chunk rolled back AND no audit row was written.
+    const fresh = await env_.DB.prepare(
+      "SELECT count(*) AS n FROM chunks WHERE id = 'wp-fresh'",
+    ).first<{ n: number }>()
+    expect(fresh?.n).toBe(0)
+    const audit = await env_.DB.prepare(
+      "SELECT count(*) AS n FROM memory_audit WHERE action = 'chunk.insert' AND tenant_id = 'wpAtom'",
+    ).first<{ n: number }>()
+    expect(audit?.n).toBe(0)
+  })
+
+  test("recall-trace appends are tenant-isolated and tenant_id/author-forced", async () => {
+    await seedOrg("rtA", "rt-a")
+    const sdb = new ScopedDB(drizzle(env_.DB), principal({ tenantId: "rtA", userId: "rtUserA" }))
+    await sdb.appendRecallTraces([
+      { query: "needle", targetId: "rt-c1", score: 0.9, clientId: "claude-code" },
+      { query: "needle", targetId: "rt-c2", score: 0.8, clientId: "claude-code" },
+    ])
+
+    const rows = await env_.DB.prepare(
+      "SELECT tenant_id, user_id FROM memory_recall_traces WHERE tenant_id = 'rtA'",
+    ).all<{ tenant_id: string; user_id: string }>()
+    expect(rows.results).toHaveLength(2)
+    expect(rows.results.every((r) => r.tenant_id === "rtA" && r.user_id === "rtUserA")).toBe(true)
+    // A different tenant sees none of tenant A's traces.
+    const other = await env_.DB.prepare(
+      "SELECT count(*) AS n FROM memory_recall_traces WHERE tenant_id = 'rtB'",
+    ).first<{ n: number }>()
+    expect(other?.n).toBe(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canary 9 (HONESTY): boundaries that need LATER features remain visible todos.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("not-yet-provable isolation (carry-forward — visible, not omitted)", () => {
   // BFS graph traversal lands in P4 (EntityExtractionWorkflow + generalized BFS over EdgeSpec).
   test.todo("[P4] BFS cross-tenant graph hop never crosses tenant_id at any depth")
-  // Write-path audit batching lands with ingestion/governance (P2/P5).
-  test.todo("[P2/P5] a write + its memory_audit row commit in the SAME db.batch (invariant 10)")
-  // Session capture + recall traces land in P5.
-  test.todo("[P5] session recall-trace rows are tenant-isolated and written off the read path")
+  // The append-only trace + its tenant-forcing are proven above; the remaining deferred half is
+  // the CALLER wiring the append OFF the synchronous read path via `ctx.waitUntil` (P5 surfaces).
+  test.todo("[P5] recall-trace append is dispatched off the read path via ctx.waitUntil")
 })

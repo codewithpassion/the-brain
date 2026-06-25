@@ -16,5 +16,7 @@ export type { BrainBindings } from "./env"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"
+// ── Hybrid-search + cited-synthesis (`think`) pipeline (Phase 2) ───────────────
+export * from "./search"
 export type { ScopedServices, ScopedServicesOptions } from "./services"
 export { createScopedServices } from "./services"

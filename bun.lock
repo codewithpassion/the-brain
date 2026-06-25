@@ -26,13 +26,6 @@
         "wrangler": "^4.104.0",
       },
     },
-    "packages/_smoke": {
-      "name": "@brain/_smoke",
-      "version": "0.0.0",
-      "devDependencies": {
-        "@brain/tsconfig": "workspace:*",
-      },
-    },
     "packages/db": {
       "name": "@brain/db",
       "version": "0.0.0",
@@ -45,6 +38,17 @@
         "@brain/tsconfig": "workspace:*",
         "@cloudflare/workers-types": "^4.20260530.1",
         "drizzle-kit": "^0.31.6",
+      },
+    },
+    "packages/ingest": {
+      "name": "@brain/ingest",
+      "version": "0.0.0",
+      "dependencies": {
+        "@brain/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@brain/tsconfig": "workspace:*",
+        "@cloudflare/workers-types": "^4.20260530.1",
       },
     },
     "packages/shared": {
@@ -81,11 +85,11 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.1", "", { "os": "win32", "cpu": "x64" }, "sha512-6uxpR9hvaglANkZemeSiN/FhYgkGasrEGn267eXIWvjrjJ2LhDlk251IhjVJq6MXzkV2/bcXwLwSroLyPtqRZg=="],
 
-    "@brain/_smoke": ["@brain/_smoke@workspace:packages/_smoke"],
-
     "@brain/api": ["@brain/api@workspace:apps/api"],
 
     "@brain/db": ["@brain/db@workspace:packages/db"],
+
+    "@brain/ingest": ["@brain/ingest@workspace:packages/ingest"],
 
     "@brain/shared": ["@brain/shared@workspace:packages/shared"],
 

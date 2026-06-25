@@ -24,6 +24,29 @@ export const makeDb = (): { sqlite: Database; db: ReturnType<typeof drizzle> } =
   return { sqlite, db: drizzle(sqlite, { schema }) }
 }
 
+/**
+ * Add a D1-shaped `.batch([...])` to a bun:sqlite Drizzle instance for the write-path tests.
+ * Production/workerd run on the real D1 binding, whose `.batch` is natively all-or-nothing;
+ * bun:sqlite has no `.batch`, so we map it to a SYNCHRONOUS `db.transaction` that runs each
+ * statement and rolls the whole group back if any one throws — the SAME atomicity the
+ * chokepoint relies on (invariant 11), so the unit tests exercise the real `commitBatch`.
+ */
+export const withBatch = (db: ReturnType<typeof drizzle>): ReturnType<typeof drizzle> => {
+  const tx = db as unknown as { transaction: (fn: () => void) => void }
+  const target = db as unknown as {
+    batch: (statements: ReadonlyArray<{ run: () => void }>) => Promise<unknown>
+  }
+  target.batch = (statements) => {
+    tx.transaction(() => {
+      for (const statement of statements) {
+        statement.run()
+      }
+    })
+    return Promise.resolve([])
+  }
+  return db
+}
+
 /** A `Principal` with sensible defaults; override per test. */
 export const principal = (overrides: Partial<Principal> = {}): Principal => ({
   tenantId: "t1",
