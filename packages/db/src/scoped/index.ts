@@ -6,10 +6,12 @@ export type {
   InsertChunkInput,
   InsertDocumentInput,
   RecallTraceInput,
+  RecordSpendInput,
   ScopedChunk,
   ScopedDocument,
   ScopedFact,
   UpdateChunkEmbeddingInput,
+  UpdateDocumentStatusInput,
   UpsertMemoryPolicyInput,
 } from "./db"
 export { ScopedDB } from "./db"

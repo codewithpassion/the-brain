@@ -24,7 +24,33 @@
   // KV for the `@cloudflare/workers-oauth-provider` store (PRD §7.2/§9). Fully emulated.
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "oauth_kv_local" }],
   // R2 for tenant-prefixed bodies/transcripts/audit ndjson (PRD §9). Fully emulated.
-  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "brain-bodies" }]
+  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "brain-bodies" }],
+
+  // ── Plain string vars (non-secret) ───────────────────────────────────────────
+  // Clerk Frontend API host — the OAuth 2.1 upstream IdP (PRD §7.2). `createClerkVerifier`
+  // pins the issuer to `https://${CLERK_FRONTEND_API}` and reads its JWKS. A non-secret
+  // public host, so it lives here as a var. (`AI_GATEWAY_ID` is set at deploy.)
+  //
+  // DEVICE_FLOW_SECRET (the `bdev_` machine-token HMAC key) is a SECRET — never committed
+  // here. Set it locally via `.env` (repo convention: `.env`, NOT `.dev.vars`), which
+  // `wrangler dev` auto-loads; in prod set it with `wrangler secret put DEVICE_FLOW_SECRET`.
+  "vars": {
+    "CLERK_FRONTEND_API": "clerk.the-brain.local"
+  },
+
+  // ── Workflows ────────────────────────────────────────────────────────────────
+  // The BatchIngest durable Workflow, backed by the `BatchIngestWorkflow` class exported
+  // from `src/index.ts`. Declared so the binding (`BATCH_INGEST`) can be bound at DEPLOY;
+  // the e2e slice drives `runBatchIngest` directly (and the `/ingest` route falls back to
+  // the inline call when the binding is absent), so the gate never depends on Workflows'
+  // local emulation. PROBED: pool-workers boots green with this declared.
+  "workflows": [
+    {
+      "name": "batch-ingest",
+      "binding": "BATCH_INGEST",
+      "class_name": "BatchIngestWorkflow"
+    }
+  ]
 
   // ── Deploy-only / FAKED-in-tests bindings (deliberately NOT declared here) ────
   // CHUNK_INDEX + ENTITY_INDEX (Vectorize V2, 1024d) and AI (Workers AI) have NO local

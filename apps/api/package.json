@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@brain/db": "workspace:*",
+    "@brain/ingest": "workspace:*",
     "@brain/shared": "workspace:*",
-    "drizzle-orm": "^0.44.6"
+    "drizzle-orm": "^0.44.6",
+    "hono": "^4.6.3"
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*",

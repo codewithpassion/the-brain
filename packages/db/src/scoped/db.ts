@@ -31,6 +31,7 @@ import {
   memoryAudit,
   memoryRecallTraces,
   memoryUsePolicy,
+  tokenSpend,
 } from "../schema"
 import { scopePredicate, visibilityPredicate } from "./predicates"
 
@@ -97,6 +98,36 @@ export interface UpdateChunkEmbeddingInput {
   embeddingModel: string
   embeddedAt: string
   embedError?: string | null
+}
+
+/**
+ * `updateDocumentStatus` patch — drives a `documents` row through its lifecycle
+ * (`pending → processing → indexed | failed`, §4.11). `tenant_id` is NEVER accepted; the
+ * chokepoint scopes the UPDATE to the principal's tenant. Optional fields are written only
+ * when present (so a status flip never clobbers the preview/chunk_count).
+ */
+export interface UpdateDocumentStatusInput {
+  status: string
+  markdownPreview?: string | null
+  chunkCount?: number | null
+  bodyR2Key?: string | null
+  ingestedAt?: string | null
+}
+
+/**
+ * `recordSpend` input — one increment into the per-tenant `token_spend` ledger (the
+ * window+model row). `tenant_id` is FORCED from the Principal; the cost cap reads it back
+ * through `readWindowSpendNeurons` (invariant 16). Attribution-only in v1.
+ */
+export interface RecordSpendInput {
+  /** Spend window key, e.g. `'2026-06'` (monthly) or `'YYYY-MM-DD'`. */
+  window: string
+  model: string
+  surface?: string | null
+  inputTokens?: number
+  outputTokens?: number
+  /** `@cf/`-neuron accounting (v1 billed unit). */
+  neurons: number
 }
 
 /** `upsertMemoryPolicy` input — `trust_grade` lives ONLY here (invariant 6). */
@@ -561,6 +592,30 @@ export class ScopedDB {
   }
 
   /**
+   * Drive a `documents` row through its ingestion lifecycle (§4.11). The WHERE is
+   * `tenant_id`-scoped so the update can never touch another tenant's document. Audited
+   * in-batch. Only the fields present in `patch` are written (no clobber of preview/count).
+   */
+  async updateDocumentStatus(documentId: string, patch: UpdateDocumentStatusInput): Promise<void> {
+    const update = this.db
+      .update(documents)
+      .set({
+        status: patch.status,
+        ...(patch.markdownPreview !== undefined ? { markdownPreview: patch.markdownPreview } : {}),
+        ...(patch.chunkCount !== undefined ? { chunkCount: patch.chunkCount } : {}),
+        ...(patch.bodyR2Key !== undefined ? { bodyR2Key: patch.bodyR2Key } : {}),
+        ...(patch.ingestedAt !== undefined ? { ingestedAt: patch.ingestedAt } : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
+    await this.batchWithAudit([update], {
+      action: "document.status",
+      targetId: documentId,
+      diff: JSON.stringify({ status: patch.status }),
+    })
+  }
+
+  /**
    * Write the `memory_use_policy` sidecar for a target (invariant 6 — the ONLY home of
    * `trust_grade`). There is no unique index on `(tenant_id, target_id)`, so the upsert is a
    * clean atomic replace: a `tenant_id`-scoped DELETE of any prior policy + the new INSERT,
@@ -616,5 +671,55 @@ export class ScopedDB {
       )
       await this.commitBatch(statements)
     }
+  }
+
+  // ── COST CAP (invariant 16) ───────────────────────────────────────────────────
+  // The enforcing per-tenant cap is the app-level `token_spend` 429 pre-check: a handler
+  // reads the tenant's spend for the current window via `readWindowSpendNeurons` and 429s
+  // BEFORE any `env.AI.run`. `recordSpend` is the attribution write (off the response path).
+  // `tenant_id` is FORCED here too, so spend can never be read/written across tenants.
+
+  /** Sum the tenant's `token_spend` neurons for a window (0 when no rows). Tenant-scoped. */
+  async readWindowSpendNeurons(window: string): Promise<number> {
+    const rows = await this.db
+      .select({ total: sql<number>`COALESCE(SUM(${tokenSpend.neurons}), 0)` })
+      .from(tokenSpend)
+      .where(and(eq(tokenSpend.tenantId, this.p.tenantId), eq(tokenSpend.window, window)))
+    return rows[0]?.total ?? 0
+  }
+
+  /**
+   * Increment the per-tenant `token_spend` ledger for `(window, model)`. Append-on-conflict
+   * (the `ux_token_spend_window` unique index): a fresh row inserts, a repeat increments the
+   * running totals. NO audit row and NO `readOnly` gate — spend is an ops counter that must
+   * be recorded regardless of who incurred it (a read-only principal's `think` still costs).
+   */
+  async recordSpend(input: RecordSpendInput): Promise<void> {
+    const now = new Date().toISOString()
+    const inputTokens = input.inputTokens ?? 0
+    const outputTokens = input.outputTokens ?? 0
+    const statement = this.db
+      .insert(tokenSpend)
+      .values({
+        id: crypto.randomUUID(),
+        tenantId: this.p.tenantId, // forced
+        window: input.window,
+        model: input.model,
+        surface: input.surface ?? null,
+        inputTokens,
+        outputTokens,
+        neurons: input.neurons,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [tokenSpend.tenantId, tokenSpend.window, tokenSpend.model],
+        set: {
+          inputTokens: sql`${tokenSpend.inputTokens} + ${inputTokens}`,
+          outputTokens: sql`${tokenSpend.outputTokens} + ${outputTokens}`,
+          neurons: sql`${tokenSpend.neurons} + ${input.neurons}`,
+          updatedAt: now,
+        },
+      })
+    await this.commitBatch([statement])
   }
 }
