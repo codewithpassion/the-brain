@@ -45,7 +45,7 @@
   // here. Set it locally via `.env` (repo convention: `.env`, NOT `.dev.vars`), which
   // `wrangler dev` auto-loads; in prod set it with `wrangler secret put DEVICE_FLOW_SECRET`.
   "vars": {
-    "CLERK_FRONTEND_API": "clerk.the-brain.local",
+    "CLERK_FRONTEND_API": "electric-bonefish-70.clerk.accounts.dev",
     "AI_GATEWAY_ID": "default"
   },
 
