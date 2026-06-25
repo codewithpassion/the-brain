@@ -39,18 +39,77 @@
   },
 
   // ── Workflows ────────────────────────────────────────────────────────────────
-  // The BatchIngest durable Workflow, backed by the `BatchIngestWorkflow` class exported
-  // from `src/index.ts`. Declared so the binding (`BATCH_INGEST`) can be bound at DEPLOY;
-  // the e2e slice drives `runBatchIngest` directly (and the `/ingest` route falls back to
-  // the inline call when the binding is absent), so the gate never depends on Workflows'
-  // local emulation. PROBED: pool-workers boots green with this declared.
+  // The durable Workflows, each backed by a `WorkflowEntrypoint` class exported from
+  // `src/index.ts`. Declared so the bindings can be bound at DEPLOY; none has local
+  // pool-workers emulation, so every phase drives its plain core fn directly in tests
+  // (and routes fall back to the inline path when the binding is absent). PROBED:
+  // pool-workers boots green with these declared (the class MUST be exported from `main`).
+  //   - BATCH_INGEST       → BatchIngestWorkflow      (Phase 2 ingest)
+  //   - SESSION_PROMOTE    → SessionPromoteWorkflow   (Phase 5 finalize → fact promotion)
+  //   - ENTITY_EXTRACTION  → EntityExtractionWorkflow (Phase 4 KG extraction)
+  //   - ENUMERATOR         → EnumeratorWorkflow       (Phase 3 backfill enumerate)
   "workflows": [
     {
       "name": "batch-ingest",
       "binding": "BATCH_INGEST",
       "class_name": "BatchIngestWorkflow"
+    },
+    {
+      "name": "session-promote",
+      "binding": "SESSION_PROMOTE",
+      "class_name": "SessionPromoteWorkflow"
+    },
+    {
+      "name": "entity-extraction",
+      "binding": "ENTITY_EXTRACTION",
+      "class_name": "EntityExtractionWorkflow"
+    },
+    {
+      "name": "enumerator",
+      "binding": "ENUMERATOR",
+      "class_name": "EnumeratorWorkflow"
     }
-  ]
+  ],
+
+  // ── Queues ───────────────────────────────────────────────────────────────────
+  // Phase-3 backfill spine (deploy-targeted). The `queue()` handler in `src/index.ts`
+  // dispatches by `batch.queue`: `brain-backfill` → `handleBackfillQueue`,
+  // `brain-reembed` → `handleReembedQueue`. Each consumer routes exhausted messages to
+  // its DLQ. PROBED: pool-workers boots with these declared (no live queue emulation;
+  // the canary drives the testable core fns directly via the injected `enqueue` seam).
+  "queues": {
+    "producers": [
+      { "binding": "BACKFILL_QUEUE", "queue": "brain-backfill" },
+      { "binding": "REEMBED_QUEUE", "queue": "brain-reembed" }
+    ],
+    "consumers": [
+      {
+        "queue": "brain-backfill",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "max_concurrency": 10,
+        "retry_delay": 30,
+        "dead_letter_queue": "brain-backfill-dlq"
+      },
+      {
+        "queue": "brain-reembed",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "max_concurrency": 10,
+        "retry_delay": 30,
+        "dead_letter_queue": "brain-reembed-dlq"
+      }
+    ]
+  },
+
+  // ── Cron triggers ────────────────────────────────────────────────────────────
+  // Every 5 minutes the `scheduled()` handler runs the P5 idle-promotion + audit-export
+  // sweeps and the P3 re-embed sweep. (No local cron emulation in the test harness.)
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
 
   // ── Deploy-only / FAKED-in-tests bindings (deliberately NOT declared here) ────
   // CHUNK_INDEX + ENTITY_INDEX (Vectorize V2, 1024d) and AI (Workers AI) have NO local
@@ -58,6 +117,5 @@
   // DEPLOY time only and FAKED in tests (see test/isolation.canary.test.ts, which drives
   // an adversarial fake Vectorize through the mandatory D1 re-check). The string bindings
   // AI_GATEWAY_ID / CLERK_FRONTEND_API / DEVICE_FLOW_SECRET are set as vars/secrets at
-  // deploy. Durable Object / Workflows / Queue bindings land in later phases once their
-  // backing classes exist (declaring them now would fail typegen/boot).
+  // deploy. The MCP Durable Object lands in Phase 6.
 }

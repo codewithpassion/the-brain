@@ -6,7 +6,7 @@
  * synthesis. The token-budget-guarded prompt PACKING (`buildSynthesisPrompt`) is the
  * Phase-2 retrieval pipeline; this chokepoint is just the guarded model call.
  */
-import { GENERATION_MODEL } from "@brain/shared"
+import { EXTRACT_MODEL, GENERATION_MODEL } from "@brain/shared"
 import { type AiDeps, aiGateway } from "./gateway"
 
 interface LlamaGenOutput {
@@ -32,6 +32,36 @@ export const gen = async (
     const res = (await deps.ai.run(
       GENERATION_MODEL,
       { messages },
+      aiGateway(deps.gatewayId, deps.tenantId),
+    )) as LlamaGenOutput
+    const out = res.response
+    return typeof out === "string" && out.length > 0 ? out : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * KG-extraction generation over llama-3.1-8b (`EXTRACT_MODEL`, PRD §6.2). Same never-throws
+ * contract as `gen()` (invariant 14) — returns `null` on any failure so entity extraction
+ * stays NON-FATAL. Requests `response_format: { type: 'json_object' }` for the structured KG
+ * payload; the caller still applies truncation-salvage parsing on top.
+ */
+export const genExtract = async (
+  deps: AiDeps,
+  prompt: string,
+  system?: string,
+): Promise<string | null> => {
+  const messages = system
+    ? [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ]
+    : [{ role: "user", content: prompt }]
+  try {
+    const res = (await deps.ai.run(
+      EXTRACT_MODEL,
+      { messages, response_format: { type: "json_object" } },
       aiGateway(deps.gatewayId, deps.tenantId),
     )) as LlamaGenOutput
     const out = res.response

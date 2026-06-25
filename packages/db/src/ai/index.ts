@@ -2,7 +2,7 @@
 export { embed, embedForIndex } from "./embed"
 export type { AiDeps, BrainAiRunOptions } from "./gateway"
 export { aiGateway } from "./gateway"
-export { gen } from "./gen"
+export { gen, genExtract } from "./gen"
 export type { AiCallMetric, OpsMetrics } from "./metrics"
 export { noopOpsMetrics } from "./metrics"
 export type { RerankCandidate, RerankHit } from "./rerank"

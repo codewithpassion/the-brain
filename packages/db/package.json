@@ -18,7 +18,8 @@
   "dependencies": {
     "@brain/shared": "workspace:*",
     "drizzle-orm": "^0.44.6",
-    "jose": "^6.0.11"
+    "jose": "^6.0.11",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*",

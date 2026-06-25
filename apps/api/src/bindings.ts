@@ -11,9 +11,12 @@
  * the boundary-lint-banned raw binding type names (`D1Database`/`Vectorize`/`R2Bucket`).
  */
 import type { BrainBindings } from "@brain/db"
+import type { EntityExtractionWorkflowParams } from "./entity-extraction"
 import type { BatchIngestWorkflowParams } from "./ingest"
 
 export type ApiBindings = BrainBindings & {
   /** Deploy-only Workflows binding; absent locally (see module doc). */
   BATCH_INGEST?: Workflow<BatchIngestWorkflowParams>
+  /** Deploy-only Workflows binding for Phase-4 KG extraction; absent locally. */
+  ENTITY_EXTRACTION?: Workflow<EntityExtractionWorkflowParams>
 }

@@ -43,6 +43,7 @@ import {
 } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import { EMBED_BATCH_SIZE, EMBEDDING_MODEL } from "@brain/shared"
+import { runEntityExtraction } from "./entity-extraction"
 
 /** Per-document ingestion inputs — R2 *references* only (cap-safe), never an inline body. */
 export interface BatchIngestParams {
@@ -162,8 +163,10 @@ export const runBatchIngest = async (
     }
   }
 
-  // 6. KG extraction — NO-OP (Phase 4: EntityExtractionWorkflow + entity dual-index).
-  // TODO(P4): extract entities/relations + entity_mentions and upsert the brain-entities index.
+  // 6. KG extraction (Phase 4). NON-FATAL: a failure never fails ingest — the doc is indexed
+  //    regardless (runEntityExtraction never throws; the .catch is belt-and-suspenders). At
+  //    deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
+  await runEntityExtraction(services, documentId).catch(() => undefined)
 
   // 7. finalize → indexed (D1 keeps the preview only — invariant 13).
   await services.db.updateDocumentStatus(documentId, {

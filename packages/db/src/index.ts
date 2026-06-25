@@ -12,7 +12,13 @@
 export * from "./ai"
 // ── Edge auth spine (Phase 1d) ────────────────────────────────────────────────
 export * from "./auth"
+// ── Backfill spine + re-embed migration (Phase 3) ─────────────────────────────
+export * from "./backfill"
 export type { BrainBindings } from "./env"
+// ── Sessions + hot memory + governance (Phase 5) ──────────────────────────────
+export * from "./governance"
+// ── Graph extraction + traversal + entity search (Phase 4) ─────────────────────
+export * from "./graph"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"
@@ -20,3 +26,4 @@ export * from "./scoped"
 export * from "./search"
 export type { ScopedServices, ScopedServicesOptions } from "./services"
 export { createScopedServices } from "./services"
+export * from "./sessions"

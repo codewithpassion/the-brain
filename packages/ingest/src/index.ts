@@ -23,3 +23,5 @@ export { fingerprint, normalizeForFingerprint } from "./fingerprint"
 export { markdownPreview, toMarkdown, UnsupportedContentTypeError } from "./markdown"
 // ── Input text normalization ─────────────────────────────────────────────────
 export { normalize } from "./normalize"
+// ── Session-export importers (ChatGPT + Claude-Code, §4.7.1) ──────────────────
+export * from "./sources"

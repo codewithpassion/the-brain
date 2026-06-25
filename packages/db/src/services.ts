@@ -10,9 +10,10 @@ import type { Principal } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import { embed, embedForIndex } from "./ai/embed"
 import type { AiDeps } from "./ai/gateway"
-import { gen } from "./ai/gen"
+import { gen, genExtract } from "./ai/gen"
 import { type RerankCandidate, type RerankHit, rerank } from "./ai/rerank"
 import type { BrainBindings } from "./env"
+import { ScopedGraph } from "./graph/scoped-graph"
 import { type BreakGlassAudit, ScopedDB } from "./scoped/db"
 import { ScopedR2 } from "./scoped/r2"
 import { ScopedVectorize } from "./scoped/vectorize"
@@ -21,6 +22,10 @@ import { ScopedVectorize } from "./scoped/vectorize"
 export interface ScopedServices {
   db: ScopedDB
   vectors: ScopedVectorize
+  /** `brain-entities` Vectorize wrapper (Phase 4 — entity search + extraction upserts). */
+  entityVectors: ScopedVectorize
+  /** Graph node-space read/write chokepoint (pages/entities/links; Phase 4). */
+  graph: ScopedGraph
   blobs: ScopedR2
   ai: {
     /** READ path — `null` ⇒ degrade to keyword-only. */
@@ -29,6 +34,8 @@ export interface ScopedServices {
     embedForIndex: (texts: string[]) => Promise<number[][]>
     /** READ path — `null` ⇒ evidence-without-synthesis. */
     gen: (prompt: string, system?: string) => Promise<string | null>
+    /** KG-extraction READ path over EXTRACT_MODEL — `null` ⇒ extraction degrades (non-fatal). */
+    genExtract: (prompt: string, system?: string) => Promise<string | null>
     /** READ path — degrades to RRF/identity order. */
     rerank: (query: string, candidates: RerankCandidate[], topK: number) => Promise<RerankHit[]>
   }
@@ -49,11 +56,14 @@ export const createScopedServices = (
   return {
     db: new ScopedDB(db, principal, options?.breakGlassAudit),
     vectors: new ScopedVectorize(env.CHUNK_INDEX, principal),
+    entityVectors: new ScopedVectorize(env.ENTITY_INDEX, principal),
+    graph: new ScopedGraph(db, principal),
     blobs: new ScopedR2(env.BODIES, principal),
     ai: {
       embed: (texts) => embed(aiDeps, texts),
       embedForIndex: (texts) => embedForIndex(aiDeps, texts),
       gen: (prompt, system) => gen(aiDeps, prompt, system),
+      genExtract: (prompt, system) => genExtract(aiDeps, prompt, system),
       rerank: (query, candidates, topK) => rerank(aiDeps, query, candidates, topK),
     },
   }

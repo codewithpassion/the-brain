@@ -4,6 +4,7 @@ import {
   type ClerkIdentity,
   type ClerkVerifier,
   ScopedDB,
+  ScopedGraph,
   ScopedR2,
   type ScopedServices,
   ScopedVectorize,
@@ -87,6 +88,8 @@ const aiStub: ScopedServices["ai"] = {
   embed: async (texts) => texts.map(() => vec1024()),
   embedForIndex: async (texts) => texts.map(() => vec1024()),
   gen: async (prompt) => `SYNTHESIS over evidence:\n${prompt.slice(0, 240)}`,
+  // KG extraction degrades to a no-op here — the slice exercises ingest→think, not the graph.
+  genExtract: async () => null,
   rerank: async (_q, candidates, topK) =>
     candidates.map((_c, index) => ({ index, score: 0 })).slice(0, topK),
 }
@@ -110,6 +113,8 @@ const fakeVectorize = makeFakeVectorize()
 const makeServices = (e: BrainBindings, principal: Principal): ScopedServices => ({
   db: new ScopedDB(drizzle(e.DB), principal),
   vectors: new ScopedVectorize(fakeVectorize.index, principal),
+  entityVectors: new ScopedVectorize(fakeVectorize.index, principal),
+  graph: new ScopedGraph(drizzle(e.DB), principal),
   blobs: new ScopedR2(e.BODIES, principal),
   ai: aiStub,
 })

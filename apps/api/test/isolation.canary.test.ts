@@ -494,13 +494,7 @@ describe("write-path tenant injection + audit-in-batch (invariants 1, 10) — re
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Canary 9 (HONESTY): boundaries that need LATER features remain visible todos.
+// Canary 9 (HONESTY): the Phase-1 carry-forward todos are now DONE and live as real
+// green canaries — [P4] graph BFS/entity isolation in `graph.canary.test.ts`, and
+// [P5] session/hot-memory/recall-trace isolation in `sessions.canary.test.ts`.
 // ─────────────────────────────────────────────────────────────────────────────
-
-describe("not-yet-provable isolation (carry-forward — visible, not omitted)", () => {
-  // BFS graph traversal lands in P4 (EntityExtractionWorkflow + generalized BFS over EdgeSpec).
-  test.todo("[P4] BFS cross-tenant graph hop never crosses tenant_id at any depth")
-  // The append-only trace + its tenant-forcing are proven above; the remaining deferred half is
-  // the CALLER wiring the append OFF the synchronous read path via `ctx.waitUntil` (P5 surfaces).
-  test.todo("[P5] recall-trace append is dispatched off the read path via ctx.waitUntil")
-})

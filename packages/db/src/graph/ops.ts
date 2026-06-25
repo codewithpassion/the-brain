@@ -1,0 +1,272 @@
+/**
+ * The graph + entity ops (PRD §6.5 surface), registered into the shared `OpRegistry` exactly
+ * like the retrieval ops (search/ops.ts): each is a `BoundOp` = the FROZEN handler-free
+ * `OpDef` contract + a runtime handler composing the chokepoints. Handlers bind in the Worker.
+ *
+ * SCOPE: the team-lead-enumerated read surface — `traverse_graph`, `get_links`,
+ * `get_backlinks`, `get_tags`, `get_timeline`, `list_entities`, `find_orphans`,
+ * `search_entities`. The mutating §6.5 surface (`add_link`/`remove_link`/`add_tag`/
+ * `add_timeline_entry`/`get_versions`/`revert_version`/`get_entity`/`entity_relations`) is
+ * DEFERRED.
+ */
+import {
+  type AnyOpDef,
+  DOC_GRAPH,
+  defineOp,
+  ENTITY_GRAPH,
+  type GraphPath,
+  type OpRegistry,
+  type Principal,
+} from "@brain/shared"
+import { z } from "zod"
+import type { ScopedVectorize } from "../scoped/vectorize"
+import type { AiPort } from "../search/types"
+import { type EntityHit, searchEntities } from "./entities"
+import type { DocLinkRow, EntityRow, OrphanReport, ScopedGraph, TimelineRow } from "./scoped-graph"
+
+/** The per-request dependency bundle a graph op handler receives. */
+export interface GraphOpDeps {
+  graph: ScopedGraph
+  entityVectors: ScopedVectorize
+  ai: Pick<AiPort, "embed">
+}
+
+/** The context a bound graph-op handler receives (mirrors `search` `OpContext`). */
+export interface GraphOpContext {
+  deps: GraphOpDeps
+  principal: Principal
+}
+
+/** A frozen `OpDef` contract paired with its runtime handler. */
+export interface BoundOp<I, O> {
+  def: AnyOpDef
+  handler: (ctx: GraphOpContext, input: I) => Promise<O>
+}
+
+// ── Zod contracts ─────────────────────────────────────────────────────────────
+
+const GraphPathSchema = z.object({
+  from_id: z.string(),
+  to_id: z.string(),
+  link_type: z.string(),
+  context: z.string(),
+  confidence: z.number().optional(),
+  depth: z.number().int(),
+})
+
+const DocLinkSchema = z.object({
+  fromId: z.string(),
+  toId: z.string(),
+  linkType: z.string(),
+  context: z.string(),
+})
+
+const EntityHitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  description: z.string(),
+  score: z.number(),
+  scope: z.string().nullable(),
+  visibility: z.string(),
+  teamId: z.string().nullable(),
+})
+
+const anchorInput = z.object({ target: z.string().min(1) })
+
+// ── Op definitions ──────────────────────────────────────────────────────────────
+
+export const TRAVERSE_OP = defineOp({
+  name: "traverse_graph",
+  description: "Generalized BFS over the document link graph or the entity knowledge graph.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    target: z.string().min(1),
+    depth: z.number().int().min(1).max(10).default(5),
+    direction: z.enum(["in", "out", "both"]).default("both"),
+    graph: z.enum(["doc", "entity"]).default("doc"),
+  }),
+  output: z.object({ paths: z.array(GraphPathSchema) }),
+})
+
+export const GET_LINKS_OP = defineOp({
+  name: "get_links",
+  description: "Outgoing typed links from a page (scope/visibility gated).",
+  capability: "read",
+  readOnly: true,
+  input: anchorInput,
+  output: z.object({ links: z.array(DocLinkSchema) }),
+})
+
+export const GET_BACKLINKS_OP = defineOp({
+  name: "get_backlinks",
+  description: "Incoming typed links to a page (scope/visibility gated).",
+  capability: "read",
+  readOnly: true,
+  input: anchorInput,
+  output: z.object({ links: z.array(DocLinkSchema) }),
+})
+
+export const GET_TAGS_OP = defineOp({
+  name: "get_tags",
+  description: "Tags on a page.",
+  capability: "read",
+  readOnly: true,
+  input: anchorInput,
+  output: z.object({ tags: z.array(z.string()) }),
+})
+
+export const GET_TIMELINE_OP = defineOp({
+  name: "get_timeline",
+  description: "Timeline entries for a page, newest first.",
+  capability: "read",
+  readOnly: true,
+  input: anchorInput,
+  output: z.object({
+    entries: z.array(
+      z.object({
+        id: z.string(),
+        date: z.string(),
+        summary: z.string(),
+        detail: z.string(),
+        source: z.string(),
+      }),
+    ),
+  }),
+})
+
+export const LIST_ENTITIES_OP = defineOp({
+  name: "list_entities",
+  description: "List knowledge-graph entities (scope/visibility gated), optionally by kind.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    kind: z.string().optional(),
+    limit: z.number().int().min(1).max(200).default(50),
+  }),
+  output: z.object({
+    entities: z.array(
+      z.object({
+        id: z.string(),
+        kind: z.string(),
+        canonicalName: z.string(),
+        description: z.string(),
+        aliases: z.array(z.string()),
+        scope: z.string().nullable(),
+        visibility: z.string(),
+        teamId: z.string().nullable(),
+        mentionCount: z.number().int(),
+      }),
+    ),
+  }),
+})
+
+export const FIND_ORPHANS_OP = defineOp({
+  name: "find_orphans",
+  description: "Report disconnected nodes in the document or entity graph (not a deleter).",
+  capability: "read",
+  readOnly: true,
+  input: z.object({ graph: z.enum(["doc", "entity"]).default("doc") }),
+  output: z.object({
+    orphans: z.array(z.object({ id: z.string(), label: z.string(), type: z.string() })),
+    totalOrphans: z.number().int(),
+    totalLinkable: z.number().int(),
+    totalNodes: z.number().int(),
+    excluded: z.number().int(),
+  }),
+})
+
+export const SEARCH_ENTITIES_OP = defineOp({
+  name: "search_entities",
+  description: "Entity vector search over brain-entities + entity_fts (RRF), D1 re-checked.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    query: z.string().min(1),
+    topK: z.number().int().min(1).max(100).default(20),
+  }),
+  output: z.object({ hits: z.array(EntityHitSchema) }),
+})
+
+// ── Bound handlers ────────────────────────────────────────────────────────────
+
+const specOf = (graph: "doc" | "entity") => (graph === "entity" ? ENTITY_GRAPH : DOC_GRAPH)
+
+export const traverseOp: BoundOp<
+  { target: string; depth: number; direction: "in" | "out" | "both"; graph: "doc" | "entity" },
+  { paths: GraphPath[] }
+> = {
+  def: TRAVERSE_OP,
+  handler: async (ctx, input) => {
+    const spec = specOf(input.graph)
+    const seedId = await ctx.deps.graph.resolveNodeId(spec, input.target)
+    if (seedId === null) return { paths: [] }
+    const paths = await ctx.deps.graph.traverse(spec, seedId, {
+      depth: input.depth,
+      direction: input.direction,
+    })
+    return { paths }
+  },
+}
+
+export const getLinksOp: BoundOp<{ target: string }, { links: DocLinkRow[] }> = {
+  def: GET_LINKS_OP,
+  handler: async (ctx, input) => ({ links: await ctx.deps.graph.getLinks(input.target) }),
+}
+
+export const getBacklinksOp: BoundOp<{ target: string }, { links: DocLinkRow[] }> = {
+  def: GET_BACKLINKS_OP,
+  handler: async (ctx, input) => ({ links: await ctx.deps.graph.getBacklinks(input.target) }),
+}
+
+export const getTagsOp: BoundOp<{ target: string }, { tags: string[] }> = {
+  def: GET_TAGS_OP,
+  handler: async (ctx, input) => ({ tags: await ctx.deps.graph.getTags(input.target) }),
+}
+
+export const getTimelineOp: BoundOp<{ target: string }, { entries: TimelineRow[] }> = {
+  def: GET_TIMELINE_OP,
+  handler: async (ctx, input) => ({ entries: await ctx.deps.graph.getTimeline(input.target) }),
+}
+
+export const listEntitiesOp: BoundOp<{ kind?: string; limit: number }, { entities: EntityRow[] }> =
+  {
+    def: LIST_ENTITIES_OP,
+    handler: async (ctx, input) => ({
+      entities: await ctx.deps.graph.listEntities({
+        ...(input.kind !== undefined ? { kind: input.kind } : {}),
+        limit: input.limit,
+      }),
+    }),
+  }
+
+export const findOrphansOp: BoundOp<{ graph: "doc" | "entity" }, OrphanReport> = {
+  def: FIND_ORPHANS_OP,
+  handler: (ctx, input) => ctx.deps.graph.findOrphans(input.graph),
+}
+
+export const searchEntitiesOp: BoundOp<{ query: string; topK: number }, { hits: EntityHit[] }> = {
+  def: SEARCH_ENTITIES_OP,
+  handler: async (ctx, input) => ({
+    hits: await searchEntities(ctx.deps, input.query, { topK: input.topK }),
+  }),
+}
+
+/** Every bound graph op. */
+export const GRAPH_OPS = [
+  traverseOp,
+  getLinksOp,
+  getBacklinksOp,
+  getTagsOp,
+  getTimelineOp,
+  listEntitiesOp,
+  findOrphansOp,
+  searchEntitiesOp,
+] as const
+
+/** Register the graph op CONTRACTS into a shared `OpRegistry` (handlers bind in the Worker). */
+export const registerGraphOps = (registry: OpRegistry): OpRegistry => {
+  for (const op of GRAPH_OPS) registry.register(op.def)
+  return registry
+}
