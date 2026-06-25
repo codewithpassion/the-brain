@@ -8,6 +8,8 @@
  * bundle — never a raw binding.
  */
 
+// ── Admin ops (mint_api_key / get_token_spend / memberships) (Phase 6) ────────
+export * from "./admin"
 // ── Isolation chokepoints + AI wrappers + factory (Phase 1c) ──────────────────
 export * from "./ai"
 // ── Edge auth spine (Phase 1d) ────────────────────────────────────────────────

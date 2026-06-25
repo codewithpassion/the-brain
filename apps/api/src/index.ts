@@ -15,6 +15,7 @@ import {
   BREAK_GLASS_READ_OP,
   CAPTURE_TURN_OP,
   type ClerkVerifier,
+  CostCeilingError,
   createAuditExportCursorStore,
   createBreakGlassAuditSink,
   createScopedServices,
@@ -22,10 +23,6 @@ import {
   type GraphOpDeps,
   MEMORY_REVIEW_OP,
   RECALL_OP,
-  registerGovernanceOps,
-  registerGraphOps,
-  registerSearchOps,
-  registerSessionOps,
   resolvePrincipal,
   type ScopedServices,
   type SearchDeps,
@@ -36,11 +33,12 @@ import { fingerprint, toMarkdown } from "@brain/ingest"
 import {
   type AnyOpDef,
   INGEST_WEBHOOK_MAX_BYTES,
-  OpRegistry,
   type Principal,
   SEARCH_OP,
   THINK_OP,
 } from "@brain/shared"
+import { appRouter, createTrpcContext, type SurfaceEnv } from "@brain/surface"
+import { trpcServer } from "@hono/trpc-server"
 import { Hono } from "hono"
 import {
   type BackfillBindings,
@@ -152,18 +150,11 @@ const GRAPH_ROUTES: readonly (readonly [string, string])[] = [
 ]
 
 /**
- * Build the Worker's op registry — every surface op across the four phases (search + graph +
- * session + governance), so the MCP/tRPC/CLI catalog sees one frozen, non-drifting set. Built on
- * demand (never at module top-level) so a hypothetical duplicate-name throw can't break boot.
+ * The Worker's op registry is the SINGLE source from `@brain/surface` (search + graph + session +
+ * governance + admin), re-exported here so the MCP DO + the integration smoke import it from one
+ * place — the MCP/tRPC/CLI catalog cannot drift from a divergent local copy.
  */
-export const buildRegistry = (): OpRegistry => {
-  const registry = new OpRegistry()
-  registerSearchOps(registry)
-  registerGraphOps(registry)
-  registerSessionOps(registry)
-  registerGovernanceOps(registry)
-  return registry
-}
+export { buildRegistry } from "@brain/surface"
 
 export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   const makeServices: MakeServices = options.makeServices ?? createScopedServices
@@ -180,6 +171,26 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   })
 
   app.get("/health", (c) => c.json({ status: "ok" }))
+
+  // ── tRPC typed surface (dashboard + CLI) — the generated `appRouter` mounted under the SAME
+  //    edge-resolved Principal (invariant 17). The router is built from the single op-registry
+  //    (`@brain/surface`), so it cannot drift from the MCP + CLI surfaces. REST routes below are
+  //    unchanged (Hono owns webhooks/upload/MCP transport; tRPC owns the typed app surface). ──
+  app.use(
+    "/trpc/*",
+    trpcServer({
+      router: appRouter,
+      endpoint: "/trpc",
+      // The Hono adapter types the context as `Record<string, unknown>`; the runtime object IS the
+      // `SurfaceContext` the router's procedures consume (cast only bridges the adapter's generic).
+      createContext: (_opts, c) =>
+        createTrpcContext(
+          c.env as unknown as SurfaceEnv,
+          c.get("principal") as Principal,
+          (promise: Promise<unknown>) => c.executionCtx.waitUntil(promise),
+        ) as unknown as Record<string, unknown>,
+    }),
+  )
 
   // ── POST /ingest — markdown → fingerprint → R2 → documents(pending) → BatchIngest. ──
   app.post("/ingest", async (c) => {
@@ -382,7 +393,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
 
   // Map typed failures to their HTTP status (401 auth, 429 cost-cap, 4xx input).
   app.onError((err, _c) => {
-    if (err instanceof AuthError || err instanceof HttpError) {
+    if (err instanceof AuthError || err instanceof HttpError || err instanceof CostCeilingError) {
       return Response.json({ error: err.message }, { status: err.status })
     }
     return Response.json({ error: "internal error" }, { status: 500 })

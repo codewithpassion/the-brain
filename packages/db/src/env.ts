@@ -33,4 +33,11 @@ export interface BrainBindings {
    * a machine token resolves statelessly (no D1 lookup).
    */
   DEVICE_FLOW_SECRET: string
+  /**
+   * Analytics Engine dataset for per-op + per-AI-call ops metrics (PRD §10). OPTIONAL: AE has
+   * NO local emulation, so it is absent in the test harness — the ops-metrics sink then no-ops
+   * (`createOpsMetrics(undefined)`). The orchestrator/Phase-6 MCP wires the real binding via
+   * `analytics_engine_datasets` in `wrangler.jsonc` (deploy-only).
+   */
+  ANALYTICS?: AnalyticsEngineDataset
 }

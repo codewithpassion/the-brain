@@ -17,6 +17,9 @@
         "@brain/db": "workspace:*",
         "@brain/ingest": "workspace:*",
         "@brain/shared": "workspace:*",
+        "@brain/surface": "workspace:*",
+        "@hono/trpc-server": "^0.4.2",
+        "@trpc/server": "^11.18.0",
         "drizzle-orm": "^0.44.6",
         "hono": "^4.6.3",
       },
@@ -64,6 +67,20 @@
         "@brain/tsconfig": "workspace:*",
       },
     },
+    "packages/surface": {
+      "name": "@brain/surface",
+      "version": "0.0.0",
+      "dependencies": {
+        "@brain/db": "workspace:*",
+        "@brain/shared": "workspace:*",
+        "@trpc/server": "^11.18.0",
+        "zod": "^3.25.76",
+      },
+      "devDependencies": {
+        "@brain/tsconfig": "workspace:*",
+        "@cloudflare/workers-types": "^4.20260530.1",
+      },
+    },
     "packages/tsconfig": {
       "name": "@brain/tsconfig",
       "version": "0.0.0",
@@ -95,6 +112,8 @@
     "@brain/ingest": ["@brain/ingest@workspace:packages/ingest"],
 
     "@brain/shared": ["@brain/shared@workspace:packages/shared"],
+
+    "@brain/surface": ["@brain/surface@workspace:packages/surface"],
 
     "@brain/tsconfig": ["@brain/tsconfig@workspace:packages/tsconfig"],
 
@@ -181,6 +200,8 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.28.1", "", { "os": "win32", "cpu": "ia32" }, "sha512-zvb/mB2bSCoJOpoCBgYKKpX6YM6mJBlBUVUtVj41DlZJVEB6/0CKlRYxP5wWl1C1ILiCoAU5wZZ4q1P3qeS6Eg=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.1", "", { "os": "win32", "cpu": "x64" }, "sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A=="],
+
+    "@hono/trpc-server": ["@hono/trpc-server@0.4.2", "", { "peerDependencies": { "@trpc/server": "^10.10.0 || >11.0.0-rc", "hono": ">=4.0.0" } }, "sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw=="],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 
@@ -285,6 +306,8 @@
     "@speed-highlight/core": ["@speed-highlight/core@1.2.17", "", {}, "sha512-Z92FwKpCtfaW1V0jTU/fh3QzYEZN8wDwrzRIBoADCJfn4mJCNcJN/XegifX7BDrQ8/h9Xh/JnbyMchL0FqXrkg=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
+    "@trpc/server": ["@trpc/server@11.18.0", "", { "peerDependencies": { "typescript": ">=5.7.2" }, "bin": { "intent": "bin/intent.js" } }, "sha512-JAvXOuNTxgXjIDfQaOvDq1j66LMNfDJUH1IU7Slfn8EvRv2EkH6ehu3A7zpYhjO0syHHiYg77v2lG2JFJgvw7Q=="],
 
     "@turbo/darwin-64": ["@turbo/darwin-64@2.10.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-EwvHThXzpY0KGd1/NAmuewI5D+aVa3Rl/OlxE36yfjUKb/+ySrfJrSlEFt8aD1OXwnnaHnQnPKHFndor0Zxlsg=="],
 

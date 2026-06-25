@@ -68,3 +68,5 @@ export {
   AuthMethodSchema,
   PrincipalSchema,
 } from "./principal"
+// ── Capability-authorization gate (admin ⊃ write ⊃ read) ─────────────────────
+export { scopeSatisfied } from "./scope"

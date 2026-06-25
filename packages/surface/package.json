@@ -1,31 +1,26 @@
 {
-  "name": "@brain/api",
+  "name": "@brain/surface",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "check": "biome check . && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "test": "vitest run",
-    "cf-typegen": "wrangler types"
+    "test": "bun test"
   },
   "dependencies": {
     "@brain/db": "workspace:*",
-    "@brain/ingest": "workspace:*",
     "@brain/shared": "workspace:*",
-    "@brain/surface": "workspace:*",
-    "@hono/trpc-server": "^0.4.2",
     "@trpc/server": "^11.18.0",
-    "drizzle-orm": "^0.44.6",
-    "hono": "^4.6.3"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*",
-    "@cloudflare/vitest-pool-workers": "^0.16.19",
-    "@cloudflare/workers-types": "^4.20260530.1",
-    "vitest": "^4.1.0",
-    "wrangler": "^4.104.0"
+    "@cloudflare/workers-types": "^4.20260530.1"
   }
 }

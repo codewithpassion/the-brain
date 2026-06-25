@@ -34,6 +34,10 @@ const EXPECTED_OPS = [
   "memory_review",
   "break_glass_read",
   "audit_export",
+  // admin (P6)
+  "mint_api_key",
+  "get_token_spend",
+  "memberships",
 ] as const
 
 describe("apps/api integration smoke", () => {

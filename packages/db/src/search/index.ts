@@ -15,6 +15,15 @@ export {
   thinkOp,
 } from "./ops"
 export { type HybridOptions, hybridSearch } from "./pipeline"
+export {
+  CostCeilingError,
+  MONTHLY_NEURON_CEILING,
+  makeBudgetPort,
+  makeRecallSink,
+  monthlyWindow,
+  recordThinkSpend,
+  USD_PER_NEURON,
+} from "./ports"
 export { rerankStage } from "./rerank-stage"
 export { type BuiltPrompt, buildSynthesisPrompt, SYNTH_SYSTEM } from "./synthesis"
 export type {
