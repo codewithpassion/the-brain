@@ -1,0 +1,234 @@
+{
+ "iteration": 5,
+ "priorProgression": [
+  26,
+  68,
+  61,
+  62
+ ],
+ "aggregateScore": 57,
+ "decisionsApplied": [
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s07.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s10.md"
+   ],
+   "changelog": [
+    "s07 \u00a77.3: rewrote the visibilityPredicate comment so owner/admin no longer bypass on the DEFAULT recall/think/graph path; named the single exception as ScopedDB.breakGlassReadPrivate (\u00a77.6) \u2014 a separate, deliberately-invoked, fail-closed admin-only call; stated the predicate stays un-omittable on every default read.",
+    "s07 \u00a77.5: added a 'single carve-out is BREAK-GLASS' paragraph after the enforcement block \u2014 default surfaces never expose other users' private/team rows; the only admin/owner path to private content is the role-gated, fail-closed, audited+alerted break-glass read; default-path guarantee explicitly unchanged.",
+    "s07 \u00a77.6: changed memory_audit.action DDL comment to include 'breakglass_read' (schema/columns unchanged).",
+    "s07 \u00a77.6: replaced the old 'compliance read' (complianceReadPrivate / action='compliance.read') paragraph with the BREAK-GLASS definition spelling out all four required gates: (a) org-scoped owner/admin role via requireRole('admin'); (b) explicit signal \u2014 admin-only tool memory.break_glass_read or breakGlass:true param \u2014 that fails CLOSED (403) for non-admins, no silent downgrade; (c) every read writes a distinct memory_audit row action='breakglass_read' (actor + diff carrying target principal + query/target_id, in the same db.batch) AND emits a high-severity alert to the alert sink (emitAlert via ctx.waitUntil, reusing the \u00a710.5/\u00a70 alerting pipeline \u2014 no new binding block); (d) reads facts+chunks without visibilityPredicate but still applies tenant_id (never bypassed, intra-tenant only) + scopePredicate, default path unchanged. References canaries #14/#15.",
+    "s10 \u00a710.6: extended canary #8's 'via ANY path' clause to include the break-glass surface invoked WITHOUT the admin role (non-admin breakGlass:true / memory.break_glass_read \u2192 403, no fall-through).",
+    "s10 \u00a710.6: added canary #14 (non-admin break-glass fails closed \u2192 403, reads no private content, for member/readonly users and restricted keys, both tool and breakGlass:true) and canary #15 (admin break-glass DOES return another user's private facts+chunks AND writes the breakglass_read audit row with actor+target-principal+query AND emits the alert \u2014 asserted via an in-test alert fake; no audit row or no alert = test failure).",
+    "s10 \u00a710.6: updated the CI-gating line 'canaries #1\u2013#13' \u2192 '#1\u2013#15'."
+   ],
+   "residual": [
+    "s07 \u00a77.6 line ~662 retains an 'owner/admin compliance read' surface for memory_recall_traces \u2014 this is the LOGS surface (distinct from private content) and was intentionally left unchanged, consistent with the original logs-only framing for traces; canary #12 still covers it.",
+    "s07 \u00a77.10 default-path edge case ('User B recalls user A private fact') was left as-is since it describes the default path correctly; no break-glass edge-case row was added (out of the \u00a77.3/\u00a77.5/\u00a77.6 + \u00a710.6 scope this task defined).",
+    "Alert sink is specified as reusing the existing \u00a710.5 Tier-2 / \u00a70 alerting pipeline (emitAlert) rather than a new wrangler binding block; if a dedicated ALERTS queue/binding is desired, \u00a710.1 would need a binding added (intentionally avoided per the no-new-binding-block guidance).",
+    "The build step will add the '#### Code references' blocks; none were added or removed."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s03.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s06.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s09.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/appendix.md"
+   ],
+   "changelog": [
+    "s03 \u00a73.2: changed 'exactly one index' to 'v1 provisions TWO Vectorize indexes \u2014 brain-chunks AND brain-entities' (both 1024-dim cosine, namespace=tenant). Updated the hard-ceilings bullet so each index is independently bounded by 10M vectors / 50k namespaces (sharding via tenant_shards.chunk_index/entity_index); added a 'Cost of the second index' note (entity-count-bounded, independent metadata-index budget: scope/team_id/visibility/embedding_model). Added brain-entities provisioning + 4 metadata-index commands to the wrangler block. Kept the trust_grade-NOT-indexed invariant and the canonical chunk upsert-metadata shape unchanged.",
+    "s03 \u00a73.1.3: flipped the deferral note \u2014 entity vectors (brain-entities) are now IN v1 powering search_entities; only cross-session SEMANTIC dedup stays deferred to Phase 3.5; brain-entities 'is provisioned'. Added 4 embed columns (embedded_at, embed_error, embedding_model, embedding_dims) to the entities DDL, mirroring chunks. \u00a73.1.4: tenant_shards.entity_index comment changed from 'deferred Phase 3.5' to 'in v1'.",
+    "s06 \u00a76.1: added the same 4 embed columns to the entities DDL (verbatim mirror of s03). \u00a76.2: added an 'embed-entities' Workflow step (embed canonical_name+description via bge-m3, upsert into brain-entities, vector.id==entities.id). \u00a76.5: search_entities added to the graph tool surface and marked in-v1. \u00a76.6: un-deferred entity vectors + search_entities (scoped vector search over brain-entities, tenant+scope/visibility gate, D1 re-check on entities, optional entity_fts fusion via RRF); kept deterministic key+alias dedup; EXPLICITLY kept cross-session semantic dedup deferred to Phase 3.5. \u00a76.6 cleanup step 3: 'deferred index' -> live v1 index. \u00a76.7: flow A now embeds/upserts entity vectors; added flow A' for search_entities.",
+    "s09 \u00a79.2.2: removed the '(deferred Phase 3.5 ...)' marker on search_entities and listed it as a v1 Graph tool with its scoped-search contract (ScopedVectorize namespace=tenantId, scope/visibility metadata filter + D1 re-check on entities with scopePredicate + {world,team} visibilityPredicate, optional entity_fts RRF fusion).",
+    "appendix \u00a76: replaced the entity-vector residual with a RESOLVED decision (entity vector search IN v1; semantic fact dedup REMAINS deferred) and split out the still-deferred Phase 3.5 semantic-dedup threshold tuning task. Added a 'Confirmed decisions (this revision)' block recording the 4 resolutions: (1) admin-vs-private = full audited+alertable break-glass read (\u00a77.6); (2) ingested-doc default visibility 'world'/tenant-wide (intended model); (3) org=tenant with row-scoping for intra-tenant clients (points to the \u00a71 Persona C resolution as single source of truth); (4) entity vector search in v1. Semantic-dedup-stays-deferred stated once (item 4)."
+   ],
+   "residual": [
+    "Per the advisor, the task's requirement that entity vectors carry 'the same staleness/per-row embedding-model tracking as chunks' required adding 4 columns (embedded_at, embed_error, embedding_model, embedding_dims) to the entities DDL in both s03 \u00a73.1.3 and s06 \u00a76.1 \u2014 done, mirrored verbatim. No 'Code references' blocks were added or removed (s03's embedded code-references block was left intact).",
+    "The s03 \u00a73.1.8 tenancy-column matrix was intentionally not changed: the new embed columns are not tenancy columns, and the entities row already lists its gate columns (scope/visibility/team_id)."
+   ]
+  }
+ ],
+ "reviews": [
+  {
+   "lens": "cf-correctness",
+   "score": 55,
+   "verdict": "major-revision",
+   "strengths": [
+    "Vectorize V2 limits in \u00a73.2 are verified-correct against live docs (10M vectors/index, 50k namespaces/index on Workers Paid, topK 100 without values/metadata and 50 with, 10 metadata indexes, 64B per value + per namespace name, 1536 max dims with 1024 used) \u2014 including the subtle and correct point that a metadata filter does not reduce topK and that {id,score}-only queries keep the full topK=100.",
+    "AI Gateway enforcement boundary (\u00a710.1 \u00a75f) is sophisticated and exactly right: native @cf/ Workers AI calls are billed via Workers AI pricing, not Unified Billing/BYOK, so AI Gateway spend limits cannot enforce a per-tenant cap for an all-@cf/ v1 model set; the app-level token_spend 429 pre-check before env.AI.run is correctly identified as the sole v1 enforcer, with gateway metadata retained for attribution only.",
+    "Workflows 1MiB step-output cap is correctly understood and designed around: extract-text returns only an R2 staging key + byte size and chunk-text stages content to R2, with explicit awareness that cf-graph's in-memory full-markdown return (verified in the actual source at ingestion.ts:77) would fail the cap; step-budget math (10k default / 25k max) and MAX_CHUNKS_PER_DOC=4000 / MAX_BODY_BYES=8MiB split rule keep a single oversized upload within the default step ceiling.",
+    "Vectorize namespace correctly framed (\u00a77.4) as a query-time partition that Cloudflare does NOT document as a security/isolation boundary, with the mandatory D1 row re-check (drop-don't-error, no existence leak) as the actual tenant-correctness authority \u2014 and ScopedVectorize hard-wiring namespace=tenantId so it cannot be forgotten.",
+    "bge-reranker-base usage shape verified against live docs (query + contexts[] index-significant + top_k + response[] of {id,score}, [0,1] sigmoid, $0.0031/M tokens) and treated defensively (output field names unpinned \u2192 blocking staging CI gate, degrade-to-RRF on malformed output) so a wrong index\u2192chunk remap can't silently mis-cite.",
+    "Batch constants and FSM ported faithfully from verified cf-graph source (CHUNK_DB_BATCH_SIZE=10 for the D1 100-bound-param cap, EMBED_BATCH_SIZE=50, KG_BATCH_SIZE=5, pending\u2192processing\u2192indexed|failed|duplicate); Queue consumer config (max_batch_size/max_retries/DLQ/max_concurrency/retry_delay) and deterministic Workflow instance ids for at-least-once idempotency are all primitive-correct."
+   ],
+   "weaknesses": [
+    {
+     "section": "s10",
+     "issue": "The self-declared-authoritative \u00a710.1 wrangler.jsonc manifest omits the brain-entities Vectorize binding entirely (only CHUNKS_INDEX is declared) and carries a comment 'brain-entities is NOT provisioned in v1 (entity vectors deferred, \u00a74.4 / Phase 3.5)'. This directly contradicts the integrated iter-4 decision in \u00a73.2/\u00a76.6/\u00a76.7/\u00a79.2 that search_entities + brain-entities are IN v1. Because \u00a710.1 says 'treat the block below as authoritative', and ScopedVectorize must be constructed against a real wrangler binding, search_entities has no ENTITIES_INDEX binding to call at runtime and throws \u2014 regardless of \u00a73.2's wrangler vectorize create commands (creating the index does not create the Worker binding). A v1-declared MCP tool cannot function as specified.",
+     "severity": "critical",
+     "recommendation": "Add the second Vectorize binding to \u00a710.1: { \"binding\": \"ENTITIES_INDEX\", \"index_name\": \"brain-entities\" }, and replace the 'NOT provisioned in v1' comment with the \u00a73.2 'TWO indexes in v1' note. Ensure ScopedVectorize resolves CHUNKS_INDEX vs ENTITIES_INDEX (and the future shard bindings via tenant_shards.entity_index)."
+    },
+    {
+     "section": "s04",
+     "issue": "\u00a74.5 line 1409 affirmatively instructs the KG extraction Workflow: 'entity vectors and semantic-dedup are deferred to Phase 3.5. The Workflow does NOT embed entities or upsert to brain-entities in v1; it writes the deterministic entity/relation/mention rows + entity_fts only. The brain-entities index is not provisioned until that phase.' This is the exact opposite of \u00a76.7 flow A and \u00a76.6, which say the same KG-extraction step DOES embed canonical_name+description and upsert into brain-entities in v1. The two sections give contradictory implementation instructions for the same Workflow step, so the v1 entity index would never be populated even if the binding existed.",
+     "severity": "critical",
+     "recommendation": "Rewrite \u00a74.5's v1-trim bullet to match \u00a76.6/\u00a76.7: the KG step embeds canonical_name+description via the embed() chokepoint and upserts to brain-entities (vector.id == entities.id) with embedded_at/embedding_model stamping; keep ONLY cross-session semantic dedup deferred. Cross-link \u00a76.7 flow A as the canonical step definition."
+    },
+    {
+     "section": "s07",
+     "issue": "\u00a77.4's create-metadata-index block (line 3116) provisions trust_grade as a brain-chunks Vectorize metadata index, and the budget note (line 3119) enumerates the index set as scope/team_id/trust_grade/embedding_model with visibility/source 'reserved'. This contradicts \u00a73.2's locked, emphatic decision that trust_grade is deliberately NOT a Vectorize metadata index and is NOT carried in the upsert blob (it lives only in the memory_use_policy sidecar, LEFT-JOINed at read). \u00a73.2's canonical four are scope/team_id/visibility/embedding_model. The \u00a77.4 set both wastes one of the scarce 10 index slots on a non-filtered column and omits visibility, which the intra-tenant gate's foldPartitionFilter actually needs \u2014 a Phase-0 deploy-ordering correctness issue since metadata indexes must exist before the first filtered upsert.",
+     "severity": "medium",
+     "recommendation": "Sync \u00a77.4's create-metadata-index list and budget enumeration to \u00a73.2's canonical four (scope, team_id, visibility, embedding_model); remove the trust_grade create-metadata-index line. Note line 3121's D1 re-check 'on trust_grade' is fine \u2014 that's a sidecar LEFT-JOIN read, not a Vectorize index."
+    },
+    {
+     "section": "s01",
+     "issue": "\u00a71.3 Non-Goals table (line 75) still lists 'No entity vectors / semantic dedup in v1 \u2014 The brain-entities index and nearest-vector merge are deferred to Phase 3.5'. This places an explicitly in-v1 feature in the NON-GOALS table, the strongest possible 'out of scope' signal, directly contradicting the integrated decision.",
+     "severity": "high",
+     "recommendation": "Split the Non-Goal: keep ONLY 'cross-session semantic entity/fact dedup (nearest-vector merge before insert)' as deferred; remove 'entity vectors / brain-entities index' from Non-Goals since search_entities + brain-entities are now v1 (per \u00a73.2/\u00a76/Appendix \u00a76)."
+    },
+    {
+     "section": "s02",
+     "issue": "\u00a72 line 381 states '`brain-entities` deferred to Phase 3+' (contradicting the v1 decision) AND frames AI Gateway tenant_id metadata as providing 'per-tenant spend caps (native, shipped 2026-06-05), backed by app-level token_spend'. The spend-cap framing is the reverse of the verified \u00a75f reality: for the all-@cf/ v1 model set the gateway-native spend caps cannot enforce (Workers AI @cf/ models bill outside Unified Billing/BYOK), so app-level token_spend is the SOLE enforcer, not a backstop to a native cap.",
+     "severity": "medium",
+     "recommendation": "In \u00a72: change 'brain-entities deferred to Phase 3+' to 'brain-chunks AND brain-entities (both 1024d/cosine) in v1'; and reword the AI-Gateway line so app-level token_spend is the primary/only v1 enforcer with gateway metadata as attribution-only, matching \u00a75f."
+    },
+    {
+     "section": "s07",
+     "issue": "\u00a77 Drizzle schema comment (line 2674) annotates entityIndex as \"'brain-entities' (deferred, Phase 3.5)\", while the parallel tenant_shards DDL at line 824 correctly annotates entity_index as \"'brain-entities' in v1\". Same column, two opposite lifecycle annotations \u2014 a residual stale comment from the pre-decision draft.",
+     "severity": "low",
+     "recommendation": "Update the line 2674 Drizzle comment to match line 824: \"'brain-entities' in v1 (entity vector search, \u00a73.2/\u00a76.6)\"."
+    },
+    {
+     "section": "s05",
+     "issue": "\u00a75.2 line 1692 states 'Entity vectors are deferred to Phase 3.5; v1 search is one index (brain-chunks).' Stale; contradicts the v1 decision and \u00a76.7's search_entities flow.",
+     "severity": "low",
+     "recommendation": "Reword to: 'v1 provisions two indexes (brain-chunks for chunk search, brain-entities for search_entities); chunk hybrid search in this section uses brain-chunks.'"
+    }
+   ],
+   "missing": [
+    "A single canonical 'v1 provisioned CF resources' table that every section derives from, so a scope decision (like entity vectors in v1) flips one source of truth instead of 6+ prose sites \u2014 the entity-vector contradiction is a direct symptom of its absence.",
+    "An explicit statement that the 50k-namespaces/index ceiling is the Workers PAID tier (Free is 1000); the platform is clearly Paid but \u00a73.2 never names the tier, so the headroom math is implicitly Paid-only.",
+    "A wrangler.jsonc validation/CI step that asserts every Vectorize index / Workflow / Queue named anywhere in the PRD has a matching binding in \u00a710.1 \u2014 this would have caught the missing ENTITIES_INDEX binding mechanically."
+   ],
+   "summary": "Against my lens (Cloudflare-primitive correctness within real V2 limits), this PRD is unusually accurate \u2014 I verified every load-bearing CF claim against live docs and they hold: Vectorize V2 (10M vectors/index, 50k namespaces/index on Paid, topK 100 without values/metadata dropping to 50 with, 10 metadata indexes, 64B value/namespace caps, 1536 max dims), Workflows (10k default / 25k max steps configurable, 1MiB non-stream step-output cap, ReadableStream bypass), the AI Gateway enforcement boundary (native @cf/ neuron-billed calls are NOT covered by gateway spend limits because they bill via Workers AI pricing not Unified Billing/BYOK \u2014 so the app-level token_spend 429 pre-check is the SOLE v1 enforcer, exactly as \u00a75f states), the bge-reranker-base query/contexts[]/top_k/response[] shape + $0.0031/M pricing, bge-m3's documented 60,000-token context + 1024 dims, and the correct framing that a Vectorize namespace is a query-time partition (not a documented security boundary) with the D1 row re-check as the authority. The batch constants (CHUNK=10/EMBED=50/KG=5) and the cf-graph 1MiB-in-memory anti-pattern the PRD fixes both check out against the actual source. What caps the score below 60 is a single CRITICAL but pervasive defect: the iteration-4 product decision to pull entity vector search (brain-entities index + search_entities) INTO v1 was integrated into \u00a71.5/\u00a73.2/\u00a76/\u00a79.2/Appendix but the reconciliation MISSED several runtime-fatal sites \u2014 most importantly the self-declared-authoritative \u00a710.1 wrangler manifest, which omits the brain-entities Vectorize BINDING entirely (so ScopedVectorize has no binding to construct \u2192 search_entities throws at runtime even though \u00a73.2's create commands make the index exist), and \u00a74.5 line 1409 which AFFIRMATIVELY instructs the KG extraction Workflow to NOT embed/upsert entities in v1 \u2014 directly opposing \u00a76.7 flow A which says that same step DOES upsert brain-entities. Two independent runtime-fatal contradictions on the exact decision this re-score was meant to confirm integrated. Plus a medium provisioning contradiction in \u00a77.4 (stale pre-decision metadata-index set including trust_grade, which \u00a73.2 explicitly forbids as an index). The design is feasible and the primitive knowledge is excellent; the integration is incomplete."
+  },
+  {
+   "lens": "completeness",
+   "score": 54,
+   "verdict": "major-revision",
+   "strengths": [
+    "Entity vector search is coherently specified across the DESIGN sections: \u00a73.2 (two-index provisioning + per-index ceilings/metadata budget), \u00a76.1 (entities table now carries embedded_at/embed_error/embedding_model/embedding_dims + entity_fts virtual table), \u00a76.2 (explicit embed-entities Workflow step with retries), \u00a76.3/\u00a76.6 (upsert + scoped search + orphan cleanup against a live index), \u00a76.7 flow A', \u00a76.5 + \u00a79.2.2 tool catalog. Within \u00a76 it is internally consistent end-to-end.",
+    "Three of the four product decisions propagated cleanly and consistently: doc/page default visibility='world' (chunks line 601, pages line 640, capability matrix line 1036, decision #2); org=tenant soft-scope row-partitioning with enforced allowed_scopes (\u00a71 Persona C, \u00a77.3, decision #3); and the admin break-glass read, which is unusually thorough \u2014 four named gates in \u00a77.6, audit action 'breakglass_read', alert emission, and two dedicated blocking canaries (#14 fail-closed, #15 returns-content-plus-audit-plus-alert).",
+    "The facts visibility enum is now the canonical 3-value {private,team,world} in both DDL reproductions (\u00a73.1 line 921 and \u00a78.1 line 3437) and they match, with \u00a73.1 explicitly deferring authority to \u00a78.1.",
+    "The section-numbering divergence (inline \u00a7N = master-plan numbering, not document headings) is explicitly documented in the convention note and assembly notes, so cross-refs like 'read path is \u00a74.3' / 'backfill spine is \u00a76' are intentional, not errors.",
+    "The trust_grade-not-in-Vectorize design is well-argued and self-consistent within \u00a73.2/\u00a75.2 (lives only in the memory_use_policy sidecar, LEFT-JOINed post-hydration)."
+   ],
+   "weaknesses": [
+    {
+     "section": "s10",
+     "issue": "Entity vector search is undeployable as written: the \u00a710.1 wrangler.jsonc binding manifest declares only {binding:'CHUNKS_INDEX', index_name:'brain-chunks'} and carries the comment 'brain-entities is NOT provisioned in v1 (entity vectors deferred, \u00a74.4 / Phase 3.5)' (line 4014). There is no ENTITY_INDEX binding anywhere in the document. \u00a76.2/\u00a76.6/\u00a76.7/\u00a79.2.2 all call ScopedVectorize against brain-entities, but with no binding the search_entities and embed-entities code has nothing to call. This directly contradicts the resolved entity-vector-in-v1 decision (Appendix #4) and \u00a73.2's two-index provisioning. CRITICAL \u2014 caps the score below 60.",
+     "severity": "critical",
+     "recommendation": "In \u00a710.1 add a second vectorize binding {binding:'ENTITY_INDEX', index_name:'brain-entities'} and delete the 'NOT provisioned in v1' comment. Because ScopedVectorize was lifted from openbrains as a SINGLE-index wrapper (\u00a72.5/\u00a72.4), also specify that ScopedVectorize selects CHUNKS_INDEX vs ENTITY_INDEX per call (e.g. an index arg or a chunks/entities method split) so the fix is actually buildable, not just a binding line. \u00a73.2 + Appendix #4 are the single source of truth; conform \u00a710.1 to them."
+    },
+    {
+     "section": "s10",
+     "issue": "\u00a710.4 'Vectorize provisioning' creates ONLY brain-chunks (lines 4175-4180) \u2014 the brain-entities create + create-metadata-index commands from \u00a73.2 (lines 1076-1080) are entirely absent from the deploy-ordering section. Additionally the \u00a710.4 brain-chunks metadata indexes contradict \u00a73.2: \u00a710.4 creates trust_grade (line 4178) which \u00a73.2 explicitly bans as a Vectorize metadata index (lines 1060/1072: 'trust_grade is intentionally NOT indexed here'), and \u00a710.4 omits the visibility index that \u00a73.2 creates (line 1070). So the two provisioning blocks disagree on three points (brain-entities existence, trust_grade, visibility).",
+     "severity": "critical",
+     "recommendation": "Replace the \u00a710.4 Vectorize provisioning block with the \u00a73.2 canonical block verbatim: brain-chunks indexes = scope, team_id, visibility, embedding_model (drop trust_grade, add visibility), plus the full brain-entities create + its four create-metadata-index commands. \u00a73.2 is canonical; \u00a710.4 is the stale copy."
+    },
+    {
+     "section": "s04",
+     "issue": "\u00a74.4 (line 1409) actively instructs the implementer AGAINST the resolved decision: 'entity vectors and semantic-dedup are deferred to Phase 3.5. The Workflow does NOT embed entities or upsert to brain-entities in v1; it writes the deterministic entity/relation/mention rows + entity_fts only. The brain-entities index is not provisioned until that phase.' This directly negates \u00a76.2's embed-entities step and \u00a76.6, and would cause an implementer following \u00a74 to omit the very step \u00a76 requires.",
+     "severity": "high",
+     "recommendation": "Rewrite the \u00a74.4 'v1 trim' note to match \u00a76.2/\u00a76.6: entity vectors ARE embedded and upserted to brain-entities in v1 (the embed-entities Workflow step); only cross-session SEMANTIC dedup remains deferred to Phase 3.5. Mirror the precise 'vectors in v1 / semantic dedup deferred' wording already used at \u00a73.2 line 1055."
+    },
+    {
+     "section": "s07",
+     "issue": "The \u00a77.2 Drizzle schema for tenant_shards (line 2674) comments entityIndex as \"'brain-entities' (deferred, Phase 3.5)\", while the \u00a73.1 D1 catalog reproduction of the SAME column (line 824) comments it \"'brain-entities' in v1 (entity vector search, \u00a73.2/\u00a76.6)\". The same shard-routing column carries opposite in-v1/deferred annotations in two places.",
+     "severity": "high",
+     "recommendation": "Update the \u00a77.2 Drizzle comment (line 2674) to '\"brain-entities\" in v1 (entity vector search, \u00a73.2/\u00a76.6)' to match the \u00a73.1 catalog and the resolved decision."
+    },
+    {
+     "section": "s01",
+     "issue": "\u00a71.3 Non-Goals (line 75) still lists 'No entity vectors / semantic dedup in v1. The brain-entities index and nearest-vector merge are deferred to Phase 3.5, gated behind a flag.' and \u00a71.7 scope table (line 196) lists 'Entity vectors + semantic dedup (Phase 3.5)' in the deferred column. Both contradict the resolved decision that entity vectors/search are in v1.",
+     "severity": "medium",
+     "recommendation": "In \u00a71.3 and \u00a71.7, split the bundled 'entity vectors + semantic dedup' item: move entity vectors / search_entities to the IN-V1 column, and keep ONLY cross-session semantic entity/fact dedup as deferred to Phase 3.5 \u2014 matching the \u00a76 distinction and Appendix #4."
+    },
+    {
+     "section": "s02",
+     "issue": "\u00a72.7 (line 381) states the storage substrate is 'Vectorize V2 (brain-chunks, 1024d/cosine; brain-entities deferred to Phase 3+)', contradicting the in-v1 decision and \u00a73.2's two-index provisioning.",
+     "severity": "medium",
+     "recommendation": "Update \u00a72.7 to list both indexes as v1: 'brain-chunks AND brain-entities (1024d/cosine)', with only semantic dedup noted as deferred."
+    },
+    {
+     "section": "s05",
+     "issue": "\u00a75.2 (line 1692) states 'Entity vectors are deferred to Phase 3.5; v1 search is one index (brain-chunks).' This contradicts the in-v1 entity search and the existence of a second index.",
+     "severity": "medium",
+     "recommendation": "Revise to: v1 runs two indexes (brain-chunks for chunk search, brain-entities for search_entities); only semantic dedup is deferred. Keep the point that the chunk hybrid arm itself is one index if that is the intended narrower claim, but do not assert entity vectors are deferred."
+    },
+    {
+     "section": "s09",
+     "issue": "The break-glass tool memory.break_glass_read is defined in \u00a77.6 (line 3242) and exercised by blocking canaries #14/#15, but it does NOT appear in the \u00a79.2.2 'Admin (admin scope only)' tool catalog (line 3865 lists only list_memberships, invite_member, create_team, mint_api_key, get_token_spend). A tested, role-gated tool is absent from the unified catalog that \u00a79.2 claims cannot drift from the registry.",
+     "severity": "medium",
+     "recommendation": "Add memory.break_glass_read (admin-only, audited+alerted) to the \u00a79.2.2 Admin tool list so the catalog matches the \u00a77.6 contract and the \u00a710.6 canary tools."
+    },
+    {
+     "section": "s07",
+     "issue": "\u00a77.5 prose (line 3200) describes the facts store as carrying 'visibility \u2208 {private,world}' \u2014 a stale 2-value enum inherited from gbrain \u2014 which contradicts the canonical 3-value DDL CHECK (visibility IN ('private','team','world')) in both \u00a78.1 (line 3437) and \u00a73.1 (line 921), and the \u00a77.5 mapping table itself (which describes all three of private/team/world).",
+     "severity": "low",
+     "recommendation": "Change the line 3200 enumeration from 'visibility \u2208 {private,world}' to 'visibility \u2208 {private,team,world}' to match the facts DDL and the \u00a77.5 access-tier table."
+    }
+   ],
+   "missing": [],
+   "summary": "Re-score under the completeness/internal-consistency lens, focused on whether entity vector search is now coherent end-to-end and whether the four resolved decisions propagated cleanly. The verdict turns on one unresolved critical: the entity-vector-in-v1 decision is fully specified on the design side (\u00a73.2 provisions brain-entities; \u00a76.2 embed-entities step; \u00a76.3/\u00a76.6 upsert; \u00a76.7 search_entities flow; \u00a79.2.2/\u00a76.5 tool catalog; \u00a76.1 entities table carries embedded_at/embed_error/embedding_model/embedding_dims + entity_fts) but is NOT reconciled at the deploy/binding layer and leaves a trail of stale \"deferred to Phase 3.5 / NOT provisioned in v1\" markers that directly negate it. Concretely: the \u00a710.1 wrangler.jsonc manifest declares only CHUNKS_INDEX (no ENTITY_INDEX binding) and comments \"brain-entities is NOT provisioned in v1\"; \u00a710.4 Vectorize provisioning creates only brain-chunks; and \u00a74.4 actively instructs the implementer that \"the Workflow does NOT embed entities or upsert to brain-entities in v1.\" As written, the search_entities / embed-entities code calls a Vectorize binding that does not exist \u2014 the feature is internally undeployable. This is a hard contradiction in the requirement set, not mere prose drift, so it caps the score below 60. The fix is mechanical (one binding + index-selection in ScopedVectorize, brain-entities provisioning commands, and ~6 stale-marker edits), and Appendix decision #4 + \u00a73.2 already declare themselves the single source of truth, so the revision direction is unambiguous: update the stale sections to match \u00a73.2, never the reverse. Two secondary inconsistencies in the same deploy layer (trust_grade indexed in \u00a710.4 but explicitly banned as a Vectorize metadata index in \u00a73.2; visibility indexed in \u00a73.2 but omitted in \u00a710.4) compound the picture that \u00a710 was not swept against \u00a73.2. The other three decisions (break-glass, doc default visibility=world, org=tenant row-scoping) are well-propagated and consistent, with only minor residue (break-glass tool missing from the \u00a79.2.2 admin catalog; one stale 2-value facts visibility phrase)."
+  },
+  {
+   "lens": "security-isolation",
+   "score": 62,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Break-glass over private memory is fully specified with all four gates: role-gated off the resolved Principal, fails CLOSED for non-admins (403, no private content) incl. the breakGlass:true param path, mandatory in-db.batch memory_audit row carrying actor+target-principal+query (un-bypassable by construction), plus a real-time alert; covered by blocking canaries #14 (fail-closed) and #15 (returns private content AND writes audit AND emits alert).",
+    "visibilityPredicate is un-omittable at the single ScopedDB choke-point on EVERY row carrying visibility/team_id/user_id (readFacts, hydrateChunks, and the graph nodeGate), drop-don't-error like the tenant gate; the default recall/think/graph/get_session_context paths provably never bypass it, and owner/admin get no default-path private bypass.",
+    "The new brain-entities vector index (search_entities, pulled into v1) carries the identical isolation contract as the chunk arm: namespace=tenantId hard-wired in ScopedVectorize, scope+{world,team}-visibility folded into the metadata filter, then the AUTHORITATIVE D1 re-check on the entities row via scopePredicate + the {world,team} visibilityPredicate; the entity KG node space is consciously {world,team}-only (no private tier) and scope-PARTITIONED in the dedup key, so cross-scope merge is structurally impossible.",
+    "Graph arm has no raw-SQL escape hatch: traverse_graph/get_links/get_backlinks/find_orphans/expandFrontier are typed ScopedDB methods that inject tenant_id + scopePredicate (+ visibilityPredicate via nodeGate) on every frontier hop and on seed/anchor resolution (resolveScopedNode/nodeVisible), drop-don't-error with no existence leak; canary #13 tests the entity-arm cross-scope hop.",
+    "Cross-scope mint-time escalation fix is correct in the authoritative \u00a77.1/\u00a77.2: a key's allowed_scopes is pinned to intersect(requestedGrant, minter.allowedScopes), so a restricted minter can never widen to '*'; the apiKey.mint audit row records the pinned grant.",
+    "Table-driven isolation canary meta-test treats visibility as a third isolation axis spanning facts AND chunks AND the graph/entity arms, so a new read surface that skips readFacts/visibilityPredicate or the typed scope-gated frontier methods fails the meta-test; #1-#15 are required blocking merge checks."
+   ],
+   "weaknesses": [
+    {
+     "section": "s09",
+     "issue": "The \u00a79.0.1 surface-layer edge-resolver prose is the VERBATIM pre-iter-3 model: the machine-token branch (\"`allowedScopes` defaults to '*'\") and the API-key branch (\"`allowedScopes` defaults to '*'\") never read the stored `api_keys.allowed_scopes` grant column that \u00a77.1's mint-time escalation fix introduced. \u00a79 only reads `allowed_scopes` from `memberships` (the JWT path), never from the key. An implementer who builds the resolver from \u00a79.0.1's concrete pseudocode (rather than the \u00a77.2 it nominally points to) reopens the Persona-C CROSS-SCOPE escalation the entire iter-3 fix closed: a restricted client-A staffer mints/uses a bk_ key that resolves to allowedScopes='*' and reads every client scope's world/team rows in the tenant. (Role stays 'member', so visibilityPredicate still excludes others' private/team content \u2014 this is a cross-scope/SC1 breach, NOT a private-content leak.)",
+     "severity": "high",
+     "recommendation": "Rewrite the \u00a79.0.1 step-2/step-3 resolver bullets to MATCH \u00a77.2 verbatim: for the bk_ path, set `allowedScopes = row.allowed_scopes === null ? '*' : parseScopeGrant(row.allowed_scopes)` (NULL means '*' ONLY because mint-time guaranteed NULL is stored only when the minter was '*'); delete both \"`allowedScopes` defaults to '*'\" clauses. State explicitly that the key/token data-partition grant is the stored, mint-time-pinned value, not a hard-coded '*'. Add a one-line cross-check that the \u00a79 resolver is generated from the same code as \u00a77.2 (single source) so the two cannot drift again."
+    },
+    {
+     "section": "s09",
+     "issue": "\u00a77.6 mandates an admin-only `memory.break_glass_read` MCP tool and canary #14 explicitly 'calls the `memory.break_glass_read` tool', but the \u00a79.2.2 admin tool catalog (list_memberships, invite_member, create_team, mint_api_key, get_token_spend) omits it. The break-glass control exists in \u00a77.6 but its surface wiring is unlisted in the section that owns the tool catalog \u2014 a canary references a tool the catalog never registers.",
+     "severity": "medium",
+     "recommendation": "Add `memory.break_glass_read` to the \u00a79.2.2 Admin (`admin` scope only) tool list with its Operation scope set to 'admin', an explicit note that it is registered ONLY for role in {owner,admin} (and a breakGlass:true param on the shared read entry point fails closed \u2192 403 for non-admins), and a \u00a77.6 cross-reference. Confirm it is wired into the unified registry so tools/list, tRPC, and CLI surface it consistently."
+    },
+    {
+     "section": "s07",
+     "issue": "Entity-vector-in-v1 (confirmed decision #4) is only half-threaded into the authoritative tenancy section: \u00a77.1's Drizzle `tenant_shards.entityIndex` carries the comment \"'brain-entities' (deferred, Phase 3.5)\" and the column stays nullable, while \u00a73.1.4's DDL twin says \"'brain-entities' in v1\". A null entity_index means ScopedVectorize cannot resolve the entity index per request, so search_entities (now a v1 surface) silently breaks or falls back unscoped \u2014 an operational/contract defect (not itself a leak, but it undermines the gate's substrate).",
+     "severity": "medium",
+     "recommendation": "Update \u00a77.1's `tenantShards` Drizzle: change the entityIndex comment to \"'brain-entities' in v1 (entity vector search, \u00a73.2/\u00a76.6)\" matching \u00a73.1.4, and state the v1 provisioning seeds every tenant_shards row with entity_index='brain-entities' (so ScopedVectorize.forPrincipal can always resolve it). If a deployment disables entity vectors, make search_entities degrade explicitly rather than resolve a null index."
+    },
+    {
+     "section": "s01",
+     "issue": "Cross-section contradiction on whether entity vectors are in v1: \u00a71.3 Non-Goals ('No entity vectors / semantic dedup in v1... deferred to Phase 3.5'), \u00a71.7 scope-boundary table (Entity vectors listed as deferred), and \u00a75.2 ('Entity vectors are deferred to Phase 3.5; v1 search is one index (brain-chunks)') all directly contradict \u00a73.2/\u00a76.6/\u00a79.2.2/appendix decision #4 ('brain-entities IS provisioned in v1'). The appendix claims decision #4 was 'threaded into its owning section' but the \u00a71 framing tables were not updated. Doc-integrity, not a leak, but it leaves the authoritative-section question ambiguous for a reader who starts at \u00a71.",
+     "severity": "low",
+     "recommendation": "Reconcile \u00a71.3 (split the non-goal: keep 'No cross-session SEMANTIC entity/fact dedup in v1' deferred; remove 'entity vectors' from the deferred set), \u00a71.7 (move entity vector search to the in-v1 column), and \u00a75.2 line ~1692 ('v1 search is one index') to say two indexes (brain-chunks + brain-entities). Make every entity-vector mention point to \u00a73.2/\u00a76.6 as authoritative."
+    },
+    {
+     "section": "s07",
+     "issue": "The task's special-focus phrasing requires every break-glass read to 'force an audit + alert row'. The audit row is durable and in-batch (correct), but the alert is best-effort via ctx.waitUntil (correctly NOT delivery-guaranteed). Separately, \u00a77.6(c) says the audit row shares the read's db.batch 'so an unaudited break-glass read is impossible by construction', but does not explicitly state the batch is AWAITED and committed before the private rows are returned to the caller (fail-closed on audit-write failure). Atomicity is implied by D1 db.batch but the await-before-return ordering is not spelled out.",
+     "severity": "low",
+     "recommendation": "In \u00a77.6(c)/(d), state explicitly that breakGlassReadPrivate awaits the db.batch (read + audit) to commit BEFORE returning any private rows, so an audit-write failure fails the whole call closed (no private content returned). Keep the alert as best-effort waitUntil but add: a break-glass read whose db.batch (audit) did not commit returns nothing \u2014 the durable audit row, not the alert, is the fail-closed gate (canary #15 already asserts the audit row; extend it to assert no rows are returned when the audit insert is forced to fail)."
+    }
+   ],
+   "missing": [],
+   "summary": "Re-score under the multi-tenant + intra-tenant isolation lens. The security spine is sound and the four targeted iteration-4/decision items are genuinely landed in the AUTHORITATIVE sections: (1) the admin break-glass read over private memory is role-gated (`requireRole('admin')` off the resolved Principal), fails CLOSED for non-admins incl. `breakGlass:true` without the role (403, returns no private content, \u00a77.6 a/b, canary #14), writes a distinct in-`db.batch` `memory_audit` row with actor + target-principal + query (durable, un-bypassable) and fires a best-effort `waitUntil` alert (canary #15); (2) the default recall/think/graph/get_session_context paths NEVER bypass `visibilityPredicate` \u2014 owner/admin do not see others' private/team rows on any default path, break-glass is the single explicit logged carve-out; (3) the new `brain-entities` vector arm (`search_entities`, pulled into v1) carries the SAME gate as chunks \u2014 `ScopedVectorize` hard-wires `namespace=tenantId`, scope/{world,team}-visibility folded into the metadata filter, then the authoritative D1 re-check on `entities` via `scopePredicate` + the `{world,team}` `visibilityPredicate` (\u00a73.2/\u00a76.6/\u00a76.7/\u00a79.2.2), and the entity graph arm is scope-partitioned with a typed `nodeGate` (no raw-SQL passthrough); (4) the cross-scope mint-time escalation fix (`allowed_scopes = intersect(requestedGrant, minter.allowedScopes)`) is correct in \u00a77.1/\u00a77.2. No non-admin can reach private content via recall/think/graph/entity-search/break-glass given the AUTHORITATIVE spine. The deductions are reconciliation/threading gaps, not spine breaks: (A) \u00a79.0.1's surface-layer resolver prose is the VERBATIM pre-iter-3 model \u2014 the `bk_`/`bdev_` branches state \"`allowedScopes` defaults to '*'\" and never read the stored `api_keys.allowed_scopes` grant, so an implementer building from \u00a79.0.1 (rather than the \u00a77.2 it points to) reopens the Persona-C CROSS-SCOPE escalation (a client-A staffer's key reading client-B world/team rows; role stays `member` so private stays excluded \u2014 NOT a private-content leak); high, not critical, because \u00a79.0.1 explicitly designates \u00a77.2 as authoritative and \u00a77.2 is right. (B) \u00a77.6 mandates an admin-only `memory.break_glass_read` MCP tool and canary #14 calls it, but the \u00a79.2.2 admin catalog omits it. (C) entity-vector-in-v1 (decision #4) is only half-threaded: \u00a73.2/\u00a73.1.4/\u00a76/\u00a79.2.2/appendix say \"brain-entities in v1,\" but \u00a71.3/\u00a71.7/\u00a75.2 still say \"deferred to Phase 3.5\" and the \u00a77.1 Drizzle `tenant_shards.entityIndex` comment says \"deferred, Phase 3.5\" and stays nullable \u2014 a null `entity_index` would leave `ScopedVectorize` unable to resolve the entity index, breaking `search_entities` operationally (not a leak). No unresolved critical; authoritative isolation spine holds. Low-60s, consistent with the improving 61->62 progression."
+  }
+ ]
+}

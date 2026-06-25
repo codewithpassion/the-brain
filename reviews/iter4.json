@@ -1,0 +1,274 @@
+{
+ "iteration": 4,
+ "priorProgression": [
+  26,
+  68,
+  61
+ ],
+ "aggregateScore": 62,
+ "reviews": [
+  {
+   "lens": "cf-correctness",
+   "score": 72,
+   "verdict": "major-revision",
+   "strengths": [
+    "Queue spine enqueues references only (payload to R2, ref in message) explicitly to stay under the message-size cap, and uses per-message ack/retry + real DLQ \u2014 a correct, idiomatic use of Queues that the mined repos lacked.",
+    "Deterministic Workflow instance ids (ingest-${tenantId}-${fingerprint}) for idempotency, with the retention-window caveat correctly noted and a durable (tenant,scope,fingerprint) UNIQUE backstop \u2014 accurate understanding of the create()-rejects-duplicate semantics and its expiry.",
+    "AI Gateway is correctly NOT modeled as a binding (invoked via env.AI.run gateway option), and the doc correctly identifies that AI Gateway spend limits do not price all-@cf/ neuron calls, falling back to an app-level token_spend 429 pre-check as the real enforcer.",
+    "All three locked models verify in the live catalog; MODEL_CTX_TOKENS=24_000 matches llama-3.3-70b-instruct-fp8-fast's documented 24,000-token window exactly.",
+    "D1 single-writer write-throughput is treated as a distinct scale axis from the 6 GB byte budget, with recall-trace writes moved off the synchronous path via ctx.waitUntil and audit rows kept in-batch for atomicity \u2014 a correct read of D1 transaction semantics (no interactive cross-await tx).",
+    "FTS5 external-content isolation via JOIN-recheck (MATCH cannot carry tenant_id) is correctly diagnosed and the cf-graph MATCH...AND workspace_id=? trap is explicitly rejected.",
+    "Workflow step cap (10k default / 25k max on Paid) is correctly cited and MAX_CHUNKS_PER_DOC=4000 yields ~1284 steps, comfortably within the default."
+   ],
+   "weaknesses": [
+    {
+     "section": "s04",
+     "issue": "CRITICAL: The Batch-Ingest Workflow's `extract-text` step returns the full extracted markdown and `chunk-text` returns every chunk's `content` as the step's return value. Non-stream step.do() output is hard-capped at 1 MiB (confirmed in Workflows limits docs). Any document whose extracted text exceeds ~1 MiB fails extract-text, and the chunk-text array (\u2248 whole doc again) fails for even smaller docs. This breaks the exact 'durable at scale'/SC5 large-single-upload case that \u00a74.3's MAX_CHUNKS_PER_DOC split is presented to defend \u2014 and the split is keyed on chunk COUNT, not extracted-text BYTES, so it does not prevent this. The doc cites the 1 MiB step-output cap only for the Enumerator, never for these two ingest steps.",
+     "severity": "critical",
+     "recommendation": "In \u00a74.3: make `extract-text` persist the extracted markdown to R2 inside the step and return only the r2_key (or return a ReadableStream<Uint8Array>, the documented large-output escape hatch); make `chunk-text` persist chunk rows (or stage them in R2) and return only ids/count + the per-chunk metadata needed downstream, never the chunk `content` blobs. State the 1 MiB non-stream step-output limit alongside the existing batching constants in 'Why the constants are load-bearing', and make the giant-upload split key on extracted-text byte size (R2 object size after extract), not just chunk count."
+    },
+    {
+     "section": "s05",
+     "issue": "HIGH: The claim 'Vectorize caps topK at 50 with a metadata filter / 100 without' (repeated in \u00a73.2, \u00a74.9, and \u00a75.3.2) is incorrect. The real semantics: topK max is 100; it drops to 50 only when the query sets returnValues:true or returnMetadata:'all' (raised from 20 in Mar 2026). A metadata FILTER does not reduce topK. Because vectorSearch returns only {id,score} (no values, no full metadata) and re-checks via D1, it can request topK=100 even with a filter. The \u00a75.3.2 recall-cliff argument that 'over-fetch (topK=min(50,limit*4)) cannot fix this because it is itself capped at 50 \u2014 the very ceiling that caused the cliff' therefore rests on a phantom limit.",
+     "severity": "high",
+     "recommendation": "Correct the cap statement everywhere to: 'topK max 100; reduced to 50 only when returnValues:true or returnMetadata:\"all\" \u2014 our query returns neither, so topK=100 is available even with a metadata filter.' Re-state the recall-cliff reasoning in \u00a75.3.2: the cliff is real for a restricted principal whose granted content ranks below the tenant-wide top-100, and foldPartitionFilter is still the right fix, but justify it as 'spend the topK-100 budget inside the grant' rather than 'because over-fetch is capped at 50.' Update \u00a73.2 / \u00a74.9 / \u00a710.7 numbers to 100."
+    },
+    {
+     "section": "s05",
+     "issue": "MEDIUM: bge-m3's context window is 60,000 tokens per the current Workers AI model page, not 8,192. The PRD asserts '8192-token context' as a verified fact in \u00a72.7, \u00a75.1, and \u00a75.7, sets MAX_EMBED_INPUT_TOKENS=8192 as the embed budget guard (returning null \u2192 keyword-only on longer input), and cites '8192 vs qwen3's 4096' as the model-choice rationale. The guard is thus over-restrictive (silently drops valid long chunks from the vector arm) and the stated rationale is factually wrong.",
+     "severity": "medium",
+     "recommendation": "In \u00a75.1: raise MAX_EMBED_INPUT_TOKENS toward the real bge-m3 limit (60,000 tokens) or set it from the model's documented window rather than 8192; keep the dimension assertion. Fix the '8192-token context' claim in \u00a72.7/\u00a75.1/\u00a75.7 to 60,000, and either drop or re-ground the 'chosen over qwen3 for 8192 vs 4096' rationale (the real differentiator is multilingual + 60k context)."
+    },
+    {
+     "section": "s05",
+     "issue": "MEDIUM (better-primitive): \u00a75.3.2 falls back to running 'one filtered query per granted scope' and unioning results for multi-scope grants, and treats the private/team visibility tiers as an OR-of-equalities 'not expressible in one filter.' Vectorize metadata filtering supports the $in / $nin operators, so both cases collapse to a single query.",
+     "severity": "medium",
+     "recommendation": "In \u00a75.3.2: replace the per-scope fan-out with a single filter {scope:{$in:[...granted scopes]}} and express the visibility tier as {visibility:{$in:['world','team']}} (plus the private-author case handled by the D1 re-check). Note the metadata-value 64-byte indexability caveat still applies per value; the D1 re-check remains authoritative. This removes the multi-query union path and its eviction-bound bookkeeping entirely."
+    },
+    {
+     "section": "s04",
+     "issue": "LOW: Internal inconsistency in the cited Workflow step cap \u2014 \u00a74.0 says 'under the 25k-step cap' while \u00a74.3 and \u00a78.6 say '10k soft / 25k hard.' Both are now reconcilable (10k default, configurable to 25k on Paid), but the wrangler.jsonc in \u00a710.1 does not set workflows[].limits.steps, so the effective cap is the 10k default, not 25k. The doc should not imply 25k is available without the config.",
+     "severity": "low",
+     "recommendation": "Standardize wording to '10,000 steps default, raisable to 25,000 via workflows[].limits.steps on Workers Paid.' If any path is intended to rely on >10k steps, add \"limits\": { \"steps\": 25000 } to the relevant workflow entry in \u00a710.1; otherwise state that the design stays within the 10k default."
+    }
+   ],
+   "missing": [],
+   "summary": "Iter-4 is genuinely strong on Cloudflare-primitive discipline: isolation chokepoints, deterministic Workflow instance ids, Queues-with-DLQ + references-only enqueue (under the 128 KB message cap), D1 100-param batching, the app-level token_spend 429 enforcer (correctly hedging that AI Gateway spend limits do not price @cf/ neuron calls), and per-row embedding-model staleness are all used correctly. All three locked models verify in the live Workers AI catalog and llama-3.3-70b-fp8-fast is exactly the 24,000-token window the synthesis guard assumes. However, four CF-correctness defects survive, one of them in the core ingest Workflow: (1) CRITICAL \u2014 the Batch-Ingest Workflow's `extract-text` step returns the entire extracted markdown and `chunk-text` returns every chunk's content as step return values, but non-stream `step.do()` output is hard-capped at 1 MiB; any document whose extracted text exceeds ~1 MiB fails these steps regardless of chunk count, breaking exactly the 'durable at scale / SC5' case \u00a74.3's chunk-split defense claims to cover (the split is keyed on chunk COUNT, not extracted-text BYTES, so it does not save this). (2) HIGH \u2014 the repeated 'Vectorize topK \u2264 50 with a metadata filter / \u2264 100 without' claim (\u00a73.2, \u00a74.9, \u00a75.3.2) is factually wrong: topK max is 100 and only drops to 50 when the query returns values or full metadata; a metadata FILTER does not lower it. Since vectorSearch returns only {id,score} and re-checks via D1, it can use topK=100 even when filtering \u2014 so the \u00a75.3.2 recall-cliff argument ('over-fetch is itself capped at 50, the very ceiling that caused the cliff') rests on a phantom limit (the foldPartitionFilter fix is still sound, only its justification is wrong). (3) MEDIUM \u2014 bge-m3's context window is 60,000 tokens, not the 8,192 the PRD asserts in three places and uses as MAX_EMBED_INPUT_TOKENS and as the stated reason for choosing it over qwen3; the guard is over-restrictive (silently returns null \u2192 keyword-only) and the rationale is incorrect. (4) MEDIUM (better-primitive) \u2014 Vectorize metadata filtering supports $in/$nin, so \u00a75.3.2's 'one filtered query per granted scope' fan-out and the private/team OR-of-equalities both collapse to a single {scope:{$in:[...]}} / {visibility:{$in:['world','team']}} filter, removing the multi-query path entirely. The critical step-output issue caps the score below the prose quality would otherwise earn."
+  },
+  {
+   "lens": "completeness",
+   "score": 63,
+   "verdict": "major-revision",
+   "strengths": [
+    "\u00a73 table DDL is faithful to the owning sections: documents/chunks/chunks_fts (\u00a73.1.1\u2194\u00a74.9), graph tables (\u00a73.1.2-3\u2194\u00a76.1), tenancy (\u00a73.1.4\u2194\u00a77.1), sessions/facts (\u00a73.1.6\u2194\u00a78.1) all match on column names, types, defaults, CHECK constraints, and indexes; the (authoritative: \u00a7N) / (consolidated here) annotations are accurate.",
+    "All seven required capabilities are concretely delivered and cross-referenced, not hand-waved: ingest (\u00a74), embed+hybrid+rerank+cited synthesis (\u00a75), graph+BFS (\u00a76), multi-tenant auth/scope/trust/audit (\u00a77), backfill+importers (\u00a78.6/\u00a74.7), session storage (\u00a78).",
+    "The three net-new consolidated tables (pages, ingest_log, token_spend) are correctly justified as 'named-but-undefined elsewhere' and grounded in call sites and source migrations; \u00a76.1 indeed contains no pages DDL, confirming the consolidation was needed.",
+    "The tenancy-column coverage matrix (\u00a73.1.8) and ER overview (\u00a73.6) give a genuine single-glance schema audit surface, and the principled req-4 exceptions (orgs, tenant_shards, FTS tables, memory_* sidecars) are each annotated at the table and in the matrix consistently."
+   ],
+   "weaknesses": [
+    {
+     "section": "s03",
+     "issue": "The Vectorize upsert metadata blob is defined in three mutually-contradicting shapes across the consolidated \u00a73 and the inline sections it claims to mirror: \u00a73.2 (line 1047) lists 10 fields `{documentId, teamId, scope, visibility, userId, trustGrade, embeddingModel, chunkIndex, path, tenant_id}`; \u00a74.3 (line 1306-1307) writes 8 fields (adds visibility/userId, omits tenant_id); \u00a74.9 (line 1482) lists 7 fields (omits visibility, userId, tenant_id). This is the same load-bearing write path; an integrator cannot implement the upsert from the document. This contradiction was INTRODUCED by the \u00a73 consolidation (\u00a73.2 is the new third variant).",
+     "severity": "high",
+     "recommendation": "In \u00a73.2, pin the metadata blob to ONE canonical field list and add a sentence: 'This is the authoritative upsert-metadata shape; \u00a74.3/\u00a74.9 must match it verbatim.' Then state the exact field set (recommend the 10-field \u00a73.2 form since it carries the visibility/userId the intra-tenant gate needs) and flag that \u00a74.3 and \u00a74.9 are to be reconciled to it. Do not leave three lists live."
+    },
+    {
+     "section": "s03",
+     "issue": "trust_grade is denormalized into Vectorize, contradicting the thrice-stated sidecar-only invariant. \u00a73.0 (line 566), \u00a73.1.1 (line 576), and \u00a75.2 (line 1626) all assert trust_grade lives ONLY in memory_use_policy 'so a trust promotion never requires a chunk rewrite.' Yet \u00a73.2 (lines 1047, 1055) provisions a Vectorize metadata index on trust_grade and \u00a74.3 (line 1307) writes trustGrade into per-vector metadata. Vectorize metadata is per-vector, so keeping it accurate after a promotion DOES require a vector re-upsert \u2014 exactly what the design claims to avoid. Verified: trust_grade is never used as a Vectorize filter (foldPartitionFilter folds only scope/visibility; the trust-grade boost at lines 1643/1789 runs post-hydration on the LEFT-JOINed sidecar value), so the index is dead, stale-after-promotion, and consumes 1 of the scarce 10 metadata-index slots.",
+     "severity": "high",
+     "recommendation": "In \u00a73.2, either (a) DROP the trust_grade metadata index and remove trustGrade from the upsert blob, reclaiming the slot and restoring the 'promotion never rewrites a vector' invariant; or (b) explicitly document trust_grade in Vectorize as an index-time snapshot that is knowingly stale after promotion and is NEVER used as a query filter (boost is post-hydration only). Pick one and state it; the current text asserts the sidecar-only rule while simultaneously violating it."
+    },
+    {
+     "section": "s04",
+     "issue": "The Batch-Ingest pseudocode reads `doc.visibility ?? 'world'` (\u00a74.3 lines 1295 and 1306) but neither the \u00a73.1.1 nor the \u00a74.9 `documents` DDL defines a `visibility` column \u2014 the \u00a73.1.8 matrix (line 1021) explicitly states 'visibility carried on chunks, not the doc row.' The `?? 'world'` masks it at runtime for the document path, but it is a spec defect, and reusing this same pseudocode on the session\u2192chunk path would WRONGLY default session-transcript chunks to 'world' instead of inheriting the session's visibility tier (the \u00a73.1.6/\u00a78.3 contract).",
+     "severity": "medium",
+     "recommendation": "In \u00a74.3, replace `doc.visibility ?? 'world'` with an explicit source: for the ingested-document path use the literal default `'world'` (documents have no visibility column); add a one-line note that the session-import path instead inherits `session.visibility` (do not reuse the doc default), matching \u00a73.1.6 and \u00a78.3."
+    },
+    {
+     "section": "s09",
+     "issue": "`get_session_context` carries two contradictory definitions. \u00a79.2.2 (line 3565) lists it as '(frozen-snapshot read, deferred phase)', implying the whole tool is deferred. But \u00a71.5 (line 158), \u00a78.5, and \u00a77.5 (line 2865) describe `get_session_context` as a v1, live instruction-fact injection tool routed through ScopedDB.readFacts, with only the `snapshot_id` argument deferred. The v1 catalog and the v1 capability description disagree on whether the tool exists in v1.",
+     "severity": "medium",
+     "recommendation": "In \u00a79.2.2, change the `get_session_context` entry to: 'get_session_context() \u2014 v1 live instruction-grade injection via ScopedDB.readFacts (\u00a71.5/\u00a78.5); the optional snapshot_id arg is accepted but deferred.' This matches \u00a71.5/\u00a77.5 and removes the wholly-deferred framing."
+    },
+    {
+     "section": "s09",
+     "issue": "`search_entities` is listed in the v1 Graph tool catalog (\u00a79.2.2 line 3561) with no deferred marker, but \u00a76.7 (line 2363), \u00a73.2 (line 1042), and \u00a76.6 (line 2373) all explicitly defer entity vector search / search_entities to Phase 3.5 and state the brain-entities index is not provisioned in v1. The unified catalog advertises a tool that cannot function in v1.",
+     "severity": "medium",
+     "recommendation": "In \u00a79.2.2, either remove `search_entities` from the Graph group or annotate it '(deferred Phase 3.5 \u2014 brain-entities index not provisioned in v1)', matching \u00a76.7/\u00a73.2."
+    },
+    {
+     "section": "appendix",
+     "issue": "Stale assembly note now contradicted by the document. The Assembly note 'Absent \u00a70 and \u00a73' (line 4114) still states 'The master plan's \u00a70 (scale ceilings) and \u00a73 (consolidated data model) ... were not provided as standalone sections to assemble; ... \u00a73's per-domain DDL are reproduced inline within \u00a74\u2013\u00a78.' But \u00a73 now EXISTS as a full consolidated standalone section (the entire point of iter-4). The note is self-contradicting and will mislead a reader.",
+     "severity": "low",
+     "recommendation": "In the Appendix assembly note, rewrite the '\u00a73' half: 'The master plan's \u00a70 (scale ceilings) is referenced inline; \u00a73 is now a full consolidated standalone data-model section that mirrors the inline DDL owned by \u00a74/\u00a76/\u00a77/\u00a78.' Leave the \u00a70 statement as-is."
+    },
+    {
+     "section": "s09",
+     "issue": "Sessions tool-name drift between sections. \u00a72.4 (line 340) lists the sessions tool set as 'capture_turn, finalize_session, get_context', but \u00a79.2.2 (line 3565) names the tools 'capture_turn, finalize_session, get_session, list_sessions, get_session_context'. 'get_context' in \u00a72.4 has no counterpart in the \u00a79 catalog (closest is get_session_context or get_session).",
+     "severity": "low",
+     "recommendation": "In \u00a72.4, change 'get_context' to 'get_session_context' (and optionally add get_session/list_sessions) so the L2 surface summary matches the authoritative \u00a79.2.2 catalog."
+    }
+   ],
+   "missing": [],
+   "summary": "Iteration 4's core goal \u2014 a consolidated \u00a73 data model that does not contradict the inline DDL \u2014 is genuinely achieved for the table definitions themselves: the \u00a73.1.1 documents/chunks/chunks_fts, \u00a73.1.2/3 graph tables, \u00a73.1.4 tenancy tables, and \u00a73.1.6 sessions/facts mirror \u00a74.9, \u00a76.1, \u00a77.1, and \u00a78.1 column-for-column (names, types, ownership annotations, indexes all match), and the three net-new consolidations (pages, ingest_log, token_spend) are correctly grounded in their call sites. All seven required capabilities are concretely present and traceable: ingestion+loading (\u00a74, Batch-Ingest Workflow), embedding+semantic+hybrid+rerank+cited synthesis (\u00a75), graph extraction+generalized BFS traversal (\u00a76), multi-tenant company brain with auth/scoping/trust/audit (\u00a77), backfill workflows (\u00a78.6 + importers \u00a74.7), and multi-source/user/team session storage (\u00a78). So this is not a \"nits only\" review \u2014 the substance is there. However, the consolidation introduced regressions that live squarely in the consistency lens. The single Vectorize-upsert metadata blob is now specified in THREE mutually-contradicting shapes (\u00a73.2 10 fields, \u00a74.3 8 fields, \u00a74.9 7 fields); this is the same load-bearing write path and an integrator cannot implement it from the doc. Separately, \u00a73.2 provisions a Vectorize metadata index on trust_grade and \u00a74.3 writes trustGrade into per-vector metadata, directly contradicting the thrice-stated \"trust_grade is sidecar-only so a promotion never rewrites a chunk/vector\" rule \u2014 and that metadata is never actually used as a Vectorize filter (foldPartitionFilter folds only scope/visibility; the boost runs post-hydration on the LEFT-JOINed sidecar), so it is dead, stale-after-promotion, and wastes one of the 10 scarce metadata slots. The ingest pseudocode reads doc.visibility though neither documents DDL defines that column; get_session_context carries two contradictory meanings (deferred snapshot read in \u00a79.2.2 vs v1 instruction-injection tool in \u00a71.5/\u00a77.5); search_entities appears in the v1 catalog though \u00a76.7 defers it; and the assembly note still says \u00a73 \"was not provided as a standalone section\" even though \u00a73 now exists. No finding is isolation-breaking (the D1 re-check stays authoritative everywhere), so nothing auto-caps below 60; the score reflects a faithful consolidation partly offset by self-introduced contradictions on the vector write path. Verdict major-revision because the 3-way metadata blob is a non-implementable path that an integrator would have to guess at."
+  },
+  {
+   "lens": "security-isolation",
+   "score": 52,
+   "verdict": "major-revision",
+   "strengths": [
+    "Cross-tenant isolation is isolation-by-construction at a real choke-point: ScopedVectorize hard-wires namespace=tenantId and the mandatory D1 hydrateChunks/getChunksByIds re-JOIN drops cross-tenant ids silently (no existence leak), with the openbrains recall.ts:36 drop rule verified against source.",
+    "FTS5 isolation is correct and the cf-graph anti-pattern (UNINDEXED workspace_id column inside MATCH) is explicitly identified and rejected in favor of gbrain's MATCH-pure + base-table-JOIN tenant re-check, with a dedicated blocking canary (#2).",
+    "iter-3 visibilityPredicate is enforced at the single choke-point (readFacts/hydrateChunks/getChunksByIds) for BOTH facts and chunks, with a table-driven meta-test treating visibility as a third isolation axis so a new facts/chunks read surface that forgets it fails the meta-test (canaries #8/#9).",
+    "Token-to-identity-to-scope resolution is well-separated: the two-axis fix (allowedScopes data-partition vs capabilities) closes the earlier scope IN ('read','write') bug; requestedTenant is re-checked against memberships so a forged tenant yields 401; internal hops use native bindings (no shared secret) with a fail-closed producer check to DLQ.",
+    "Audit is append-only with a defensible tamper backstop (lint-guarded no-UPDATE/DELETE + append-only R2 export), and second-order privacy on recall_traces/audit reads is gated (canary #12)."
+   ],
+   "weaknesses": [
+    {
+     "section": "s07",
+     "issue": "ROOT CAUSE (critical, in-lens, breaks SC1 cross-scope clause): The \u00a77.3 guarantee that 'every read injects tenant_id (+ optional scope filter) and the visibilityPredicate at the single choke-point' is FALSE for the graph arm. ScopedDB.all(sql, binds) (used by \u00a76.4 BFS and get_links/get_backlinks) is a raw-SQL passthrough that injects ONLY the tenant_id binding; the scopePredicate and visibilityPredicate are enforced only inside the TYPED methods (listDocuments/hydrateChunks/readFacts/getChunksByIds). So traverse_graph/get_links/get_backlinks bypass allowedScopes entirely: a restricted Persona-C staffer with allowedScopes=['clientA'] can traverse into scope='clientB' pages within the same tenant. The cross-scope canary (#7) tests only 'the FTS arm, the vector arm, and ScopedDB.listDocuments' \u2014 the graph arm is uncovered, so this leak passes CI.",
+     "severity": "critical",
+     "recommendation": "In \u00a77.3, state that ScopedDB exposes NO raw-SQL escape hatch usable by graph reads: either (a) remove ScopedDB.all() from the public surface and require the BFS/links engine to receive pre-scoped predicates, or (b) make ScopedDB.all() itself append the active scopePredicate (and, once nodes carry visibility, visibilityPredicate) to any query over a scope-bearing table. Add a new blocking canary #13 to the \u00a77.3/\u00a710.6 list: 'graph-arm cross-scope \u2014 a restricted-allowedScopes principal traverse_graph/get_links/get_backlinks must not return another client's-scope pages', mirroring canary #7. Update SC1's verification to name the graph arm explicitly."
+    },
+    {
+     "section": "s07",
+     "issue": "CRITICAL (token->identity->scope, squarely in-lens): The bk_ API-key resolution branch (\u00a77.2) hard-codes allowedScopes:'*' and teamIds:[], and the api_keys table (\u00a77.1) has NO allowed_scopes column to carry a data-partition restriction. Therefore a restricted Persona-C member (allowedScopes=['clientA'] via membership) can mint an API key and immediately read the ENTIRE tenant across ALL client scopes \u2014 a one-step privilege escalation that defeats the same cross-scope isolation SC1 promises and the \u00a77.3 assertScopeAllowed/scopePredicate are built to enforce. The comment 'allowedScopes ... defaults to * for a key' acknowledges this without recognizing it as an escalation path for a non-* minter.",
+     "severity": "critical",
+     "recommendation": "In \u00a77.2/\u00a77.1: derive the key's allowedScopes from the MINTER's membership at mint time, not '*'. Add an allowed_scopes (JSON string[]|NULL) column to api_keys; on mint, store the intersection of the requested grant with the minter's allowedScopes (a restricted minter can never widen). In the bk_ branch, populate Principal.allowedScopes from row.allowed_scopes (NULL='*' only when the minter was '*'). Add a canary: a key minted by a restricted member cannot read scopes outside the minter's grant."
+    },
+    {
+     "section": "s06",
+     "issue": "HIGH (intra-tenant visibility unenforceable on the graph arm): pages and entities/entity_relations carry NO visibility column (pages has team_id/scope/user_id but no visibility; entities have neither user_id nor visibility). The \u00a77.5 access tier {private,team,world} is therefore structurally unenforceable on traverse_graph/get_links/get_backlinks. This is latent today but becomes an ACTIVE intra-tenant leak the moment any private/personal content is promoted to a page or extracted into an entity (the promotion pipeline's exact node-creation behavior is unestablished in \u00a72.8, so this is conditional, not a confirmed live leak).",
+     "severity": "high",
+     "recommendation": "In \u00a76.1/\u00a73.1.2-3.1.3, add visibility (+ ensure user_id) columns to pages and entities mirroring chunks, OR state explicitly in \u00a76.0/\u00a76.8 that the graph node space is restricted to visibility='world' (org/team) content only and that promotion of private session content MUST NOT create pages/entities \u2014 and assert that invariant in a test. Add a \u00a76.8 invariant covering the intra-tenant (scope+visibility) axis, not just cross-tenant slug collision."
+    },
+    {
+     "section": "s06",
+     "issue": "MEDIUM (BFS query + startId gating): The \u00a76.4 traverse() seeds visited with startId and runs frontier queries that filter only e.tenant_id; the JOINed node rows (nf/nt) are not filtered on scope or visibility, and startId is never checked against the principal's scope/visibility before the walk begins, so a walk can both start from and traverse into out-of-grant nodes within the tenant.",
+     "severity": "medium",
+     "recommendation": "In \u00a76.4, add the scope predicate (and visibility predicate once nodes carry the column) to the nf/nt JOIN clauses of the frontier query, and gate startId resolution through a scoped page/entity lookup (drop-don't-error: an out-of-grant startId yields an empty traversal, no existence leak) before entering the BFS loop."
+    },
+    {
+     "section": "s07",
+     "issue": "LOW (dangling cross-reference on admin recall over private memory): \u00a77.3 states owner/admin do NOT bypass the visibility predicate on the recall/think path and that admin reach is 'an explicit compliance read surface (\u00a77.6)'. But \u00a77.6 defines compliance reads only for the memory_audit and memory_recall_traces TABLES \u2014 it never specifies a compliance read surface over private facts/chunks themselves. The promised admin path to private memory is referenced but undefined.",
+     "severity": "low",
+     "recommendation": "In \u00a77.6, either define the explicit admin/owner compliance read surface over private facts/chunks (a distinct, audited tool/route that bypasses visibilityPredicate only for role admin/owner and writes a memory_audit row), or remove the '(\u00a77.6)' promise from the \u00a77.3 comment so admin simply has no path to private memory in v1."
+    }
+   ],
+   "missing": [],
+   "summary": "The cross-TENANT spine is genuinely strong and largely airtight: namespace=tenantId hard-wired in ScopedVectorize, the mandatory D1 re-JOIN gate, the FTS5 MATCH-then-JOIN-recheck (correctly avoiding cf-graph's UNINDEXED-column trap), BFS tenant_id-on-every-hop, append-only audit with R2 tamper-backstop, the trust_grade='evidence' hard-wire, and the 12-canary blocking CI suite are well-specified and source-verified (openbrains recall.ts:36 drop rule confirmed). The iter-3 intra-tenant visibilityPredicate on facts AND chunks is a real improvement. BUT three unresolved isolation holes remain, two of them critical and blocking, both inside the cross-SCOPE / intra-tenant axis the PRD itself promises (SC1 'enforced cross-scope isolation'): (1) the graph arm (traverse_graph/get_links/get_backlinks) goes through ScopedDB.all() raw SQL that injects ONLY tenant_id, so a restricted Persona-C staffer (allowedScopes=['clientA']) can walk into scope='clientB' pages \u2014 and canary #7 explicitly omits the graph arm; (2) the bk_ API-key branch hard-codes allowedScopes:'*' with no allowed_scopes column on api_keys, so any restricted member mints a key and escalates to full-tenant, all-scope read. The root cause is that ScopedDB.all() is a raw passthrough that bypasses the scope/visibility predicates the typed methods enforce \u2014 falsifying the \u00a77.3 'every read injects tenant_id (+scope)' guarantee. Per the rubric, two live criticals cap the score below 60."
+  }
+ ],
+ "sectionsFixed": [
+  "s03",
+  "s04",
+  "s05",
+  "s06",
+  "s07",
+  "s09",
+  "appendix"
+ ],
+ "integrations": [
+  {
+   "section": "s03",
+   "appliedCount": 2,
+   "changelog": [
+    "Finding 1 (metadata blob, three contradicting shapes \u2014 high): pinned \u00a73.2 to ONE canonical upsert-metadata shape `{documentId, teamId, scope, visibility, userId, embeddingModel, chunkIndex, path, tenant_id}` and added an explicit authority sentence ('This is the authoritative upsert-metadata shape; \u00a74.3 and \u00a74.9 must match it verbatim'), flagging \u00a74.3/\u00a74.9 for reconciliation. Adopted the \u00a73.2 form's coverage of visibility/userId that the intra-tenant gate needs, per the recommendation.",
+    "Finding 2 (trust_grade denormalized into Vectorize, contradicts the thrice-stated sidecar-only invariant \u2014 high): chose option (a) \u2014 DROPPED the `trust_grade` metadata index and removed `trustGrade` from the canonical upsert blob, restoring the '\u00a73.0/\u00a73.1.1/\u00a75.2 promotion never rewrites a vector' invariant and reclaiming a scarce metadata-index slot. Added explicit prose stating trust_grade is deliberately NOT a Vectorize index/blob field and is never used as a filter (foldPartitionFilter folds only scope/visibility; boost is post-hydration on the LEFT-JOINed sidecar value).",
+    "Reconciled the two interacting findings: finding 1 recommended the 10-field form (which included trustGrade) while finding 2 recommended dropping trustGrade \u2014 resolved to a 9-field blob that keeps visibility/userId (finding 1's concern) and drops trustGrade (finding 2's option a).",
+    "Updated the \u00a73.2 provisioning bash block: removed the `trust_grade` create-metadata-index line, added the `visibility` create-metadata-index line (visibility is now a provisioned indexed property), and added an inline NOTE explaining trust_grade's intentional absence. Updated the 'Reserved budget' note from 'visibility and source' to 'source' since visibility is now provisioned.",
+    "Verified via grep that openbrains vectorize.ts contains no trust_grade reference, corroborating the finding that the index was dead. \u00a73.6 ER diagram already showed trust_grade only via the memory_use_policy LEFT JOIN, so it remains consistent \u2014 no change needed."
+   ],
+   "residual": [
+    "Findings 1 and 2 both note cross-section contradictions in \u00a74.3 and \u00a74.9 (the live per-vector upsert writes there still disagree with the now-canonical \u00a73.2 blob). Those sections are outside the s03 edit scope; \u00a73.2 now carries an explicit verbatim-match directive flagging them for reconciliation by the \u00a74 owner, but the \u00a74 text itself was not edited here.",
+    "advisor() was rate-limited this turn and could not be consulted; the finding-interaction reconciliation (keep visibility/userId, drop trustGrade) was resolved by direct analysis and a grounding grep of openbrains vectorize.ts instead."
+   ]
+  },
+  {
+   "section": "s04",
+   "appliedCount": 3,
+   "changelog": [
+    "CRITICAL (cf-correctness, 1 MiB step-output cap): Reworked the \u00a74.3 Batch-Ingest pseudocode so no step returns full markdown or chunk content. `extract-text` now persists the extracted body to a staging R2 key (`${tenantId}/${documentId}/body.md`) and returns only `{stagingKey, byteLength}`. `persist-body` reads the body back from that key (no double-write \u2014 extract writes, persist-body records it as bodyR2Key). `chunk-text` stages chunk content to `${tenantId}/${documentId}/chunks.json` keyed by chunk id and returns only lean per-chunk metadata (`records` = ids/index/headingPath/tokenCount/model/dims). `store-chunks-batch` reads content back from the chunks.json staging object; after it runs, D1.chunks.content is the durable content authority. `embed-batch` reads content back from D1 via `db.chunks.getContentByIds` instead of `batch.map(c=>c.content)`. Verified the full read-back chain end-to-end; `chunkRecords = chunkMeta.records` carries no content blobs.",
+    "CRITICAL (cont.): Added a '1 MiB non-stream step-output cap' bullet at the top of 'Why the constants are load-bearing', naming the ReadableStream<Uint8Array> escape hatch and explaining the R2-staging choice; added \u00a74.5 note that KG steps also read content back from D1 by id for the same reason.",
+    "CRITICAL (cont.): Made the giant-upload split rule key on BOTH chunk count AND extracted-text byte size. Kept `MAX_CHUNKS_PER_DOC=4000` and added `MAX_BODY_BYTES=8 MiB` per part, measured via `extract.byteLength` of the R2 body at extract time; a body over the threshold splits on chunk boundaries even when chunk count is under the ceiling. Restructured the split paragraph into a two-limit (step budget + byte size) form so SC5 'durable at scale' holds for few-but-huge-chunk documents the count-only key would have missed.",
+    "MEDIUM (completeness, phantom `visibility` column): Replaced both `doc.visibility ?? 'world'` occurrences (store-chunks insert and vec.upsert metadata) with the literal `'world'`, since `documents` has no visibility column. Added inline note that the session-import path instead inherits `session.visibility` (do not reuse the doc default), aligning with \u00a73.1.6/\u00a78.3 and the existing chunks DDL comment (lines 310-311).",
+    "LOW (cf-correctness, step-cap wording): Standardized to '10,000 steps default, raisable to 25,000 via workflows[].limits.steps on Workers Paid' in \u00a74.0 (was 'under the 25k-step cap') and in the \u00a74.3 split rule (was '10k-soft / 25k-hard'); explicitly state the design stays within the 10k default and does not assume 25k is configured, leaning on the MAX_CHUNKS_PER_DOC=4000 math."
+   ],
+   "residual": [
+    "\u00a710.1 wrangler.jsonc gap (from low finding) is out-of-section: it does not set `workflows[].limits.steps`, so the effective cap is the 10k default. I cannot edit \u00a710.1 here; I instead standardized s04's wording to the 10k default and asserted the design stays within it (the 4000-chunk ceiling keeps the total well under 10k), so no s04 path implies 25k is available without that config. If a future path needs >10k steps, \u00a710.1 must add `\"limits\": { \"steps\": 25000 }`.",
+    "Pre-existing \u00a74.6 claim that the pre-chunked path 'still gets a bodyR2Key (concatenated chunks \u2192 R2)' is not reflected in the \u00a74.3 pseudocode, where `persist-body` is gated on `not preChunked` (pre-existing, untouched by these findings). The chunk-text staging now does write a chunks.json for preChunked, but a concatenated body.md for preChunked is still only described in prose. Left as-is \u2014 outside the scope of the three findings and would be a behavioral change."
+   ]
+  },
+  {
+   "section": "s05",
+   "appliedCount": 3,
+   "changelog": [
+    "Finding 1 (HIGH, topK cap): Corrected the \u00a75.3.2 cap statement from 'Vectorize caps topK at 50 with metadata / 100 without' to 'topK max is 100; drops to 50 only when returnValues:true or returnMetadata:\"all\" \u2014 our vectorSearch returns neither, so topK=100 is available even with a metadata filter.' Re-grounded the recall-cliff argument: the cliff is real for a restricted principal whose granted content ranks below the tenant-wide top-100, the fix is foldPartitionFilter spending the topK-100 budget inside the grant \u2014 removed the phantom 'over-fetch is itself capped at 50' reasoning and the min(50,limit*4) over-fetch fallback.",
+    "Finding 2 (MEDIUM, bge-m3 context): Raised MAX_EMBED_INPUT_TOKENS from 8192 to 60_000 (set from the model's documented window) in \u00a75.1; fixed the model-constants comment and the \u00a75.7 invariant to state 60,000, and re-grounded the model-choice rationale from '8192 vs qwen3 4096' to 'multilingual coverage + 60k window.' Updated the pre-call budget-guard comment. Left the 24k llama-3.3-70b *generation* ceiling (line 17, MODEL_CTX_TOKENS) untouched \u2014 different model, out of scope.",
+    "Finding 3 (MEDIUM, $in operator): Replaced the per-scope fan-out + union path with a single Vectorize query using {scope:{$in:[...granted scopes]}}; removed the multi-query union and its eviction bookkeeping; updated the vectorSearch code comment accordingly and noted the per-value 64-byte indexability caveat. Visibility-$in deliberately DECLINED (see residual) \u2014 pushing {visibility:{$in:['world','team']}} would exclude the principal's own private chunks from the vector arm, which the D1 re-check cannot recover; visibility stays authoritative at D1. Added an explicit 'Why visibility is NOT pushed' paragraph and reworded the getChunksByIds prose that previously called visibility a 'best-effort Vectorize pre-filter.'"
+   ],
+   "residual": [
+    "Finding 3 visibility sub-point (intentionally declined, recorded per spec): visibility stays D1-only. Other users' high-ranking private chunks can still consume topK=100 slots before the D1 visibility gate drops them \u2014 accepted because the correct predicate (world OR own-private OR own-team) is not expressible as a single $in, and $in:['world','team'] would drop the principal's own private chunks. Minor recall risk only for tenants with heavy private-session content; does not affect correctness/security (D1 remains authoritative).",
+    "Cross-section propagation for Finding 1 (outside s05, for owning sections): update the topK cap number from 50\u2192100 in \u00a73.2, \u00a74.9, and \u00a710.7.",
+    "Cross-section propagation for Finding 2 (outside s05, for owning section): update the bge-m3 context-window claim from 8192\u219260,000 in \u00a72.7."
+   ]
+  },
+  {
+   "section": "s06",
+   "appliedCount": 2,
+   "changelog": [
+    "\u00a76.0: Added an 'Intra-tenant visibility on the graph arms' decision block. DOC_GRAPH (pages) gets the full {private,team,world} gate (pages already carries scope/team_id/user_id; \u00a76.1 adds the missing visibility column). ENTITY_GRAPH gets two conscious decisions: (a) visibility EXCLUDES private (the canonical-merge dedup key has no user_id, so a per-entity private tier is incoherent \u2014 private knowledge stays only in the \u00a77.5-gated facts store), (b) scope is PARTITIONED not merged (scope joins the entity dedup key, so cross-client 'Acme' becomes two rows, never one cross-scope node) because s05 makes scope isolation required-before-GA for agency tenants.",
+    "\u00a76.1 entities schema: added `scope` (data-partition axis, now part of the dedup key) plus `visibility TEXT CHECK(visibility IN ('team','world'))` and `team_id`. Changed idx_entities_key to ON entities(tenant_id, COALESCE(scope,''), kind, lower(canonical_name)) so the unrestricted (NULL-scope) partition still dedups under SQLite NULL-distinct semantics.",
+    "\u00a76.1 EdgeSpec: added optional scopeCol/visibilityCol/teamCol/userCol so traverse() builds the node gate generically (same parameterization as the table names). DOC_GRAPH sets all four (private tier reachable via pages.user_id); ENTITY_GRAPH sets scope/visibility/team but NOT userCol ({world,team} only).",
+    "\u00a76.2 load-chunks step: added `AND visibility <> 'private'` so private-session chunks never become tenant-wide entities. Added a note that the access tier (scope + max-permissive visibility/team_id) is derived deterministically from the trusted source chunks, never from untrusted LLM output.",
+    "\u00a76.3 upsertEntity: carries `scope` into the INSERT and the COALESCE-scoped lookup key; added mergeVisibility() (max-permissive: world wins, cross-team promotes to world). relate()/store-kg note updated: endpoints resolve within one scope partition.",
+    "\u00a76.4 traverse() \u2014 CORE FIX for the MEDIUM finding: (i) seed startId/slug resolved through a scoped node lookup BEFORE the BFS loop (out-of-grant start \u2192 empty traversal, drop-don't-error, no existence leak); (ii) every frontier-query nf/nt node JOIN now ANDs ScopedDB.nodeGate (scopePredicate + visibilityPredicate). Added intra-tenant over-reach impossibility argument alongside the existing cross-tenant one.",
+    "\u00a76.5: get_links/get_backlinks (named in the finding) now apply the same scoped node gate as BFS, with scoped anchor resolution.",
+    "\u00a76.6: find_orphans report now runs under the principal's scope/visibility node gate (a report is still a node read surface).",
+    "\u00a76.7 flow B/C: reflect scoped startId/anchor resolution and the per-endpoint node gate.",
+    "\u00a76.8: added the intra-tenant (scope+visibility) INVARIANT framed as a ScopedDB contract on every pages/entities read (covers traverse_graph/get_links/get_backlinks/list_entities/get_entity/entity_relations/find_orphans), with a blocking CI test seeding a gated mid-path node on both arms \u2014 kept alongside, did not replace, the existing cross-tenant slug-collision invariant."
+   ],
+   "residual": [
+    "CROSS-SECTION (s06-only edit cannot fix): s03 \u00a73.1.2 `pages` DDL is authoritative-in-s03 and still lacks the `visibility` column this section now requires \u2014 must be added there to match \u00a76.0/\u00a76.1.",
+    "CROSS-SECTION: s03 \u00a73.1.3 reproduces `entities` marked '(authoritative: \u00a76.1)' and is now desynced \u2014 must mirror the new `scope`/`visibility`/`team_id` columns and the COALESCE(scope,'')-based idx_entities_key.",
+    "CROSS-SECTION: s07 \u00a77.3 ScopedDB must define the three helpers this section invokes \u2014 nodeVisible(spec,id), nodeGate(spec,alias)->{sql,binds}, and resolveScopedNode/scoped slug lookup \u2014 and wire visibilityPredicate/scopePredicate to the pages/entities node tables (today they are only wired to facts/chunks/documents).",
+    "Did NOT add a per-entity 'private' tier or user-keyed entity dedup (deferred to Phase 3.5 with semantic dedup, per \u00a76.6) \u2014 judgment call: faithful to current behavior but would fragment the canonical-merge; excluding private from the KG is the simpler v1 choice consistent with the PRD's 'prove the deterministic graph first' ethos.",
+    "entity_relations was NOT given its own visibility/scope columns \u2014 the gate rides on the entities nf/nt node JOINs (the relation's endpoints), so duplicating the columns on the edge would be redundant; flagged here as a deliberate non-change."
+   ]
+  },
+  {
+   "section": "s07",
+   "appliedCount": 3,
+   "changelog": [
+    "CRITICAL (graph-arm cross-scope, finding #1): Closed the leak where graph reads (traverse_graph/get_links/get_backlinks + \u00a77.4 BFS) injected only tenant_id and bypassed allowedScopes. \u00a77.3 ScopedDB intro now states there is NO raw-SQL passthrough escape hatch; added typed scope-gated methods getLinks/expandFrontier that AND the scopePredicate (and visibilityPredicate once nodes carry it) on every hop, with discovered ids still re-hydrated through hydrateChunks/listDocuments. \u00a77.4 BFS paragraph upgraded from tenant_id-only to tenant_id + scopePredicate per hop. \u00a77.10 BFS edge case extended to cross-scope. Added blocking canary #13 (graph-arm cross-scope, mirroring #7) to the \u00a77.3 enforcement list and named the graph arm in the coverage clause + meta-test.",
+    "CRITICAL (API-key privilege escalation, finding #2): Removed the hard-coded allowedScopes:'*' in the \u00a77.2 bk_ branch that let a restricted member mint a tenant-wide key in one step. Added allowed_scopes column (JSON string[] | NULL) to the api_keys schema in \u00a77.1 with the rule that '*'/NULL is stored ONLY when the minter was '*'. Added \u00a77.1 mint-time derivation prose: allowed_scopes = intersect(requestedGrant, minter.allowedScopes), so a restricted minter can never widen. bk_ branch now populates Principal.allowedScopes from row.allowed_scopes (NULL\u2192'*' only when minter was '*'); added parseScopeGrant helper that fails closed to '[]'. Added \u00a77.10 edge case and an apiKey.mint audit row carrying the pinned grant.",
+    "LOW (dangling \u00a77.6 compliance-read promise, finding #3): The \u00a77.3/\u00a77.5 comment promised an admin compliance read surface over private facts/chunks 'at \u00a77.6', but \u00a77.6 only defined compliance reads over the traces/audit TABLES. Resolved by defining ScopedDB.complianceReadPrivate in \u00a77.6: role-gated to owner/admin, bypasses visibilityPredicate over facts/chunks but never tenant_id, and MUST write a memory_audit 'compliance.read' row in the same batch (unaudited read impossible). Added to the \u00a710.6 canary table and noted it can be config-disabled for a 'no admin path in v1' deployment."
+   ],
+   "residual": [
+    "Finding #1's anchors reference artifacts not present in s07 (ScopedDB.all() raw-SQL method, '\u00a76.4 BFS', 'SC1'). Applied the substance in s07's own vocabulary: there is no .all() to remove, so the fix asserts the no-raw-SQL discipline and adds typed scope-gated graph methods instead. The leak's real location in s07 was the \u00a77.4 'BFS carries tenant_id on every hop' line, now fixed.",
+    "Cross-section follow-ups (cannot edit outside s07): (a) \u00a710.6 canary table must gain canary #13 (graph-arm cross-scope) as a real row; s07 now references it. (b) SC1's verification clause should name the graph arm explicitly per finding #1. (c) \u00a710.6 should also add canary rows for the key-grant-isolation test and the compliance.read audit assertion that s07 now references.",
+    "Finding #3 (low) was a genuine dangling reference; chose to DEFINE the audited break-glass surface (rather than delete the promise) because \u00a77.6 already had the owner/admin compliance-read pattern for traces, making the extension cheap and keeping admin-recall capability available with a config off-switch \u2014 strictly more useful than removing the reference."
+   ]
+  },
+  {
+   "section": "s09",
+   "appliedCount": 2,
+   "changelog": [
+    "\u00a79.2.2 Sessions: rewrote the `get_session_context(snapshot_id?)` entry from '(frozen-snapshot read, deferred phase)' to 'v1 live instruction-grade injection via ScopedDB.readFacts \u2014 \u00a71.5/\u00a78.5/\u00a77.5; the optional snapshot_id arg for a frozen-snapshot read is accepted but deferred', resolving the contradiction with \u00a71.5/\u00a77.5/\u00a78.5 (the tool exists in v1; only the snapshot_id arg is deferred).",
+    "\u00a79.2.2 Graph: annotated `search_entities` as '(deferred Phase 3.5 \u2014 entity vector search; the brain-entities index is not provisioned in v1, \u00a76.7/\u00a73.2/\u00a76.6)', so the unified v1 catalog no longer advertises a tool that cannot function in v1."
+   ],
+   "residual": [
+    "Finding 3 (sessions tool-name drift, 'get_context' in \u00a72.4 has no \u00a79 counterpart) \u2014 NOT applied: its recommended edit lives in \u00a72.4, which is outside this section's file (s09). \u00a79.2.2 already names the authoritative set (capture_turn, finalize_session, get_session, list_sessions, get_session_context) consistently with \u00a79.1.1 router and \u00a79.3 CLI, so no change was required within s09; the \u00a72.4 rename should be made by the s02 editor."
+   ]
+  },
+  {
+   "section": "appendix",
+   "appliedCount": 1,
+   "changelog": [
+    "Rewrote the \u00a73 half of the 'Absent \u00a70 and \u00a73' assembly note: removed the self-contradicting claim that \u00a73 was 'not provided as a standalone section' and replaced it with '\u00a73 is now a full consolidated standalone data-model section that mirrors the inline DDL owned by \u00a74/\u00a76/\u00a77/\u00a78.' Left the \u00a70 statement unchanged (still referenced inline, reproduced within \u00a74\u2013\u00a78). Updated the bold lead-in label from 'Absent \u00a70 and \u00a73' to '\u00a70 inline; \u00a73 now consolidated' so the heading no longer asserts both are absent."
+   ],
+   "residual": []
+  }
+ ],
+ "totalApplied": 16
+}

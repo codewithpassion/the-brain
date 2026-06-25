@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Layered Memory for Claude — cf-graph · gbrain-cf · openbrains</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2b3340;
+    --ink:#e6edf3; --muted:#9aa7b4; --dim:#6e7d8d;
+    --accent:#7c9eff; --accent2:#5eead4; --warn:#f0b429; --bad:#ff6b6b; --good:#56d364;
+    --cfg:#f0883e; --gbr:#7c9eff; --obr:#bc8cff; --hermes:#5eead4;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.86em;background:#0b0f14;border:1px solid var(--line);border-radius:5px;padding:.08em .4em;color:#cbe2ff}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+  header.hero{padding:64px 0 40px;border-bottom:1px solid var(--line);
+    background:radial-gradient(1200px 400px at 20% -10%,rgba(124,158,255,.16),transparent),
+               radial-gradient(900px 360px at 85% -10%,rgba(188,140,255,.13),transparent)}
+  .eyebrow{letter-spacing:.16em;text-transform:uppercase;font-size:12px;color:var(--accent2);font-weight:600}
+  h1{font-size:38px;line-height:1.15;margin:14px 0 10px;font-weight:750;letter-spacing:-.02em}
+  h1 .grad{background:linear-gradient(90deg,var(--cfg),var(--gbr) 45%,var(--obr));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);max-width:760px;font-size:16px}
+  .meta{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);
+    padding:5px 11px;border-radius:999px}
+  nav.toc{position:sticky;top:0;z-index:20;background:rgba(13,17,23,.85);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);padding:11px 0}
+  nav.toc .wrap{display:flex;gap:6px;flex-wrap:wrap}
+  nav.toc a{font-size:13px;color:var(--muted);padding:5px 11px;border-radius:7px}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none}
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+  h2 .n{color:var(--dim);font-weight:600;margin-right:10px}
+  .lead{color:var(--muted);margin:0 0 26px;max-width:820px}
+  h3{font-size:18px;margin:30px 0 10px}
+  p{margin:0 0 14px}
+  .grid{display:grid;gap:18px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:880px){.g3,.g2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .card.cfg{border-top:3px solid var(--cfg)}
+  .card.gbr{border-top:3px solid var(--gbr)}
+  .card.obr{border-top:3px solid var(--obr)}
+  .card h3{margin-top:0;display:flex;align-items:center;gap:9px}
+  .tag{font-size:11px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:6px;text-transform:uppercase}
+  .tag.cfg{background:rgba(240,136,62,.15);color:var(--cfg)}
+  .tag.gbr{background:rgba(124,158,255,.15);color:var(--gbr)}
+  .tag.obr{background:rgba(188,140,255,.15);color:var(--obr)}
+  .tag.hermes{background:rgba(94,234,212,.15);color:var(--hermes)}
+  .kv{font-size:13.5px;color:var(--muted)}
+  .kv b{color:var(--ink);font-weight:600}
+  ul{margin:8px 0 14px;padding-left:20px}
+  li{margin:5px 0}
+  .small{font-size:13px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0 6px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+    position:sticky;top:0;background:var(--panel)}
+  tbody tr:hover{background:var(--panel2)}
+  td.feat{font-weight:600;color:var(--ink);white-space:nowrap}
+  .rate{font-weight:700;font-size:13px;white-space:nowrap}
+  .r-strong{color:var(--good)} .r-part{color:var(--warn)} .r-none{color:var(--dim)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .d-strong{background:var(--good)} .d-part{background:var(--warn)} .d-none{background:var(--dim)}
+  .callout{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-left:3px solid var(--accent);border-radius:10px;padding:16px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.good{border-left-color:var(--good)}
+  .callout h4{margin:0 0 6px;font-size:15px}
+  .pillarbar{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 8px}
+  .pillarbar .p{flex:1;min-width:200px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .pillarbar .p .src{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .pillarbar .p b{display:block;margin:3px 0;font-size:15px}
+  /* architecture diagram */
+  .arch{background:#0b0f14;border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin:18px 0;overflow-x:auto}
+  .layer{display:flex;align-items:stretch;gap:14px;margin:0 0 12px}
+  .layer:last-child{margin-bottom:0}
+  .lbl{flex:0 0 116px;display:flex;flex-direction:column;justify-content:center;
+    font-size:12px;color:var(--muted);border-right:1px dashed var(--line);padding-right:12px}
+  .lbl b{color:var(--ink);font-size:13px}
+  .box{flex:1;border-radius:10px;padding:13px 15px;border:1px solid var(--line);background:var(--panel)}
+  .box .t{font-weight:700;font-size:14px;margin-bottom:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .box .d{font-size:12.5px;color:var(--muted)}
+  .box.l0{border-left:4px solid var(--hermes)}
+  .box.l1{border-left:4px solid var(--warn)}
+  .box.l2{border-left:4px solid var(--gbr)}
+  .box.l3{border-left:4px solid var(--good)}
+  .box.x{border-left:4px solid var(--obr);background:var(--panel2)}
+  .flow{text-align:center;color:var(--dim);font-size:18px;margin:-4px 0 8px}
+  .src-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .chip{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.03em}
+  .chip.cfg{background:rgba(240,136,62,.16);color:var(--cfg)}
+  .chip.gbr{background:rgba(124,158,255,.16);color:var(--gbr)}
+  .chip.obr{background:rgba(188,140,255,.16);color:var(--obr)}
+  .chip.hermes{background:rgba(94,234,212,.16);color:var(--hermes)}
+  .chip.new{background:rgba(240,180,41,.16);color:var(--warn)}
+  ol.phases{counter-reset:ph;list-style:none;padding:0;margin:18px 0}
+  ol.phases>li{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px 18px 16px 60px;margin:0 0 12px}
+  ol.phases>li::before{counter-increment:ph;content:counter(ph);position:absolute;left:16px;top:16px;
+    width:28px;height:28px;border-radius:8px;background:var(--accent);color:#0b0f14;font-weight:800;
+    display:flex;align-items:center;justify-content:center;font-size:14px}
+  ol.phases h4{margin:0 0 4px;font-size:15px}
+  ol.phases .effort{float:right;font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
+  footer{padding:40px 0 70px;color:var(--dim);font-size:13px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:6px 0 14px}
+  .verdict{font-size:13px;color:var(--muted);margin-top:10px;border-top:1px dashed var(--line);padding-top:10px}
+  .verdict b{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Memory Systems Analysis &amp; Architecture Recommendation</div>
+    <h1>Building <span class="grad">truly multi-layered memory</span> for Claude</h1>
+    <p class="sub">A deep comparison of three home-grown memory systems — <b>cf-graph</b>, <b>gbrain-cf</b>, and <b>openbrains</b> — mapped against the four-pillar "perfect memory" blueprint from Simon Scrapes' <i>"Claude Code Agentic OS… It Remembers Everything"</i>, with a concrete recommendation for assembling them into one layered brain.</p>
+    <div class="meta">
+      <span class="pill">Source video: <a href="https://youtu.be/F4At4St1iH8" target="_blank">F4At4St1iH8</a></span>
+      <span class="pill">3 projects analyzed in depth</span>
+      <span class="pill">4 memory pillars</span>
+      <span class="pill">Prepared 2026-06-24</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#blueprint">The Blueprint</a>
+    <a href="#projects">The 3 Projects</a>
+    <a href="#compare">Feature Matrix</a>
+    <a href="#mapping">Pillar Mapping</a>
+    <a href="#gaps">Gaps</a>
+    <a href="#reco">Recommendation</a>
+    <a href="#plan">Build Plan</a>
+  </div>
+</nav>
+
+<!-- ============ BLUEPRINT ============ -->
+<section id="blueprint">
+  <div class="wrap">
+    <h2><span class="n">01</span>The blueprint the video describes</h2>
+    <p class="lead">Simon defines "perfect memory" for a business as four capabilities, each cherry-picked from a different open-source project. Claude Code out of the box is weak at all three core jobs — <b>storage</b>, <b>injection</b>, and <b>recall</b> — so the goal is to assemble the best of each.</p>
+
+    <div class="pillarbar">
+      <div class="p"><div class="src">Pillar 1 · from GBrain</div><b>Cites its sources</b><span class="small">Returns the exact conversation context, the words used, the file/line, and the date. Synthesizes a cited answer — and admits when it doesn't know instead of inventing.</span></div>
+      <div class="p"><div class="src">Pillar 2 · from Hermes</div><b>Recent-context injection</b><span class="small">A small, <i>capped</i> "frozen snapshot" (soul / user / memory / today) loaded silently at session start via a hook. Avoids context rot.</span></div>
+    </div>
+    <div class="pillarbar">
+      <div class="p"><div class="src">Pillar 3 · from memarch / vectors</div><b>Long-term search by meaning</b><span class="small">Chunk → summarize/keep verbatim → embed → hybrid <i>vector + keyword</i> search. "Payment processing" finds "Stripe" even with no shared words.</span></div>
+      <div class="p"><div class="src">Pillar 4 · from GBrain company brain</div><b>Scoped team / client access</b><span class="small">One shared brain, every memory tagged by owner, every query filtered by who's asking — enforced by row-level security.</span></div>
+    </div>
+
+    <div class="callout">
+      <h4>The runtime loop Simon describes</h4>
+      <p class="small" style="margin:0">A <b>Stop hook</b> fires after every turn → decides if the turn is a durable fact (decision, price, preference, environment) → promotes it into a <b>capped short-term <code>memory.md</code></b> (dedup/overwrite) <i>and</i> embeds everything long-term regardless. Retrieval is <b>three-tier</b>: (1) read the injected short-term snapshot → (2) if absent, vector + keyword search top 5–10 → (3) <b>rerank</b>, then <b>synthesize a cited, honest answer</b>. A one-time <b>backfill</b> turns months of old sessions into memory so you "start with everything already remembered." Team OS = Railway Postgres with row-level security (or local PGLite + pgvector).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PROJECTS ============ -->
+<section id="projects">
+  <div class="wrap">
+    <h2><span class="n">02</span>The three building blocks</h2>
+    <p class="lead">Each project is real, deployed, and substantially complete. They are not three attempts at the same thing — they specialize. Below: what each <i>is</i>, and the one job it does better than the others.</p>
+
+    <div class="grid g3">
+      <!-- cf-graph -->
+      <div class="card cfg">
+        <h3><span class="tag cfg">cf-graph</span></h3>
+        <p class="kv"><b>Document &amp; knowledge-graph engine</b> on Cloudflare Workers. Ingests PDF/DOCX/HTML/CSV, converts to Markdown, chunks, embeds, and auto-extracts an entity/relationship graph.</p>
+        <p class="small" style="margin:10px 0 4px"><b>Stack:</b> TS · Workers · D1 (SQLite) · R2 · Vectorize · Workers AI (bge-m3 1024d, llama-3.1-8b). Hono · TanStack · tRPC · Clerk.</p>
+        <ul class="small">
+          <li><b>Hybrid search</b> (vector + FTS5 + RRF) on <i>both</i> chunks and entities</li>
+          <li><b>Durable, resumable ingestion Workflows</b> — retried per-step, survive restarts</li>
+          <li>KG extraction with truncated-JSON recovery</li>
+          <li>Workspaces + per-user ownership (app-level), read-only API keys</li>
+          <li><code>cfg</code> CLI + workspace-scoped MCP (read/mutation tools)</li>
+        </ul>
+        <p class="verdict"><b>Best at:</b> heavy, reliable ingestion of arbitrary documents into a searchable graph. <br><b>Missing:</b> no session/conversation memory, no context injection, no synthesized/cited answers, no "I don't know."</p>
+      </div>
+
+      <!-- gbrain-cf -->
+      <div class="card gbr">
+        <h3><span class="tag gbr">gbrain-cf</span></h3>
+        <p class="kv"><b>The GBrain reimplementation</b> — a "company brain" MCP server (47 tools) on Cloudflare. Markdown pages + typed link graph + hot-fact memory + cited synthesis.</p>
+        <p class="small" style="margin:10px 0 4px"><b>Stack:</b> TS · Workers · D1 · Vectorize (gbrain-chunks 1024d) · Workers AI (bge-m3 + llama-3.3-70b). OAuth 2.1 via Clerk · cron job runner.</p>
+        <ul class="small">
+          <li><b><code>think</code></b> — hybrid search → LLM synthesis → <b>cites slugs, reports gaps, admits "no evidence"</b></li>
+          <li><b>Hybrid search + LLM query expansion</b> (RRF, compiled-truth &amp; title boosts, staleness flag)</li>
+          <li><b>Typed fact hot-memory</b> — <code>extract_facts</code>/<code>recall</code>/<code>forget_fact</code>, with kind/confidence/notability/visibility/validity</li>
+          <li><b>Graph</b> — typed links, BFS <code>traverse_graph</code> (depth 10), backlinks, tags, timeline</li>
+          <li>GitHub source sync + webhook ingest + async job queue</li>
+        </ul>
+        <p class="verdict"><b>Best at:</b> Pillars&nbsp;1 &amp; 3 — cited synthesis and meaning-based retrieval. The closest thing to "perfect memory" already built. <br><b>Missing:</b> single-tenant (no per-user / per-client row-level isolation), no client-side injection hook.</p>
+      </div>
+
+      <!-- openbrains -->
+      <div class="card obr">
+        <h3><span class="tag obr">openbrains</span></h3>
+        <p class="kv"><b>Multi-tenant governed-memory SaaS.</b> Remote MCP + CLI + dashboard so any AI client captures, searches, and recalls thoughts with full provenance and trust grading.</p>
+        <p class="small" style="margin:10px 0 4px"><b>Stack:</b> TS · Convex (reactive DB + auth) · Vectorize (thoughts-v1, namespace = userId) · Workers AI (qwen3-embed 1024d). OAuth 2.1 via Clerk · CLI <code>ob</code>.</p>
+        <ul class="small">
+          <li><b>Strict per-user isolation</b> — Convex <code>requireUserId</code> + Vectorize <code>namespace=userId</code> (cross-tenant query impossible by construction)</li>
+          <li><b>Trust grades</b> — instruction / evidence / draft; agent writes hard-wired to <i>evidence</i>; only humans promote to <i>instruction</i></li>
+          <li><b>Full audit</b> — <code>memory_audit</code> diff log + <code>memory_recall_traces</code> per query</li>
+          <li>Project scoping (per-project namespaces, global entity/CRM graph)</li>
+          <li>Capture primitives: brain-dump split, agent writeback, Gmail/OB1 importers</li>
+        </ul>
+        <p class="verdict"><b>Best at:</b> Pillar 4 — multi-tenant scoping &amp; governance done properly. <br><b>Missing:</b> vector-only (no hybrid / no rerank), no synthesized cited answer, no hot-fact snapshot store, no injection hook.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURE MATRIX ============ -->
+<section id="compare">
+  <div class="wrap">
+    <h2><span class="n">03</span>Side-by-side feature matrix</h2>
+    <p class="lead">Capability by capability. The pattern is clear: gbrain-cf owns retrieval + synthesis, openbrains owns tenancy + governance, cf-graph owns document ingestion.</p>
+    <div class="legend">
+      <span><span class="dot d-strong"></span>Strong / first-class</span>
+      <span><span class="dot d-part"></span>Partial</span>
+      <span><span class="dot d-none"></span>Absent</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>Capability</th>
+        <th><span class="tag cfg">cf-graph</span></th>
+        <th><span class="tag gbr">gbrain-cf</span></th>
+        <th><span class="tag obr">openbrains</span></th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="feat">Storage substrate</td>
+          <td>D1 + R2 + Vectorize</td><td>D1 + Vectorize (Markdown-first pages)</td><td>Convex + Vectorize</td></tr>
+        <tr><td class="feat">Deployment</td>
+          <td>Cloudflare edge</td><td>Cloudflare edge</td><td>Cloudflare + Convex</td></tr>
+        <tr><td class="feat">Vector embeddings</td>
+          <td><span class="r-strong">●</span> bge-m3 1024d</td><td><span class="r-strong">●</span> bge-m3 1024d</td><td><span class="r-strong">●</span> qwen3 1024d</td></tr>
+        <tr><td class="feat">Hybrid vector + keyword</td>
+          <td><span class="r-strong">● RRF + FTS5</span></td><td><span class="r-strong">● RRF + FTS5 + query expansion</span></td><td><span class="r-none">○ vector only</span></td></tr>
+        <tr><td class="feat">Reranking</td>
+          <td><span class="r-none">○</span></td><td><span class="r-part">◐ boosts (no cross-encoder)</span></td><td><span class="r-none">○ deferred</span></td></tr>
+        <tr><td class="feat">Cited &amp; synthesized answers</td>
+          <td><span class="r-none">○ raw chunks</span></td><td><span class="r-strong">● <code>think</code> cites + reports gaps</span></td><td><span class="r-part">◐ trust-grade only</span></td></tr>
+        <tr><td class="feat">Admits "I don't know"</td>
+          <td><span class="r-none">○</span></td><td><span class="r-strong">● built-in</span></td><td><span class="r-part">◐ skill convention</span></td></tr>
+        <tr><td class="feat">Short-term / hot facts store</td>
+          <td><span class="r-none">○</span></td><td><span class="r-strong">● facts table (typed)</span></td><td><span class="r-part">◐ trust-graded thoughts</span></td></tr>
+        <tr><td class="feat">Session-start context injection (hook)</td>
+          <td><span class="r-none">○</span></td><td><span class="r-none">○ (server-side)</span></td><td><span class="r-part">◐ scope pin + skill packs</span></td></tr>
+        <tr><td class="feat">Frozen snapshot (soul/user/memory/today)</td>
+          <td><span class="r-none">○</span></td><td><span class="r-none">○</span></td><td><span class="r-none">○</span></td></tr>
+        <tr><td class="feat">Per-user / per-client isolation (RLS)</td>
+          <td><span class="r-part">◐ app-level workspace</span></td><td><span class="r-none">○ single-tenant</span></td><td><span class="r-strong">● namespace=userId, enforced</span></td></tr>
+        <tr><td class="feat">Trust / provenance governance</td>
+          <td><span class="r-none">○</span></td><td><span class="r-part">◐ source fields + visibility</span></td><td><span class="r-strong">● grades + audit + recall traces</span></td></tr>
+        <tr><td class="feat">Typed graph + traversal</td>
+          <td><span class="r-part">◐ single-hop</span></td><td><span class="r-strong">● BFS depth 10, backlinks</span></td><td><span class="r-part">◐ entity relations + viz</span></td></tr>
+        <tr><td class="feat">Heavy document ingestion (PDF/DOCX)</td>
+          <td><span class="r-strong">● durable Workflows</span></td><td><span class="r-part">◐ Markdown / GitHub sync</span></td><td><span class="r-part">◐ Gmail/OB1 importers</span></td></tr>
+        <tr><td class="feat">Backfill of old sessions → memory</td>
+          <td><span class="r-part">◐ reprocess docs</span></td><td><span class="r-part">◐ webhook/source ingest</span></td><td><span class="r-part">◐ importer interface</span></td></tr>
+        <tr><td class="feat">Fact extraction from a turn</td>
+          <td><span class="r-none">○</span></td><td><span class="r-strong">● <code>extract_facts</code></span></td><td><span class="r-strong">● classify/enrich/writeback</span></td></tr>
+        <tr><td class="feat">Interface surface</td>
+          <td>CLI + MCP + tRPC + UI</td><td>MCP (47 tools) + admin UI</td><td>MCP (25 tools) + CLI + dashboard</td></tr>
+        <tr><td class="feat">Maturity</td>
+          <td>Near production</td><td>v0.2 — 47 ops, 96 tests green</td><td>Phase G/H, strong test discipline</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MAPPING ============ -->
+<section id="mapping">
+  <div class="wrap">
+    <h2><span class="n">04</span>How the projects map to the video's four pillars</h2>
+    <p class="lead">The blueprint asks for one project per pillar. Strikingly, we already own a best-in-class implementation for three of the four — and the fourth (Hermes injection) is deliberately a <i>client</i> concern, not a server one.</p>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>Video pillar</th><th>Inspiration</th><th>Our strongest block</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="feat">1 · Cites its sources</td>
+          <td>GBrain</td>
+          <td><span class="tag gbr">gbrain-cf</span> <code>think</code> — synthesizes, cites slugs, reports gaps, says "no evidence"</td>
+          <td><span class="rate r-strong">✔ Already built</span></td>
+        </tr>
+        <tr>
+          <td class="feat">2 · Recent-context injection</td>
+          <td>Hermes</td>
+          <td><span class="tag hermes">bruce-hermes</span> reference impl + <code>bruce-reborn</code> hooks → wire to gbrain <code>recall</code>/<code>facts</code></td>
+          <td><span class="rate r-part">◐ Adapt existing, not greenfield</span></td>
+        </tr>
+        <tr>
+          <td class="feat">3 · Long-term search by meaning</td>
+          <td>memarch / vectors</td>
+          <td><span class="tag gbr">gbrain-cf</span> hybrid + expansion · <span class="tag cfg">cf-graph</span> for doc backfill</td>
+          <td><span class="rate r-strong">✔ Already built</span></td>
+        </tr>
+        <tr>
+          <td class="feat">4 · Scoped team / client access</td>
+          <td>GBrain company brain</td>
+          <td><span class="tag obr">openbrains</span> per-user namespace + trust grades + audit</td>
+          <td><span class="rate r-part">◐ Built, needs porting into core</span></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="callout warn">
+      <h4>The core tension to resolve</h4>
+      <p class="small" style="margin:0">gbrain-cf has the <b>retrieval brain</b> (citations, hybrid search, hot facts, graph) but is <b>single-tenant</b>. openbrains has the <b>tenancy &amp; governance</b> (per-user RLS, trust grades, audit) but is <b>vector-only with no synthesis</b>. The video wants <i>both</i> from "GBrain." So the decision is: which one becomes the spine, and which one donates its missing half?</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GAPS ============ -->
+<section id="gaps">
+  <div class="wrap">
+    <h2><span class="n">05</span>What's missing across all three</h2>
+    <p class="lead">Even combined, the three projects leave four concrete gaps versus the blueprint. These are the actual build work.</p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>① Session-start injection hook <span class="tag hermes">Pillar 2</span></h3>
+        <p class="small">None of the three servers injects a capped frozen snapshot — correct, it's a harness job. But it is <b>not greenfield</b>: <code>bruce-hermes*/reference/hermes-agent/</code> holds the Hermes reference (SOUL.md "loaded fresh each message," <code>hermes_cli/subcommands/memory.py</code> + <code>profile.py</code>, <code>profile-builder.md</code>) and <code>bruce-reborn/</code> has a TS hooks framework. Work = <b>adapt</b> that into a <code>SessionStart</code> hook in <code>bruce/agent</code> that pulls a byte-capped <code>soul / user / memory / today</code> bundle from gbrain. The main agent's <code>.claude/</code> has settings + skills but no snapshot hook yet.</p>
+      </div>
+      <div class="card">
+        <h3>② The Stop-hook promote/embed loop <span class="tag hermes">Runtime</span></h3>
+        <p class="small">No project has the after-every-turn judge that decides "is this a durable fact?" then promotes to short-term <i>and</i> embeds long-term. gbrain's <code>extract_facts</code> + openbrains' <code>writeback</code> are the primitives; the <b>orchestration belongs in a Bruce Stop-hook</b>.</p>
+      </div>
+      <div class="card">
+        <h3>③ Per-user RLS inside the retrieval brain</h3>
+        <p class="small">gbrain-cf (the best retrieval brain) is single-tenant. To deliver Pillar 4 you must add an owner/scope column to D1 + a Vectorize namespace per identity + token→identity scope filtering — exactly the model openbrains already proves.</p>
+      </div>
+      <div class="card">
+        <h3>④ True reranking</h3>
+        <p class="small">All three stop at RRF fusion + heuristic boosts. The video explicitly calls for a rerank step before synthesis. A cross-encoder or LLM rerank over the top 10–20 candidates is a small, high-leverage addition to gbrain's <code>think</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RECOMMENDATION ============ -->
+<section id="reco">
+  <div class="wrap">
+    <h2><span class="n">06</span>Recommendation: gbrain-cf as the spine, layered</h2>
+    <p class="lead">Make <b>gbrain-cf the unified memory core</b> — it already delivers three of four pillars and is the literal GBrain the video praises. Port openbrains' tenancy/governance into it, use cf-graph as the heavy-ingest feeder, and build the Hermes injection + Stop-hook loop in Bruce. This gives the exact three-tier retrieval Simon describes.</p>
+
+    <div class="arch">
+      <div class="layer">
+        <div class="lbl"><b>Tier 0</b><span>Frozen snapshot</span></div>
+        <div class="box l0">
+          <div class="t">SessionStart hook → capped <code>soul / user / memory / today</code> snapshot</div>
+          <div class="d">Bruce reads a byte-capped bundle from the brain and injects it silently. No vector call — instant, recent context every session. Avoids context rot.</div>
+          <div class="src-chips"><span class="chip hermes">Hermes pattern</span><span class="chip new">adapt bruce-hermes ref</span><span class="chip gbr">reads gbrain recall/facts</span></div>
+        </div>
+      </div>
+      <div class="flow">▼ &nbsp;if not in snapshot, dig deeper</div>
+      <div class="layer">
+        <div class="lbl"><b>Tier 1</b><span>Hot facts</span></div>
+        <div class="box l1">
+          <div class="t">Typed short-term facts — <code>recall</code> / <code>extract_facts</code> / <code>forget_fact</code></div>
+          <div class="d">Decisions, prices, preferences, environment. Capped &amp; deduped. Promoted by the Stop-hook after every turn based on a durability judgment.</div>
+          <div class="src-chips"><span class="chip gbr">gbrain-cf facts table</span></div>
+        </div>
+      </div>
+      <div class="flow">▼</div>
+      <div class="layer">
+        <div class="lbl"><b>Tier 2</b><span>Semantic long-term</span></div>
+        <div class="box l2">
+          <div class="t">Hybrid search — vector + FTS5 + RRF + LLM query expansion → <b>rerank</b></div>
+          <div class="d">"Payment processing" finds "Stripe." Top 5–10 candidates, then a new cross-encoder/LLM rerank step (gap ④). Fed by both live turns and the cf-graph backfill engine.</div>
+          <div class="src-chips"><span class="chip gbr">gbrain-cf search/query</span><span class="chip cfg">cf-graph ingest Workflows</span><span class="chip new">+ rerank</span></div>
+        </div>
+      </div>
+      <div class="flow">▼</div>
+      <div class="layer">
+        <div class="lbl"><b>Tier 3</b><span>Cited synthesis</span></div>
+        <div class="box l3">
+          <div class="t"><code>think</code> — answer from evidence only, cite slug + line + date, report gaps</div>
+          <div class="d">"You agreed a third tier at $37 — decided by Simon, from <code>pricing.md</code>, on that date. No newer pricing discussion found." Honest when evidence is missing.</div>
+          <div class="src-chips"><span class="chip gbr">gbrain-cf think</span></div>
+        </div>
+      </div>
+      <div class="layer" style="margin-top:14px">
+        <div class="lbl"><b>Cross-cut</b><span>Scope &amp; trust</span></div>
+        <div class="box x">
+          <div class="t">Per-identity RLS · trust grades (instruction / evidence / draft) · audit + recall traces</div>
+          <div class="d">Every row tagged by owner + scope; every query filtered by who's asking. Agent writes default to <i>evidence</i>; only humans promote to binding <i>instruction</i>. Reimplement openbrains' pattern on gbrain's D1 + Vectorize namespaces (design-only port — openbrains is Convex/qwen3, so its vectors aren't mergeable; only the architecture transfers). This is the Team OS / company-brain layer.</div>
+          <div class="src-chips"><span class="chip obr">openbrains governance → port into gbrain</span></div>
+        </div>
+      </div>
+      <div class="layer" style="margin-top:14px">
+        <div class="lbl"><b>Feeder</b><span>Ingest &amp; backfill</span></div>
+        <div class="box" style="border-left:4px solid var(--cfg)">
+          <div class="t">Durable ingestion Workflows — old sessions, PDFs, docs → chunk → embed → KG</div>
+          <div class="d">The one-time "your back catalogue becomes your brain" step, plus ongoing document ingest. Resumable, retried per step. Writes into the same Vectorize + facts core.</div>
+          <div class="src-chips"><span class="chip cfg">cf-graph Workflows + KG extraction</span><span class="chip new">session-transcript adapter</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout good">
+      <h4>Why gbrain-cf as the spine (not openbrains) — and the risk to weigh</h4>
+      <p class="small" style="margin:0 0 6px">Two of the four pillars — <b>cited synthesis</b> and <b>hybrid meaning-search</b> — are the hardest to build, and gbrain-cf already nails both, plus the hot-facts store and graph traversal. Both run on the <b>same Cloudflare D1/Workers/Vectorize substrate</b>, so cf-graph and gbrain compose natively.</p>
+      <p class="small" style="margin:0 0 6px"><b>The asymmetry to respect:</b> the gbrain→openbrains gap is <i>additive and safe</i> (add synthesis/hybrid; worst case is weaker search, nothing leaks). The openbrains→gbrain gap is <i>security-critical</i> — retrofitting multi-tenancy into a single-tenant brain means every future query must remember to scope, and isolation bugs leak silently across clients. openbrains made cross-tenant access <b>impossible by construction</b> (<code>requireUserId</code> at the identity layer, <code>namespace=userId</code> at the Vectorize layer); that is hard to replicate as a retrofit. So if a multi-tenant team brain ships soon, lean openbrains and frame the call on <b>isolation risk, not effort</b>.</p>
+      <p class="small" style="margin:0"><b>Decision rule:</b> single power-user / personal brain (Pillar 4 deferred) → extend gbrain — clearly right. Paying multi-tenant team needed soon → extend openbrains as the tenancy shell and port gbrain's <code>think</code> + hybrid + facts in; you inherit production-grade Convex auth + audit from day one. Note these are <i>different substrates</i> (Convex vs D1), so either direction is a <b>reimplementation of the pattern, not a code lift</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BUILD PLAN ============ -->
+<section id="plan">
+  <div class="wrap">
+    <h2><span class="n">07</span>Phased build plan</h2>
+    <p class="lead">Ordered so you get a usable multi-layer brain after Phase 2, with team scoping and backfill following.</p>
+    <ol class="phases">
+      <li><span class="effort">~2–3 days · Bruce</span>
+        <h4>Wire gbrain-cf as Bruce's memory backend + the Stop-hook loop</h4>
+        <p class="small" style="margin:0">Point Bruce at gbrain's MCP. Add a <code>Stop</code> hook: after each turn, call <code>extract_facts</code>; for durable items (decision/price/preference/env) write to the facts store with dedup, and let <code>put_page</code>/embedding handle long-term. This alone fixes Claude's storage gap.</p>
+      </li>
+      <li><span class="effort">~2–3 days · Bruce (adapt, not build)</span>
+        <h4>Hermes-style SessionStart injection (Pillar 2)</h4>
+        <p class="small" style="margin:0">Adapt the existing Hermes reference (<code>bruce-hermes*/reference/hermes-agent/</code> — SOUL.md, <code>memory.py</code>/<code>profile.py</code>, <code>profile-builder.md</code>) and the <code>bruce-reborn</code> TS hooks framework into a <code>SessionStart</code> hook in <code>bruce/agent</code>. Snapshot = <code>soul</code> + <code>user</code> from static brain pages, <code>memory</code> from a byte-capped <code>recall</code> of top recent facts, <code>today</code> from today's timeline entries. Inject silently; hard cap (e.g. ≤2k tokens). <b>Check first whether bruce-reborn already wires snapshot injection</b> — if so this shrinks further.</p>
+      </li>
+      <li><span class="effort">~1–2 days · gbrain-cf</span>
+        <h4>Add a rerank stage to <code>think</code> (gap ④)</h4>
+        <p class="small" style="margin:0">Between RRF fusion and synthesis, rerank the top 10–20 candidates with a cross-encoder (or a cheap LLM rerank). Measurable retrieval-quality win; completes the video's "rerank then cite" step.</p>
+      </li>
+      <li><span class="effort">~2–3 days · cf-graph → gbrain</span>
+        <h4>Session-history backfill</h4>
+        <p class="small" style="margin:0">Write an adapter that feeds existing Claude session transcripts through cf-graph's durable ingestion Workflow (chunk → embed → KG), writing into the shared core. <b>This works because cf-graph and gbrain both embed with bge-m3 1024d — vectors are directly compatible.</b> The effort is re-targeting cf-graph's document/chunk model onto gbrain's page/chunk schema + Vectorize index, not the embedding. Run once: "start with everything already remembered, searchable, cited."</p>
+      </li>
+      <li><span class="effort">~1.5–2 weeks · gbrain-cf (reimplement openbrains' pattern)</span>
+        <h4>Per-identity scoping + trust grades (Pillar 4 / Team OS)</h4>
+        <p class="small" style="margin:0"><b>Security-critical, and a reimplementation — not a code lift</b> (openbrains is Convex, gbrain is D1). Replicate openbrains' model on D1: owner + scope columns on pages/facts/chunks, a Vectorize namespace per identity, token→identity resolution, and query filtering that is enforced at a single choke-point (mirroring openbrains' <code>requireUserId</code> + <code>namespace=userId</code> "impossible by construction" design) rather than per-query. Add instruction/evidence/draft trust grades + <code>memory_audit</code> + recall traces. Budget time for <b>isolation tests that actually prove cross-tenant access fails.</b> This is the company-brain / Railway-RLS equivalent the video defers to "next few weeks."</p>
+      </li>
+      <li><span class="effort">ongoing</span>
+        <h4>Non-technical contribution + version control</h4>
+        <p class="small" style="margin:0">Let brand context &amp; <code>CLAUDE.md</code> live in Notion / Google Drive as source-of-truth, synced into the brain (gbrain already has GitHub source sync as the pattern). Back everything to GitHub. Skills/memory stay agent-managed.</p>
+      </li>
+    </ol>
+
+    <div class="callout">
+      <h4>One-line summary</h4>
+      <p class="small" style="margin:0"><b>gbrain-cf is your GBrain</b> (Pillars 1 &amp; 3, already done) → <b>borrow openbrains' governance</b> for Pillar 4 → <b>use cf-graph to backfill</b> the long-term store → <b>build the Hermes snapshot + Stop-hook in Bruce</b> for Pillar 2 and the runtime loop. That assembles the exact four-pillar, three-tier memory the video describes — mostly from parts you already own.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Generated from deep analysis of <code>/home/roboto/devel/cf-graph</code>, <code>/home/roboto/devel/gbrain-cf</code>, <code>/home/roboto/devel/openbrains</code> and the transcript <code>bruce/agent/data/transcripts/…simon_scrapes.md</code>. Project ratings reflect code as inspected on 2026-06-24.
+  </div>
+</footer>
+
+</body>
+</html>

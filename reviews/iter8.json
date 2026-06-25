@@ -1,0 +1,211 @@
+{
+ "iteration": 8,
+ "priorProgression": [
+  26,
+  68,
+  61,
+  62,
+  57,
+  68,
+  67
+ ],
+ "aggregateScore": 78,
+ "applyApplied": [
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s01.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s02.md"
+   ],
+   "changelog": [
+    "s01: Added new subsection 1.1a 'v1 deployment target (DECIDED)' setting the v1 target = 1-2 tenants (internal dogfood for the owner's new service company), stating the multi-tenant ISOLATION model is fully v1 while horizontal SCALE-OUT (D1 shard fan-out) is DEFERRED to Phase N on a single shared D1; documents Workers Paid ($5/mo, Neuron billing), Clerk auth (confirmed, no provider TBD), MONTHLY_COST_CEILING_USD=400 (configurable/per-tenant-overridable), labeled-conservative rate-limit assumptions, and the AI-provider upgrade path (AI Gateway + AI_PROVIDER=openai-compatible).",
+    "s01: Reframed G8 from 'low hundreds of tenants' hedge to single-D1 v1 with sharding as a Phase-N trigger; Vectorize 10M/50k ceilings + 6 GB D1 trigger marked NON-BINDING at 1-2 tenants.",
+    "s01: Rewrote the Non-Goals row to 'No horizontal scale-out (D1 sharding) in v1' (1-2 tenants, single D1, tenant_shards resolves to one shard for forward-compat).",
+    "s01: SC8 now pre-checks against MONTHLY_COST_CEILING_USD (default 400, configurable, per-tenant-overridable) on Workers Paid; SC9 reframed as a Phase-N observability trigger, non-binding at 1-2 tenants.",
+    "s01: Scope-boundary table deferred cell now reads 'Horizontal scale-out: D1/Vectorize shard fan-out - Phase N (single D1 in v1)'.",
+    "s01: DEBRIS - corrected Persona B line (1.4) so trust_grade stays in the memory_use_policy sidecar (never a Vectorize field, \u00a73.2/\u00a75.2) instead of being pushed to metadata; visibility now listed as the metadata dimension.",
+    "s02: ScopedDB note, L6/\u00a72.7 prose, and the L4 layer-ASCII now state v1 runs a SINGLE shared D1 (shard fan-out is a deferred future layer, \u00a75e); added Workers Paid + MONTHLY_COST_CEILING_USD framing.",
+    "s02: Added the AI-provider abstraction as an explicit architectural seam in \u00a72.7 (provider factory per cf-graph factory.ts; v1 wires only native Workers AI via AI Gateway; AI_PROVIDER=openai-compatible BYO path documented, not built).",
+    "s02: DEBRIS - corrected the ScopedVectorize \u00a72.5 delta: trust_grade removed from the 'move to filterable metadata' list and replaced with the canonical sidecar-only invariant (never an index/filter/upsert field; lives only in memory_use_policy \u00a73.2/\u00a75.2, LEFT-JOINed at read, default 'evidence'); visibility added to the metadata set."
+   ],
+   "residual": [
+    "The trust_grade-into-Vectorize-metadata debris spans ~6 lines as stated in the task; s02 (\u00a72 prose) had exactly ONE such line (the \u00a72.5 ScopedVectorize delta) which is now fixed, plus the \u00a71.4 Persona-B instance in s01 was fixed. The remaining ~4 debris instances live in /tmp/.../scratchpad/coderefs.json (the \u00a72 createVectorizeClient code-reference entries at lines 30, 53, 65, 81, each saying 'move/add team_id/scope/trust_grade/embedding_model to metadata'). These are OUTSIDE the EDIT-ONLY s01/s02 scope and were not modified; they should be corrected to the sidecar-only invariant in a follow-up that includes coderefs.json (and any assembled PRD.md regenerated from it).",
+    "'pending'/'embeddingModel:pending'/status:'pending' occurrences in s01/s02 are legitimate code values, NOT 'pending confirmation' residuals; no unresolved confirmation-pending markers remain in s01/s02.",
+    "Per-model Workers AI request-RATE limit values are stated as explicitly-labeled conservative assumptions (unverified-until-staging); their concrete numbers live in \u00a75.1/\u00a75f (not in scope here) and remain to be verified against staging."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s03.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s10.md"
+   ],
+   "changelog": [
+    "s03 \u00a73.1.4: annotated tenant_shards as SINGLE-SHARD in v1 - every row resolves to one shared D1 (db_binding='DB'); columns retained for forward-compat; horizontal split (db_binding fan-out / brain-chunks-{shard}) reframed as a DEFERRED Phase-N scale-out trigger, not v1 build. No new sharding logic added.",
+    "s03 \u00a73.2: annotated the Vectorize per-index ceilings (10M vectors / 50k namespaces) as NON-BINDING at the v1 scale of 1-2 tenants - documented forward-compat headroom + Phase-N split trigger, not a v1 constraint.",
+    "s10 \u00a710.1 vars: added MONTHLY_COST_CEILING_USD=400 (per-tenant-overridable env var).",
+    "s10 \u00a710.1 d1_databases comment: made v1 = SINGLE D1, no shard fan-out explicit; isolation model intact, horizontal D1 split is deferred Phase-N. Kept BOTH Vectorize indexes (brain-chunks + brain-entities) untouched.",
+    "s10 \u00a710.1 (after \u00a75f): added new 'Plan, models & rate limits' note - Workers PAID ($5/mo), Workers AI Neuron budget (~10k/day incl., ~$0.011/1k after), locked model set, INFORMED LABELED conservative per-model req/min assumptions (unverified-until-staging, non-binding at 1-2 tenants), AI Gateway (caching/retry/fallback), and BYO/OpenAI-compatible upgrade path (AI_PROVIDER=openai-compatible via cf-graph factory.ts).",
+    "s10 \u00a75f + \u00a710.7 M5: wired the token_spend 429 enforcer to MONTHLY_COST_CEILING_USD (default 400, per-tenant-overridable) - trips when projected monthly spend would exceed it; at 1-2 tenants it is effectively the whole-platform budget.",
+    "s10 \u00a710.3: confirmed Clerk as the OAuth 2.1 IdP (CLERK_* secrets already present and complete); removed the 'IdP TBD' hedging by stating no IdP choice is left open.",
+    "s10 \u00a710.5 Tier-2 + \u00a710.7 production alerts: reframed the \u00a70 scale-trigger thresholds (6GB / 7M / 50k) as Phase-N scale-out triggers, NON-BINDING at 1-2 tenants.",
+    "s10 \u00a710.7 D1 WRITE-THROUGHPUT: resolved the shard-split QPS debris - reframed from 'designed in here' v1 build to a documented Phase-N trigger; single-writer ceiling NON-BINDING at 1-2 tenants; the write-QPS threshold is observed at scale-up, not pre-tuned at v1. Recall-trace decoupling retained as a cheap v1 design choice."
+   ],
+   "residual": [
+    "Per-model Workers AI request-rate limits in s10's 'Plan, models & rate limits' note are LABELED conservative ASSUMPTIONS (embed/rerank ~300 req/min, synthesis ~100 req/min) - explicitly unverified-until-staging and non-binding at 1-2 tenants. Real ceilings should be observed at the staging reranker gate (\u00a710.6) and captured back."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s05.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s07.md"
+   ],
+   "changelog": [
+    "s05 \u00a75.1 cost-boundary: integrated DECIDED platform facts \u2014 Workers Paid plan ($5/mo), Neuron billing (~10k Neurons/day then ~$0.011/1k), MONTHLY_COST_CEILING_USD=400 (configurable per-tenant, projected-spend 429 enforcer), and the BYO/upgrade path (AI Gateway caching/retry/fallback + AI_PROVIDER=openai-compatible per cf-graph factory.ts). token_spend name preserved.",
+    "s05 \u00a75.1 rate-limit paragraph: reframed the ~300/~300/~3000 req/min figures as explicitly-LABELED conservative ASSUMPTIONS, unverified-until-staging and NON-BINDING at 1-2 tenants. Demoted the prior 'must confirm / file limit-increase before launch / launch dependency' hedge to a documented Phase-N scale-out TRIGGER. Added (see \u00a710) cross-ref instead of duplicating a table.",
+    "s05 \u00a75.4 rerank + \u00a75.5 synthesis: added brief, consistent pointers tying each model call to the Neuron/token_spend/MONTHLY_COST_CEILING_USD chokepoint and its assumed (non-binding) per-model rate-limit, pointing to \u00a75.1/\u00a710 for detail; noted the BYO/OpenAI-compatible longer-context swap behind the synthesis guard. No duplicated tables.",
+    "s07 \u00a77.2: added a DECIDED confirmation that Clerk is the confirmed OAuth 2.1 upstream IdP (matches gbrain-cf + openbrains), explicitly removing the 'IdP TBD' framing.",
+    "s07 \u00a77.3 foldPartitionFilter (debris b): replaced the single-scope-only fold (and its per-scope fan-out/union fallback) with a single multi-scope filtered query {scope:{$in:[...granted scopes]}}, the form \u00a75.3.2 already uses. Made the ScopedVectorize.query() authorization guard shape-aware (string OR {$in:[...]}) so the folded object no longer makes the .includes() check throw ForbiddenError on every restricted query.",
+    "s07 \u00a77.3 getLinks/expandFrontier (debris c): extended the link arm to apply the same nodeGate (scope AND visibility) to BOTH endpoints (nf/nt), matching the BFS node-gate; threaded EdgeSpec as the first parameter; reframed re-hydration (\u00a77.3/\u00a77.4/\u00a77.10 prose) as defense-in-depth rather than the only node-level gate.",
+    "s07 \u00a77.3 (debris d): added a sentence stating nodeGate/nodeVisible/resolveScopedNode (and the new endpoint JOINs) interpolate EdgeSpec field names validated at construction against a fixed allowlist of known table/column names \u2014 not arbitrary input \u2014 with all values bound as parameters, so it is not an injection surface.",
+    "s07 \u00a77.4 + \u00a77.10: updated graph-arm prose to describe both-endpoint node-gating (scope + visibility) consistently with the new code, with a light hedge for node tables that do not yet carry a visibility column."
+   ],
+   "residual": [
+    "\u00a76 callers of ScopedDB.getLinks/expandFrontier (traverse_graph / get_links / get_backlinks and the BFS) must add the EdgeSpec first argument \u2014 their signatures changed in \u00a77.3 (getLinks(spec, fromId, dir), expandFrontier(spec, ids)) to apply nodeGate to both endpoints. \u00a76 is in a separate file not edited here; those call sites need updating to match.",
+    "The \u00a710 cross-references in s05 (Neuron/per-model rate-limit detail) assume \u00a710 carries that content; \u00a710 is a separate file not in scope here. If \u00a710 lacks the per-model detail, the (see \u00a710) pointers should be retargeted."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s09.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/appendix.md"
+   ],
+   "changelog": [
+    "s09.md \u00a79.0.1: fixed the membership-resolution isolation bug. The OAuth/Clerk JWT branch now resolves the active tenant FIRST (from authenticated context / OAuth resource, 401 if unspecified), then scopes the membership lookup with WHERE user_id = ? AND tenant_id = ? (was unscoped WHERE user_id = ?). No matching row => 401; this scoped query now also serves as the re-check. Prose reordered so the tenant is an input to the query (not an attached output), and a sentence added noting a multi-tenant user no longer over-matches and the Principal is bound to exactly one tenant per request. Machine-token and API-key branches were already (userId, tenantId)-bound, so all three branches now match.",
+    "s09.md \u00a79.1.3: threaded MONTHLY_COST_CEILING_USD into the spend-ceiling 429 error case (default 400, configurable via env var, per-tenant-overridable; trips when projected monthly spend would exceed it; whole-platform budget at 1-2 tenants).",
+    "appendix.md \u00a71: resolved 'v1 tenant ceiling acceptance' => 1-2 tenants internal dogfood, isolation intact, single D1, horizontal scale-out deferred to Phase-N, tenant_shards forward-compat resolving to one shard, Vectorize 10M/50k ceilings non-binding; exact vector/session counts kept as the sole TRUE-UNKNOWN ('measure during dogfood').",
+    "appendix.md \u00a79: resolved 'active-tenant selection' => error (401) default, scoped WHERE user_id = ? AND tenant_id = ?, Principal bound to one tenant (mirrors the s09 SQL fix, cross-ref \u00a77.2/\u00a79.0.1).",
+    "appendix.md \u00a710 (AI Gateway): appended the PLATFORM resolution \u2014 Workers PAID ($5/mo), Neurons billing, AI Gateway caching/retry/fallback + BYO/OpenAI-compatible upgrade path (AI_PROVIDER=openai-compatible, cf-graph factory.ts), locked models retained, MONTHLY_COST_CEILING_USD cap.",
+    "appendix.md \u00a710 (Workers AI request-RATE limits): resolved-for-v1 as labeled conservative assumptions (unverified-until-staging, non-binding at 1-2 tenants); downgraded off 'launch dependency'.",
+    "appendix.md Confirmed-decisions block: changed 'Four product decisions' to 'These product decisions' and added items 5-8 (Scale/topology; Platform plan PAID; IdP=Clerk; Cost ceiling MONTHLY_COST_CEILING_USD=400 configurable)."
+   ],
+   "residual": [
+    "IdP=Clerk: no explicit 'IdP TBD' hedging existed in either file to remove; recorded as a new Confirmed-decision (item 7) rather than a deletion. The OAuth/Clerk JWT path in s09 already named Clerk.",
+    "Left genuinely-open engineering questions untouched (not 'pending product sign-off'): target_id polymorphism, embed-failure policy, KG Workflow-vs-Queue split, per-document chunk ceiling, D1 down-migration policy, idle_minutes window, cron cadence/pacing, Vectorize isolation-test coverage, transport/CLI/dashboard-UX design questions, reranker output-shape capture. Per advisor these are not the four facts.",
+    "Team-row aggregation (a user with multiple team rows in one tenant) is pre-existing modeling, not part of the isolation fix; left as-is."
+   ]
+  }
+ ],
+ "reviews": [
+  {
+   "lens": "cf-correctness",
+   "score": 83,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Enforcement boundary is CORRECT and docs-verified: AI Gateway spend limits price only Unified-Billing/BYOK rails 'for models with known pricing'; a native env.AI.run binding call traverses neither rail, so the app-level token_spend 429 pre-check BEFORE env.AI.run is rightly the enforcing cap for the all-@cf/ v1 set. MONTHLY_COST_CEILING_USD=400 is wired end-to-end (vars in \u00a710.1, token_spend DDL \u00a73.1, pre-check \u00a75.1/\u00a79.1.3/\u00a75f, dashboard banner) and per-tenant-overridable.",
+    "Vector-arm CF correctness is excellent: \u00a75.3.2 knows topK max is 100 (drops to 50 only with returnValues/returnMetadata:'all'), returns only {id,score} to preserve the full 100 budget under a metadata filter, uses the $in operator to collapse multi-scope grants to one query, respects the 64-byte metadata-indexability caveat, and solves the restricted-principal recall cliff by pushing scope into the Vectorize filter (not impossible over-fetch) while keeping visibility authoritative at D1.",
+    "Right-sized for the confirmed v1 target: single D1, sharding deferred to Phase N, tenant_shards columns resolve to one shard for forward-compat, Vectorize 10M-vectors/50k-namespaces and 6GB-D1 ceilings explicitly labeled NON-BINDING and reframed as Phase-N scale-out triggers rather than v1 build work \u2014 the design rewards right-sizing over over-engineering, exactly per the lens.",
+    "Namespace honesty: \u00a77.4/\u00a71.5 correctly characterize a Vectorize namespace as a query-time partition (same class as a metadata filter), NOT a security boundary; the hard guarantee rests on un-omittable ScopedVectorize wiring + the mandatory D1 row re-check. namespace=tenantId is justified on team-recall grounds, not a false hard-vs-soft security claim.",
+    "Workers AI Neuron billing verified exact ($0.011/1k Neurons, 10k Neurons/day included on Paid); rate limits handled with the correct posture (labeled assumptions, non-binding at 1-2 tenants, degrade-or-queue not user-429, limit-increase as a Phase-N trigger), and the \u00a710.7 single-writer-D1 write-throughput axis with ctx.waitUntil-decoupled recall traces is the right Cloudflare idiom.",
+    "AI Gateway + BYO path documented but not built: every env.AI.run carries metadata.tenant_id for attribution, the gateway option (not a binding) is correctly shown, and the AI_PROVIDER=openai-compatible seam behind the embed()/gen()/rerank() chokepoints is the only forward-compat investment \u2014 a config swap, not a rewrite."
+   ],
+   "weaknesses": [
+    {
+     "section": "s09",
+     "issue": "The enforcing cost cap is 'token_spend pre-check returns 429 when PROJECTED MONTHLY SPEND from token_spend.neurons would exceed MONTHLY_COST_CEILING_USD,' but the document never specifies HOW token_spend.neurons is written. The DDL has a neurons column and \u00a75f calls token_spend 'the durable record,' yet no post-env.AI.run accumulation step is defined. If neurons are sourced only from the eventually-consistent AI Gateway log (env.AI.aiGatewayLogId), the pre-check runs on lagged data and the 429 overshoots \u2014 a SOFT cap, not the claimed enforcing/hard cap. This is the hard-cap-vs-soft-cap distinction. NON-BINDING at 1-2 tenants (the 10k-Neuron/day included allotment dominates the headroom), so non-blocking, but the 'enforcing cap' wording overstates what is specified.",
+     "severity": "medium",
+     "recommendation": "Add the missing chokepoint write-back: after each successful env.AI.run, compute neurons app-side from the returned token usage x the per-model neuron rate and UPSERT into token_spend(tenant_id, window, model) in the same code path (ctx.waitUntil acceptable). State explicitly that the pre-check reads this app-maintained ledger (fresh) and that the AI Gateway log is reconciliation/attribution only, so 'enforcing' is accurate. One paragraph in \u00a75.1/\u00a79.1.3."
+    },
+    {
+     "section": "s10",
+     "issue": "The labeled rate-limit assumptions are numerically inconsistent across three sections: \u00a75.1 (L1684) says embed ~3000 / gen ~300 / rerank ~300 req/min; \u00a710 (L4182-4184) says embed ~300 / synthesis ~100 / rerank ~300; the Appendix (L4488) says ~3000 embed / ~300 text-gen+reranker. Embed (300 vs 3000) and gen (100 vs 300) disagree. These are the 'clamp targets' the \u00a75.1/\u00a710.7 pacing logic is said to clamp against, so contradictory values are real debris even though all are labeled non-binding at 1-2 tenants.",
+     "severity": "low",
+     "recommendation": "Reconcile to a single canonical table (directionally embeddings >> large-LLM, so \u00a710's 'embed ~300' is the likely typo \u2014 set embed ~3000 to match \u00a75.1 and the Appendix; pick one gen value, ~300). Have \u00a710 and the Appendix reference that one table instead of restating numbers."
+    },
+    {
+     "section": "s10",
+     "issue": "The Workers AI Paid plan's 10,000-Neuron/day included allotment is a HARD daily limit at which Workers AI itself errors (docs: 'further operations will fail with an error'; 'all limits reset daily at 00:00 UTC'). The platform's enforcer keys only on a monthly USD ceiling. The PRD acknowledges the daily allotment as 'dominant headroom' but does not treat it as an independent operational ceiling, so a tenant could be under the monthly $400 budget yet hit the daily Neuron wall mid-day.",
+     "severity": "low",
+     "recommendation": "Add one line noting the 10k-Neuron/day allotment is a distinct daily ceiling from the monthly USD budget, and that at 1-2 dogfood tenants daily volume is expected well under it; optionally surface daily-Neuron headroom on the same \u00a710.5 dashboard panel as the monthly USD bar."
+    }
+   ],
+   "missing": [
+    "A specified post-env.AI.run write-back step that populates token_spend.neurons (app-computed from token counts x per-model neuron rate) so the 'projected monthly spend' pre-check reads fresh durable data rather than the eventually-consistent AI Gateway log",
+    "One canonical per-model rate-limit table referenced by all sections, instead of three partially-conflicting assumption sets in \u00a75.1, \u00a710, and the Appendix",
+    "An explicit note that the hard daily 10,000-Neuron Workers AI allotment (docs: operations fail with an error past it) is a distinct ceiling from the monthly USD budget the enforcer keys on"
+   ],
+   "summary": "Re-scored against the CONFIRMED v1 target (1-2 tenants, Workers Paid, Clerk, MONTHLY_COST_CEILING_USD=400, scale-out deferred to Phase N), not a hypothetical hyperscale deployment. On the Cloudflare-primitive-correctness lens the document is now strong and, importantly, RIGHT-SIZED: the four deployment facts are integrated consistently across \u00a71.1a/\u00a71.2/\u00a72.7/\u00a75.1/\u00a710.1/\u00a710.3 and the Appendix \"Confirmed decisions\" block, with no residual \"IdP TBD\" or \"unknown scale\" placeholders. Every load-bearing CF claim I could check verifies against primary docs (2026-06): (1) Workers AI Neuron pricing $0.011/1k Neurons + 10,000 Neurons/day included on Paid \u2014 exact; (2) AI Gateway spend limits apply only to Unified-Billing/BYOK rails \"for models with known pricing,\" so the all-@cf/ binding-based v1 set is NOT gateway-enforceable and the app-level token_spend 429 pre-check correctly IS the enforcing cap (the contentious cross-round \"debris\" point survives docs verification); (3) Vectorize 10M vectors/index (Jan-2026 increase) + topK ceiling 100, dropping to 50 only with returnValues/returnMetadata:'all' \u2014 the \u00a75.3.2 vector arm correctly returns only {id,score} to keep the full 100 budget, uses the $in metadata operator for multi-scope grants, respects the 64-byte metadata-indexability caveat, and frames the namespace as a query-time partition (NOT a security boundary) with the D1 re-check as the authoritative gate. The right-sizing is explicit and correct: single D1, sharding deferred, tenant_shards columns resolve to one shard, Vectorize/D1 ceilings labeled NON-BINDING and reframed as Phase-N triggers; the \u00a710.7 single-writer-D1 write-throughput axis and ctx.waitUntil-decoupled recall traces are the correct CF idiom. Workers AI per-model rate limits are explicitly labeled conservative ASSUMPTIONS, unverified-until-staging, non-binding at 1-2 tenants, degrade-or-queue (never 429 the user) \u2014 the correct posture; AI Gateway + BYO/OpenAI-compatible upgrade path is documented behind the embed()/gen()/rerank() chokepoints and not built in v1. No critical or high issue remains; the score cap-below-60 rule (unresolved critical) does not apply. Residual debris is minor: one MEDIUM spec gap (where token_spend.neurons is written \u2014 app-computed post-call vs lagged gateway log \u2014 is never specified, which is the hard-cap-vs-soft-cap distinction; non-binding at 1-2 tenants) and two LOW items (the rate-limit assumption numbers conflict across three sections; the hard daily 10k-Neuron Workers AI allotment is distinct from the monthly USD ceiling the enforcer keys on). These are the \"clear the round-7 debris\" cleanups, not design defects."
+  },
+  {
+   "lens": "completeness",
+   "score": 79,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Four deployment facts integrated authoritatively and consistently: 1.1a 'DECIDED' framing is echoed (not contradicted) in every downstream section, and each fact has a dedicated single-source-of-truth entry in the appendix 'Confirmed decisions' list (items 5-8).",
+    "Scale-out deferral is airtight across all sharding touchpoints \u2014 the tenant_shards DDL itself carries an inline 'SINGLE-SHARD in v1' / db_binding='DB' comment, and \u00a710.7 reframes the 6 GB / 10 M-vector / 50k-namespace / write-QPS limits as explicitly NON-BINDING Phase-N triggers, so no reader can mistake them for v1 constraints.",
+    "Clerk and the $400 ceiling are stated with anti-hedge language ('not IdP TBD', 'no provider TBD', 'configurable via env var, per-tenant-overridable') at every occurrence, eliminating the ambiguity the prior rounds carried.",
+    "Rate-limit uncertainty is handled correctly for an internal-consistency lens: it is consistently relabeled as a 'conservative ASSUMPTION, unverified-until-staging, non-binding at 1-2 tenants' Phase-N trigger rather than an open 'pending' blocker, so the residual unknown is scoped, not contradictory.",
+    "The appendix cleanly separates RESOLVED decisions from genuinely-deferred tuning tasks (idle_minutes window, prune-N days, trust-boost values), so no decided value is left masquerading as open."
+   ],
+   "weaknesses": [
+    {
+     "section": "s10",
+     "issue": "The \u00a710.1 'Plan, models & rate limits' block self-contradicts the rest of the document on two of three rate-limit numbers: it states embed (bge-m3) ~300 req/min (line 4182) where \u00a75.1 (line 1684) and appendix (line 4488) say ~3000 \u2014 a 10x discrepancy \u2014 and synthesis ~100 req/min (line 4183) where \u00a75.1/appendix say ~300. Line 4181 explicitly frames this block as 'configured against the following assumed conservative values' that \u00a75.1 uses, so \u00a710.1 asserts fidelity to \u00a75.1 while contradicting it twice. Operationally non-binding at 1-2 tenants, but it is a direct numeric self-contradiction of an assumed value across sections.",
+     "severity": "medium",
+     "recommendation": "Reconcile \u00a710.1 to \u00a75.1/appendix: change embed 300 -> 3000 req/min and synthesis 100 -> 300 req/min (or, if \u00a710.1's numbers are the intended ones, update \u00a75.1 and the appendix to match). Rerank (~300) already agrees and needs no change."
+    },
+    {
+     "section": "s04",
+     "issue": "The Workflow-id retention caveat at line 1573 still reads 'within its retention window (3 days Free / 30 days Paid)', presenting the Free/Paid plan as an open variable. With Workers Paid now confirmed (\u00a71.1a, appendix #6), the operative window is unambiguously 30 days and the 'Free' branch is non-applicable residue \u2014 exactly the kind of pre-decision hedge the deployment-fact integration was meant to clear.",
+     "severity": "low",
+     "recommendation": "Drop the Free branch: state 'within its 30-day retention window (Workers Paid)'. The fast-path-vs-durable-backstop argument is unaffected and remains correct."
+    },
+    {
+     "section": "appendix",
+     "issue": "Internal revision-provenance tags ('iter-2', 'iter-3', 'iter-4', 'iteration-2') remain pervasive throughout the body (dozens of occurrences). These are not contradictions \u2014 they annotate applied fixes, not unresolved items \u2014 but they are cosmetic debris that read as in-progress edit markers in what is presented as a finished PRD.",
+     "severity": "low",
+     "recommendation": "Optional cleanup pass to strip the 'iter-N' inline tags (or relocate them to a single changelog block) once the document is frozen; no semantic change required."
+    }
+   ],
+   "missing": [
+    "Positive cross-check of each named round-7 (R7) debris item \u2014 the specific R7 review list is an external artifact not contained in the PRD, so clearance can only be inferred from the absence of surviving hedges, not verified item-by-item.",
+    "A single canonical rate-limit table referenced by both \u00a75.1 and \u00a710.1 \u2014 the duplicated-prose approach is what allowed the embed/synthesis numbers to drift; one authoritative table would make this class of discrepancy structurally impossible."
+   ],
+   "summary": "Requirements-coverage / internal-consistency re-score after integrating the four confirmed deployment facts (1-2 tenants v1 / Workers Paid / Clerk / $400 configurable ceiling) with scale-out deferred to Phase-N. The four facts are genuinely and consistently integrated \u2014 no surviving contradictions of the now-decided values. (1) The 1-2-tenant target is stated authoritatively in \u00a71.1a and threaded through G8, Non-Goals, SC9, \u00a72, \u00a73.1.4, \u00a75.1, \u00a710.5/\u00a710.7, and the appendix; every \"unknown\" that remains is the explicitly-bounded \"vector/session counts unknown but SMALL,\" not an \"unknown scale\" hedge. (2) Scale-out deferral is consistent at every sharding mention: \u00a71.1a, G8, Non-Goals, the \u00a72 ASCII, the tenant_shards DDL (\u00a73.1.4 carries an explicit \"SINGLE-SHARD in v1, db_binding='DB'\" comment), \u00a73.2, ScopedDB/ScopedVectorize (\u00a77.3 resolve to 'DB'/'brain-chunks'), \u00a710.1 wrangler config, and the \u00a710.7 Phase-N triggers \u2014 nowhere is sharding treated as v1 build work. (3) Clerk is confirmed everywhere with explicit \"not IdP TBD\" language (\u00a71.1a, \u00a77.2 line 2725, \u00a710.3 line 4220, appendix #7). (4) The $400 ceiling (configurable, per-tenant-overridable) is consistent across SC8, \u00a71.1a, \u00a72, \u00a75.1/\u00a75f, \u00a79.1.3, \u00a710.1 vars, and appendix #8. Rate-limit hedges are uniformly relabeled as \"assumed, conservative, non-binding at 1-2 tenants\" rather than \"pending.\" The appendix consolidates all 8 confirmed decisions as a single source of truth and marks each carried-forward open question RESOLVED or as a v1-irrelevant tuning task. Residual defects are minor and do not touch the four facts: (a) a real internal-consistency nick \u2014 the \u00a710.1 \"Plan, models & rate limits\" block states embed ~300 req/min (\u00a75.1/appendix say ~3000 \u2014 a 10x contradiction) and synthesis ~100 req/min (\u00a75.1/appendix say ~300), while line 4181 claims that very block is \"configured against\" the \u00a75.1 values, so \u00a710.1 asserts fidelity to \u00a75.1 while contradicting it twice; this is one stale block, non-binding operationally but a direct numeric self-contradiction; (b) line 1573's Workflow-id retention caveat still cites \"3 days Free / 30 days Paid\" as if the plan were undecided \u2014 now that Paid is confirmed the operative window is unambiguously 30 days and the Free branch is non-applicable residue; (c) \"iter-N\"/\"iteration-N\" revision-provenance tags remain pervasive (dozens) \u2014 not contradictions, but cosmetic debris for a finished PRD. On the \"R7 debris\": I could verify no surviving unknown-scale / IdP-TBD / rate-pending hedges and that the deferral/fact integration is clean, but the specific round-7 review item-list is an external artifact not contained in the PRD, so I cannot positively cross-check each R7 item was cleared by name \u2014 I report only what the document itself substantiates. Net: a large improvement on the lens; the four facts are well-integrated with no critical contradiction (nothing caps below 60). Fix the \u00a710.1 rate-limit numbers and the line-1573 Free-plan residue."
+  },
+  {
+   "lens": "security-isolation",
+   "score": 71,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Single structural choke-point (ScopedDB/ScopedVectorize/ScopedR2) with an ESLint banned-import rule converts isolation from convention to a compile-time-enforced control; no read arm (FTS, vector, graph, facts) can bind tenant_id while skipping the scope/visibility gate, and there is explicitly no raw-SQL passthrough.",
+    "Write side actually populates the columns the read predicates depend on: \u00a78.3 stamps session visibility/user_id/team_id onto transcript chunks, chunks.visibility is NOT NULL DEFAULT 'world' CHECK-constrained, and writeFact forces user_id=p.userId + role-constrains visibility \u2014 so canary #8's intra-tenant private-session leak is backed by a real data model, not just a read-side assertion.",
+    "trust_grade is provably nowhere in the vector path \u2014 authoritative ChunkMeta enumerated without it, not a metadata index, foldPartitionFilter folds only scope, boost runs post-hydration on the sidecar \u2014 so a trust promotion never re-upserts a vector and never participates in partitioning.",
+    "Recall-cliff fix (foldPartitionFilter {scope:{$in:[...]}}) correctly keeps the restricted-principal topK=100 budget inside the grant via ONE query, while keeping visibility authoritative at D1 (declining the pushdown that would drop the principal's own private chunks) \u2014 a subtle, correct call.",
+    "Break-glass is a textbook fail-closed audited carve-out: org-role-gated, 403 for non-admins incl. forged breakGlass:true, in-batch audit row + guaranteed alert, intra-tenant only, with canaries #14/#15 asserting both the deny and the audited-success paths.",
+    "API-key mint pins allowed_scopes=intersect(request, minter.allowedScopes), closing the one-step privilege-escalation path a restricted Persona-C member could otherwise use to mint a tenant-wide key.",
+    "Table-driven canary meta-test treats visibility as a third isolation axis spanning facts AND chunks AND graph, so a new read surface that bypasses readFacts/visibilityPredicate/the typed frontier methods fails CI \u2014 isolation coverage scales with the surface."
+   ],
+   "weaknesses": [
+    {
+     "section": "s07",
+     "issue": "Four Code-reference annotation lines (\u2248554, 1619, 2098, 3381) still describe Vectorize metadata as including trust_grade ('move team_id/scope/trust_grade/embedding_model to metadata', 'scope/type/trust_grade as metadata filters'), directly contradicting the authoritative \u00a73.2/\u00a74.9 design which states trust_grade is deliberately NOT a Vectorize field. This is stale round-debris, not an actual leak (the load-bearing ChunkMeta and foldPartitionFilter are clean), but it is exactly the kind of contradiction that misleads an implementer porting from the cited source.",
+     "severity": "low",
+     "recommendation": "Edit the four code-reference lines to read 'move team_id/scope/visibility/embedding_model to metadata; trust_grade stays in the memory_use_policy sidecar (never a Vectorize field)' so the annotations match the authoritative \u00a73.2 shape."
+    },
+    {
+     "section": "s05",
+     "issue": "The FTS arm's inline SQL (\u00a75.3.1, lines 1761-1769) filters tenant_id + scope but does NOT apply the visibility predicate inline; visibility is only enforced when the returned ids are hydrated through getChunksByIds. This is correct per the 'D1 re-check is authoritative' model and the end-to-end result is gated, but a reader could mistake the inline arm as fully self-gating and a future refactor that consumes FTS ids without the mandatory hydration step would leak private-session chunk existence on the keyword arm.",
+     "severity": "low",
+     "recommendation": "Add one sentence to \u00a75.3.1 making explicit that the FTS arm's inline predicate is tenant+scope only and that the visibility tier is enforced at the mandatory getChunksByIds hydration (never bypass hydration for FTS ids) \u2014 mirroring the note already present for the vector arm."
+    },
+    {
+     "section": "s07",
+     "issue": "visibilityPredicate's team branch evaluates to sql`0` when p.teamIds is empty, and resolves team rows via team_id IN (p.teamIds). This is correct, but the security guarantee depends entirely on principalFromMembership populating teamIds completely from ALL of the user's membership rows in the active tenant. A user with multiple membership rows (one per team) relies on highestRole + the teamIds flatMap being exhaustive; there is no canary explicitly asserting that a user who is a member of teams T1 and T2 (two rows) gets BOTH in teamIds (only the single-team recall case #9 is specified).",
+     "severity": "medium",
+     "recommendation": "Add a canary (or extend #9) asserting that a user with multiple team-membership rows in one tenant recalls team rows for ALL their teams (teamIds is the union across membership rows), guarding against a regression where principalFromMembership collapses to a single row."
+    }
+   ],
+   "missing": [],
+   "summary": "Against the CONFIRMED v1 target (1-2 tenants, Workers Paid, Clerk, $400/mo configurable, scale-out deferred to Phase-N), the multi-tenant + intra-tenant isolation story is sound and no critical leak survives. All seven lens checks pass on both the read AND write sides. (1) \u00a79.0.1/\u00a77.2 membership resolution is tenant-bound: the lookup is WHERE user_id=? AND tenant_id=?, the active tenant is pinned per-surface and re-checked against memberships, and an unspecified tenant errors 401 (never a silent first-membership default) \u2014 a multi-tenant user is bound to exactly one tenant per request. (2) foldPartitionFilter collapses any number of granted scopes to a single {scope:{$in:[...]}} query, derived from the principal's own grant, and ScopedVectorize.query independently re-authorizes any explicit scope filter against allowedScopes, so no ungranted scope leaks; visibility is deliberately NOT pushed (correct \u2014 it would drop the principal's own private chunks). (3) The link-arm getLinks/expandFrontier are typed ScopedDB methods that apply nodeGate (scope AND visibility) to BOTH endpoints (nf/nt) with no raw-SQL escape hatch; the BFS, getLinks, and get_backlinks gate identically, and the seed is resolved through nodeVisible/resolveScopedNode before the walk. (4) trust_grade is genuinely absent from the entire vector path: the authoritative ChunkMeta upsert blob (\u00a73.2/\u00a74.9) enumerates exactly {documentId,teamId,scope,visibility,userId,embeddingModel,chunkIndex,path,tenant_id} with no trustGrade, it is not a metadata index, foldPartitionFilter folds only scope, and the trust boost runs post-hydration on the LEFT-JOINed sidecar. (5) Break-glass remains fail-closed (403 for non-admins, including a forged breakGlass:true), org-role-gated, writes a breakglass_read audit row in-batch, fires a high-severity alert every call, is intra-tenant only (never bypasses tenant_id), and is covered by canaries #14/#15. (6) Isolation is intact despite single-D1: ScopedDB injects tenant_id + scopePredicate + visibilityPredicate at one choke-point with an ESLint banned-import control, ScopedVectorize hard-wires namespace=tenantId with a D1 re-check as the correctness gate, and the \u00a73.1.8 coverage matrix confirms chunks/facts/pages carry tenant_id+visibility+user_id+team_id (entities the {world,team} subset). Crucially the WRITE side backs the read predicates: \u00a78.3 stamps the session's visibility/user_id/team_id onto transcript chunks (overriding the 'world' default that correctly applies only to org-knowledge ingested docs), chunks.visibility is NOT NULL DEFAULT 'world' CHECK-constrained, writeFact forces user_id=p.userId and constrains visibility by role, and \u00a77.1 mint pins allowed_scopes=intersect(request, minter.allowedScopes) so a restricted member cannot one-step-escalate to tenant-wide. The only residue is non-load-bearing documentation debris: four Code-reference annotation lines still say 'trust_grade as metadata filter,' contradicting the (correct) authoritative body. Tag and fix; it does not cap the score."
+  }
+ ]
+}

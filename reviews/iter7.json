@@ -1,0 +1,182 @@
+{
+ "iteration": 7,
+ "priorProgression": [
+  26,
+  68,
+  61,
+  62,
+  57,
+  68
+ ],
+ "aggregateScore": 67,
+ "sweepApplied": [
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s05.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s08.md"
+   ],
+   "changelog": [
+    "s05 \u00a75.3.2 (~line 163): removed `trust_grade` from the filterable Vectorize-metadata list \u2014 now reads `team_id`/`scope`/`embedding_model` are metadata filters within the namespace.",
+    "s05 \u00a75.3.2 (~line 177): removed `trust_grade?: string` from the `vectorSearch` filter param type \u2014 now `filter?: { team_id?: string; scope?: string }`.",
+    "s08 \u00a78.3 (~line 219): removed `trust_grade:'evidence'` from the session-chunk Vectorize upsert metadata blob \u2014 now `{userId, teamId, scope, sessionId, visibility, embedding_model:'bge-m3'}`, all other fields kept.",
+    "Preserved the legitimate sidecar path: s05 canonical mapping table (line 84), getChunksByIds memory_use_policy LEFT-JOIN (lines 219/226), post-hydration TRUST_BOOST (line 257), D1 hydration field (line 211), FTS hydration note (line 159); s08 orthogonality statement (line 111) and insertUsePolicy sidecar write (line 212)."
+   ],
+   "residual": [
+    "Grep-verified: no trust_grade/trustGrade remains in any Vectorize upsert/filter/metadata context in either file. All remaining occurrences are sidecar (memory_use_policy) JOIN/boost/write references, which are correct and retained.",
+    "No `#### Code references` blocks exist in either file (count 0 both), so none were added or removed. Headings/structure preserved."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s10.md"
+   ],
+   "changelog": [
+    "Item 1 (\u00a710.4, line ~199): Removed the `wrangler vectorize create-metadata-index brain-chunks --property-name=trust_grade --type=string` line, replacing it with `--property-name=visibility` so the brain-chunks indexed set is exactly team_id/scope/visibility/embedding_model.",
+    "Item 2 (\u00a710.7 runbook step 3, line ~311): Changed the brain-chunks metadata-index list from `team_id/scope/trust_grade/embedding_model` to `team_id/scope/visibility/embedding_model`. (\u00a710.6 is the test strategy and contained no metadata-index list or trust_grade; the only deploy checklist/metadata-index list is in \u00a710.7.)",
+    "Item 3 (\u00a710.2 env overrides, lines ~149-150): Added the second Vectorize binding {binding:'ENTITY_INDEX', index_name:'brain-entities-staging' / 'brain-entities'} to BOTH the staging and production env vectorize arrays; also added the explicit `binding:'CHUNKS_INDEX'` key to the sibling chunks entries so each array element is well-formed and consistent.",
+    "Item 4 (\u00a710.7 rollout-gate, line ~343): Changed the stale example from '(e.g. Phase 3.5 entity vectors)' to '(e.g. Phase 3.5 semantic fact dedup)' since entity vectors are v1.",
+    "Grep-verified: zero trust_grade/trustGrade in \u00a710; zero 'Phase 3.5 entity vectors'; ENTITY_INDEX/brain-entities present in the top-level, staging, and production vectorize blocks; no 'Code references' blocks added or removed."
+   ],
+   "residual": [
+    "Punch-list line numbers (~4131-4325) were stale; the file is 344 lines. Mapped each item to its actual location by content (trust_grade at lines 199 and 311; env overrides at 149-150; rollout-gate at 343). All four items applied correctly.",
+    "Item 2 referenced a '\u00a710.6 deploy checklist' but \u00a710.6 is the Test strategy with no metadata-index list; the deploy/runbook checklist lives in \u00a710.7. Fixed the trust_grade in \u00a710.7 step 3 (the only occurrence in any checklist)."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s07.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s03.md"
+   ],
+   "changelog": [
+    "s07 \u00a77.4 (filterable-metadata list): removed `trust_grade` from \"Within the namespace, userId/teamId/scope/visibility/trust_grade/embedding_model ride as filterable metadata\" \u2192 now `userId/teamId/scope/visibility/embedding_model`. Left other fields untouched.",
+    "s07 \u00a77.4 (D1 re-check field list): removed `trust_grade` from the post-query re-check \"tenant_id/scope/trust_grade/deleted_at\" \u2192 now `tenant_id/scope/deleted_at` (trust grade comes from the memory_use_policy JOIN/boost, not a Vectorize-returned field). Did NOT swap in `visibility` (would be new design).",
+    "s07 \u00a77.3 (ScopedVectorize prose): removed `trust_grade` from the metadata-filters list \"team_id/scope/trust_grade/embedding_model are metadata filters within the namespace\" \u2192 now `team_id/scope/embedding_model` \u2014 invariant says trust_grade is NEVER a Vectorize filter field. (Outside the punch-list's named lines but mandated by the invariant sweep.)",
+    "s07 \u00a77.9 (request-flow A, step 3): removed `trust_grade` from the Vectorize arm's metadata filter `{scope, trust_grade}` \u2192 now `{scope}`. (Outside the punch-list's named lines but a genuine Vectorize-filter violation.)",
+    "s03 \u00a73.1.4 (api_keys DDL): added `allowed_scopes TEXT` (nullable; NULL='*' iff minter was '*'; pinned at mint to intersect(request, minter.allowedScopes)) \u2014 closes the phantom-column gap so the s09 \u00a79.0.1 read of `api_keys.allowed_scopes` resolves against a defined column, matching the s07 \u00a77.1 DDL + \u00a77.2 mint-time write end-to-end."
+   ],
+   "residual": [
+    "Item 2 alignment confirmed end-to-end: allowed_scopes is DEFINED in both DDLs (s07 \u00a77.1 Drizzle line 82 + s03 \u00a73.1.4 line 258), WRITTEN at mint as the minter-grant intersection (s07 \u00a77.2 line 105, \u00a77.10 line 735), and READ in s09 \u00a79.0.1 line 34 ('a restricted key never resolves to *'). No phantom column remains.",
+    "Remaining trust_grade references in s07 (lines 559, 570, 576, 584-585, 618, 722, 742) are all legitimate and left intact: the {instruction,evidence,draft} enum/CHECK, the governance-keystone hard-wiring, the memory_use_policy sidecar DDL/JOIN/boost, the writeback batch, and the 'agent cannot self-assign instruction' rejection guard. Line 570's `trust_grade='instruction'` is canonical Pillar-2 prose about the visibilityPredicate choke-point (its Vectorize pre-filter is on `visibility`, not trust_grade) \u2014 not a violation.",
+    "\u00a73.2 (s03) was NOT altered per instructions \u2014 it is the canonical-correct source. Note (not edited): \u00a73.2 line 513 already correctly states trust_grade is NOT a Vectorize metadata index and is applied as a post-hydration LEFT-JOIN boost, consistent with the now-fixed \u00a77.x lists.",
+    "Optional cosmetic-only nit not changed (not required): s03 coverage matrix row for api_keys (line 496) shows '\u2014' in the scope column while memberships shows 'allowed_scopes'; harmless and outside the invariant.",
+    "No '#### Code references' blocks were added or removed; headings/structure preserved. s09 was not edited (its read side was already correct)."
+   ]
+  }
+ ],
+ "reviews": [
+  {
+   "lens": "cf-correctness",
+   "score": 64,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Canonical Vectorize design (\u00a73.2/\u00a75.2) is clean: trust_grade is excluded from both the metadata-index list and the upsert blob, lives only in memory_use_policy, LEFT-JOINed at hydration; the trust boost runs post-hydration so a promotion never re-upserts a vector.",
+    "brain-entities is consistently declared in every env binding block (\u00a710.1, \u00a710.2 staging+production) and provisioned in \u00a710.4 and the \u00a710.7 deploy runbook with identical four metadata indexes (scope/team_id/visibility/embedding_model), no trust_grade.",
+    "Vectorize V2 topK reasoning is correct: query sets returnMetadata:'indexed' (\u2260'all') and not returnValues:true, so topK=100 holds even with a metadata filter \u2014 the \u00a75.3.2 recall-cliff fix rests on a true platform fact.",
+    "$in/$nin are supported Vectorize V2 metadata operators, so the canonical multi-scope-collapses-to-one-query path ({scope:{$in:[...granted]}}) in \u00a75.3.2 is implementable as written.",
+    "api_keys.allowed_scopes escalation is closed and internally consistent: mint-time intersect with minter grant, NULL='*' iff minter was '*', threaded through Principal.allowedScopes and the D1 gate across \u00a77.1/\u00a77.2/\u00a77.10."
+   ],
+   "weaknesses": [
+    {
+     "section": "s02",
+     "issue": "Six code-reference/architecture prose lines still instruct the implementer to move trust_grade into Vectorize metadata, directly contradicting the canonical \u00a73.2/\u00a75.2 sidecar-only invariant. Lines: 97 ('pushes team_id/scope/trust_grade to metadata'), 354 ('team_id/scope/trust_grade/embedding_model move to filterable metadata'), 541, 1602, 2081, 3326 (all 'add team_id/trust_grade/embedding_model metadata' in ScopedVectorize code-ref annotations). trust_grade is ranking-only and cannot leak, but these are directive 'how to lift from openbrains' notes \u2014 if followed literally they re-introduce the stale-on-promotion / wasted-index-slot defect \u00a73.2 forbids.",
+     "severity": "high",
+     "recommendation": "In each of lines 97, 354, 541, 1602, 2081, 3326, drop trust_grade from the 'move to / add metadata' list (leave team_id/scope/embedding_model + visibility) and append a clause: 'trust_grade is sidecar-only (memory_use_policy), LEFT-JOINed at read \u2014 NOT Vectorize metadata, per canonical \u00a73.2/\u00a75.2.'"
+    },
+    {
+     "section": "s07",
+     "issue": "\u00a77.3 foldPartitionFilter (lines 3070-3078) returns only a single-scope filter ({scope: p.allowedScopes[0]} for length===1) and its comment says 'Multi-scope grants are handled by the caller (one query per scope, then union \u2014 \u00a75.3).' This contradicts the canonical \u00a75.3.2 (lines 1798, 1848), which states foldPartitionFilter 'adds {scope:{$in:[...]}}' as ONE query and explicitly 'removes the multi-query union path and its eviction bookkeeping entirely.' Since $in/$nin are supported Vectorize V2 operators (confirmed), \u00a77.3 is the stale side.",
+     "severity": "high",
+     "recommendation": "Rewrite \u00a77.3 foldPartitionFilter to emit {...filter, scope:{$in:[...p.allowedScopes]}} for any restricted (non-'*') grant of length>=1, and delete the 'caller fans out per-scope, then union' comment so the code matches canonical \u00a75.3.2's single-query $in contract. Confirm $in support against current Vectorize docs at implementation time."
+    },
+    {
+     "section": "s03",
+     "issue": "\u00a73.2 line 1062 says the restricted-principal fold pushes \"visibility='world'\" INTO the metadata filter, and the \u00a77.3 foldPartitionFilter comment (line 3071) says \"visibility='world' is pushed when its index is live.\" Both contradict the canonical, well-argued \u00a75.3.2 decision (line 1850, 'Why visibility is NOT pushed into the filter \u2014 declined on purpose') that visibility is never pushed for chunks because it would drop the principal's own private chunks the D1 re-check can't recover. Line 1061 likewise says 'foldPartitionFilter folds only scope/visibility' \u2014 should be scope only.",
+     "severity": "medium",
+     "recommendation": "Edit line 1061 to 'folds only scope'; edit line 1062 to drop the \"visibility='world' is folded\" clause (keep scope-only fold); fix the \u00a77.3 line-3071 comment to 'visibility is intentionally NOT pushed (\u00a75.3.2) \u2014 it stays authoritative at the D1 visibilityPredicate.' so all three match the canonical \u00a75.3.2 decision."
+    },
+    {
+     "section": "s06",
+     "issue": "Entity-arm prose (\u00a76.6/\u00a76.7 lines 2523, 2541 and \u00a79 line 3854) states entity-search visibility is 'folded into the metadata filter exactly as on chunks,' which on its face contradicts \u00a75.3.2's 'visibility is NOT pushed.' This is reconcilable \u2014 the KG node space is {world,team} only (line 2523), so there is no own-private entity to lose, unlike chunks \u2014 but the asymmetry and its rationale are never stated, so the two sections read as a flat contradiction.",
+     "severity": "medium",
+     "recommendation": "Add one sentence to \u00a76.6/\u00a76.7 explaining the asymmetry: 'Unlike chunks, the KG node space is {world,team} only \u2014 there is no own-private entity to drop \u2014 so visibility CAN be safely pushed into the entity-arm metadata filter; this is the deliberate divergence from the chunk arm's D1-only visibility (\u00a75.3.2).'"
+    }
+   ],
+   "missing": [],
+   "summary": "Under the Cloudflare-primitive-correctness lens, the invariant sweep largely held. All eight named focus sections comply with the trust_grade sidecar-only rule: \u00a73.2/\u00a75.2 (canonical) keep trust_grade out of the Vectorize metadata-index list and the upsert blob, LEFT-JOINed from memory_use_policy at hydration; \u00a75.3.2 hydrates trust_grade via getChunksByIds and runs the boost post-hydration; \u00a77.4 omits trust_grade from create-metadata-index; \u00a77.5 states \"trust grade feeds search ranking (not isolation)\"; \u00a78.3's embed-everything metadata blob is {userId,teamId,scope,sessionId,visibility,embedding_model} with no trust_grade; \u00a710.4/\u00a710.6/\u00a710.7 provision only scope/team_id/visibility/embedding_model. brain-entities is declared in EVERY env binding block (\u00a710.1 top-level vectorize[], \u00a710.2 staging AND production) and provisioned in \u00a710.4 (+\u00a710.7 deploy runbook) with the same four metadata indexes and no trust_grade. api_keys.allowed_scopes alignment is solid and consistent: mint-time intersect(requestedGrant, minter.allowedScopes), NULL='*' iff minter was '*', resolved into Principal.allowedScopes, escalation path closed (\u00a77.1/\u00a77.2/\u00a77.10). Affirmed CF-correctness strength: the query sets returnMetadata:'indexed' (not 'all') and never returnValues:true, so the topK=100 ceiling holds even with a metadata filter \u2014 the \u00a75.3.2 recall-cliff claim is sound. Vectorize V2 supports $in/$nin, so the canonical {scope:{$in:[...]}} single-query path in \u00a75.3.2 is correct. Remaining defects are textual/contract consistency, not isolation breaks or nonexistent-primitive requirements: (1) six code-reference/architecture prose lines still direct the implementer to \"move trust_grade to filterable metadata,\" contradicting canonical \u00a73.2 sidecar-only \u2014 high because they are directive and the focus said \"anywhere,\" but trust_grade is ranking-only so it cannot leak; (2) \u00a77.3 foldPartitionFilter code returns single-scope only and its comment says \"caller fans out per-scope, then union,\" contradicting canonical \u00a75.3.2's single-query {scope:{$in:[...]}} \u2014 since $in is real, \u00a77.3 is the stale side; (3) \u00a77.3 code comment \"visibility='world' is pushed when its index is live\" and \u00a73.2 line 1062 \"visibility='world' is folded into the metadata filter\" contradict \u00a75.3.2's explicit, well-argued \"visibility is NOT pushed\"; entity-arm prose (\u00a76.6/\u00a76.7/\u00a79) says visibility IS folded \u2014 reconcilable (KG node space is {world,team} only, no own-private entity to lose) but the asymmetry rationale is unstated. None caps below 60; the isolation core is sound. Score 64, consistent with the prior 68 ceiling minus the trust_grade-prose drift and foldPartitionFilter contract divergence."
+  },
+  {
+   "lens": "completeness",
+   "score": 71,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "trust_grade sidecar-only invariant is airtight across all six relevant surfaces (chunks/facts schema, Vectorize metadata, ingest write, promote write, promotion update, read-time LEFT JOIN) with explicit anti-denormalization rationale repeated at each site",
+    "brain-entities now appears in top-level + staging + production wrangler blocks; the dev=top-level note (line 4137) closes the third environment without a separate block",
+    "api_keys.allowed_scopes mint-time escalation fix is consistent in all three prose sites (\u00a77.1 line 2681, \u00a77.10 line 3311, \u00a79.0.1 line 3722) and the two read branches; the privilege-escalation threat model (restricted minter cannot widen to '*') is stated identically each time",
+    "The allowedScopes (data partition) vs capabilities (read|write|admin) two-axis split is referenced-not-redefined from \u00a71.4 through \u00a77.2/\u00a79.0.1/\u00a79.0.2 with the old single-scopes collapse explicitly called out as removed and a CI canary (#7/#11) guarding it"
+   ],
+   "weaknesses": [
+    {
+     "section": "s09",
+     "issue": "The membership-resolution SQL in \u00a79.0.1 step 1 (line 3720) reads `SELECT tenant_id, team_id, role, allowed_scopes FROM memberships WHERE user_id = ?` with NO tenant filter, then says 'attach tenantId/teamIds/role/allowedScopes'. The authoritative version in \u00a77.2 principalFromMembership (line 2755) uses `WHERE user_id = ? AND tenant_id = ?`. Taken literally, the \u00a79.0.1 query returns a multi-tenant user's rows across ALL tenants and the attach step shown does not narrow to the active tenant, so teamIds/allowedScopes would over-broaden across the tenant boundary. The prose 're-checked against memberships' gestures at a filter the SQL omits. \u00a77.2 is authoritative and correct, and \u00a79.0.1 explicitly defers to it, so this does not cap the score \u2014 but the lens names \u00a79.0.1 specifically and the snippet as written is a scope-resolution bug an implementer could ship.",
+     "severity": "medium",
+     "recommendation": "Add `AND tenant_id = ?` (bound to the requestedTenant value) to the \u00a79.0.1 step-1 SQL so it matches \u00a77.2 verbatim, or show the explicit post-query filter to the active tenant. Either makes the snippet self-consistent with the authoritative resolver."
+    },
+    {
+     "section": "s03",
+     "issue": "The \u00a73.1.8 tenancy-column coverage matrix (line 1044) shows `\u2014` in the scope column for `api_keys`, while `memberships` (line 1043) correctly shows `allowed_scopes`. Since api_keys.allowed_scopes is a load-bearing data-partition grant defined in \u00a73.1.4, \u00a77.1, and read in \u00a77.2/\u00a79.0.1, the summary matrix is stale/incomplete for the one table whose grant the escalation fix hinges on.",
+     "severity": "low",
+     "recommendation": "Put `allowed_scopes` in the scope column of the api_keys row of the \u00a73.1.8 matrix (mirroring the memberships row), so the summary table reflects the DDL it summarizes."
+    },
+    {
+     "section": "s07",
+     "issue": "mintApiKey is specified only in prose (\u00a77.1 line 2681, \u00a77.10 line 3311) \u2014 the intersect(requestedGrant, minter.allowedScopes) derivation, the NULL='*'-iff-minter-was-'*' rule, and the apiKey.mint audit row are described but no function body is shown, unlike resolvePrincipal/principalFromMembership which are given as code. The behavior is consistent across the three prose sites, so this is a completeness gap, not a contradiction.",
+     "severity": "low",
+     "recommendation": "Add a short mintApiKey() code stub (mirroring the \u00a77.2 style) showing the intersect computation and the same-batch apiKey.mint audit write, so the write side of allowed_scopes has the same code-level rigor as the read side."
+    }
+   ],
+   "missing": [],
+   "summary": "Post-sweep re-score on the requirements-coverage / internal-consistency lens. All three targeted invariants are genuinely resolved with no surviving contradiction. (1) trust_grade is sidecar-only everywhere: absent from the chunks DDL (\u00a73.1.1/\u00a74.9) and facts DDL (\u00a73.1.6); CHECK-constrained only on memory_use_policy (\u00a73.1.5); explicitly excluded from Vectorize metadata and not a metadata index (\u00a73.2/\u00a74.9); written only via insertUsePolicy in the promote batch (\u00a78.3) and updateUsePolicy on promotion (\u00a77.5); read via LEFT JOIN + COALESCE(...,'evidence') (\u00a75.2/\u00a75.3). (2) brain-entities is provisioned in the top-level vectorize block AND in both staging and production env blocks (\u00a710.1/\u00a710.2); dev = top-level config, so all three environments carry ENTITY_INDEX \u2014 the prior contradiction is fixed. (3) api_keys.allowed_scopes is defined (\u00a73.1.4 DDL, \u00a77.1 Drizzle), written via the mint-time intersect(requestedGrant, minter.allowedScopes) rule (consistent prose at \u00a77.1/\u00a77.10), and read in the bk_ branch (\u00a77.2) and \u00a79.0.1 step 3 \u2014 the two-axis allowedScopes(data)/capabilities(capability) split is consistent across \u00a71.4/\u00a77.2/\u00a79.0.1/\u00a79.0.2 with no residual single-scopes collapse. Score lifts above the prior 68 because the invariant sweep landed; held out of the 80s by one in-scope medium (a membership-SQL divergence between \u00a79.0.1 and \u00a77.2) plus two low documentation gaps. No unresolved critical, so no sub-60 cap applies."
+  },
+  {
+   "lens": "security-isolation",
+   "score": 66,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "api_keys.allowed_scopes is a real, dual-defined (\u00a73.1.4 DDL + \u00a77.1 Drizzle) column, written at mint as intersect(requestedGrant, minter.allowedScopes) and read at resolve in the \u00a77.2 bk_ branch with fail-closed parseScopeGrant\u2192[]; a restricted minter can never widen to '*' and a restricted key never resolves to '*' (one-step escalation closed, \u00a77.10).",
+    "trust_grade is authoritatively sidecar-only: NOT a Vectorize metadata index and NOT in the upsert blob (\u00a73.2 line 1061, \u00a71.4 line 1543); foldPartitionFilter folds ONLY scope/visibility and the trust boost runs post-hydration on the LEFT-JOINed memory_use_policy value \u2014 no cross-grade leak via metadata is possible, and a promotion never re-upserts a vector.",
+    "The entity search arm (search_entities) carries the SAME tenant+scope+visibility gate as the chunk arm: namespace=tenantId, scope+{world,team} folded into the metadata filter, then authoritative D1 re-check on entities (scopePredicate + {world,team} visibilityPredicate); entities are scope-partitioned in the dedup key (\u00a76.1) so the same name under two clients is two rows, and the gate columns physically exist on the entities table.",
+    "Break-glass over private memory is fail-closed and audited by construction (\u00a77.6): role-gated to owner/admin, 403 for any non-admin signal incl. breakGlass:true, tenant_id hard boundary never bypassed, breakglass_read audit row written in the same db.batch plus a guaranteed alert; canaries #14/#15 assert both the deny path and the audited allow path.",
+    "Intra-tenant RLS (visibilityPredicate) is a structural Scoped* contract, not per-op prose: ScopedDB.readFacts and getChunksByIds/hydrateChunks always AND (world OR team\u2208teamIds OR private\u2227user_id=self), the chunks table carries visibility/user_id/team_id (\u00a73.1.1), session chunks inherit session visibility while ingested docs default world, and a table-driven canary meta-test fails if a new read surface skips the choke-point.",
+    "Defense-in-depth on both search arms: the FTS arm enforces c.scope IN(grants) inline AND drops out-of-grant ids at scope-gated hydration; the vector arm hard-wires namespace=tenantId and re-checks every id at the D1 gate, so a forgotten/forged Vectorize filter or a missing metadata index cannot leak another scope or tenant."
+   ],
+   "weaknesses": [
+    {
+     "section": "s07",
+     "issue": "Internal contradiction at the isolation boundary on the doc/entity LINK arm. \u00a77.3's getLinks (2947-2953) and expandFrontier (2955-2960) gate via scopePredicate2(docLinks.scope) \u2014 but doc_links (\u00a76.1, 2127-2138) and entity_relations (\u00a76.1, 2212-2222) have NO scope column; the edge DDL carries only tenant_id + from/to ids + link_type/context. These methods also do NO node JOIN and return raw edge rows. Yet \u00a76.1/\u00a72110 (iter-4 fix) and Flow C (\u00a76.7 line 2546) require the NODE-level scopePredicate+visibilityPredicate applied to JOINed pages/entities endpoints. As literally coded in \u00a77.3, get_links/get_backlinks are gated on tenant_id + a phantom column only, so a restricted Persona-C principal (allowedScopes=['clientA']) can enumerate edge rows (from_id/to_id/link_type/context text) touching clientB-scope or team/private pages within the same tenant \u2014 a cross-scope/visibility intra-tenant leak sitting inside the \u00a77.3 choke-point itself. Cross-tenant still holds (tenant_id always applied).",
+     "severity": "high",
+     "recommendation": "Resolve the contradiction toward Flow C / \u00a72110: rewrite getLinks/expandFrontier (and get_backlinks) to JOIN each edge endpoint to its node table (pages/entities) and AND nodeGate(spec, nf)+nodeGate(spec, nt) \u2014 the exact gate traverse() already uses \u2014 instead of the nonexistent docLinks.scope/entity_relations.scope predicate. Delete scopePredicate2(docLinks.scope) and scopePredicate2(entity_relations.scope). Ensure get_links/get_backlinks return endpoint-hydrated, node-gated results, not raw edge rows. Add a canary asserting get_links/get_backlinks (not just traverse_graph) drop edges whose far endpoint is out-of-scope or team/private."
+    },
+    {
+     "section": "s07",
+     "issue": "Stale, self-contradictory prose in \u00a77.4 (line 3126): 'Once graph nodes carry a visibility column, the visibilityPredicate rides along too; until then, discovered ids are re-hydrated...'. But \u00a76.1 and \u00a72110 (iter-4) ALREADY add the visibility column to pages and entities and mandate the node-level visibility gate on the graph arm. So \u00a77.4 describes a pre-iter-4 world where node visibility is not yet enforced and re-hydration is the only safety net \u2014 directly contradicting \u00a76.1/\u00a72108-2110. A reader/implementer following \u00a77.4 would build the weaker re-hydration-only path and skip the node visibility gate on traversal/links.",
+     "severity": "medium",
+     "recommendation": "Update \u00a77.4 to state unconditionally that pages/entities carry visibility (\u00a76.1) and that every graph frontier/link read ANDs the node-level scopePredicate+visibilityPredicate via nodeGate on the JOINed endpoints. Remove the 'until then' conditional and the implication that re-hydration is the primary graph-arm visibility gate (it is now belt-and-suspenders, not the boundary)."
+    },
+    {
+     "section": "s01",
+     "issue": "Doc-hygiene inconsistency the invariant sweep missed: \u00a71.5 (line 97), \u00a72 (lines 354), \u00a71.4 (line 1543 header text) and several code-reference lines (541, 1602, 2081, 3326) still describe trust_grade as pushed 'to metadata' / 'trust_grade as metadata filters' within the Vectorize namespace. This contradicts the authoritative \u00a73.2 (line 1061) and \u00a75.2/\u00a75.3, which state trust_grade is deliberately NOT a Vectorize metadata index and NOT in the upsert blob. Not an isolation leak (trust_grade affects ranking only, and foldPartitionFilter folds only scope/visibility), but an implementer following the \u00a71.5/\u00a72 prose could wrongly add trust_grade as filterable metadata, wasting a scarce index slot and producing stale values on every promotion.",
+     "severity": "low",
+     "recommendation": "Scrub the residual 'trust_grade to metadata'/'as metadata filters' phrasing in \u00a71.5 line 97, \u00a72 line 354, the code-reference lines (541, 1602, 2081, 3326), and the \u00a71.4 line 1543 description so they all match the authoritative \u00a73.2: trust_grade lives only in memory_use_policy, LEFT-JOINed at read, never a Vectorize filter."
+    },
+    {
+     "section": "s07",
+     "issue": "nodeGate/nodeVisible/resolveScopedNode build raw SQL by string-interpolating EdgeSpec field names (${alias}.${spec.scopeCol}, ${spec.nodeTable}, ${spec.visibilityCol}) into the query (lines 2974-3028). EdgeSpec is a static internal constant (DOC_GRAPH/ENTITY_GRAPH), so there is no current injection vector, but this is the one place in the isolation choke-point that constructs identifiers via template strings rather than the parameterized binds used elsewhere. If a future EdgeSpec ever became config- or caller-derived, the scope/visibility gate would become injectable.",
+     "severity": "low",
+     "recommendation": "Add an explicit invariant/comment that EdgeSpec values are compile-time constants only and must never be sourced from request input, and/or validate spec column/table names against an allowlist before interpolation. Keep the binds (already used for the scope/team/user values) and never interpolate values, only the vetted identifiers."
+    }
+   ],
+   "missing": [],
+   "summary": "From the multi-tenant + intra-tenant isolation lens, three of the four checkpoints are now genuinely closed and the invariant sweep largely held. (1) api_keys.allowed_scopes is a real, consistently-defined column \u2014 DDL in \u00a73.1.4 + Drizzle in \u00a77.1 \u2014 written at mint as intersect(requestedGrant, minter.allowedScopes) (NULL='*' stored only when the minter was '*'), read at resolve in the \u00a77.2 bk_ branch (row.allowedScopes===null ? '*' : parseScopeGrant), with parseScopeGrant failing closed to [] on malformed input. A restricted key can never resolve to '*' and the one-step mint escalation is structurally closed. (2) trust_grade is sidecar-only (memory_use_policy), authoritatively NOT a Vectorize metadata index and NOT in the upsert blob (\u00a73.2/\u00a71.4/\u00a75.2); foldPartitionFilter folds only scope/visibility, and the trust boost runs post-hydration on the LEFT-JOINed sidecar \u2014 no cross-grade leak via metadata. (3) Break-glass (\u00a77.6) is role-gated (requireRole('admin')), fails CLOSED to 403 for non-admins (incl. breakGlass:true without the role), keeps tenant_id as a hard boundary, and writes a breakglass_read audit row in the same db.batch plus a guaranteed alert (canaries #14/#15). (4) The entity search arm (search_entities, \u00a76.6/\u00a76.7) now carries the same gate as the chunk arm: namespace=tenantId, scope+{world,team} visibility folded into the metadata filter, then an authoritative D1 re-check on entities via scopePredicate + {world,team} visibilityPredicate; the entities table actually carries scope/visibility/team_id columns (\u00a76.1), and entities are partitioned by scope in the dedup key so 'Acme' under clientA vs clientB are two rows. The one material defect is an internal contradiction on the doc-graph link arm: \u00a77.3's getLinks/expandFrontier gate at the EDGE level on docLinks.scope/entity_relations.scope \u2014 phantom columns absent from the \u00a76.1 edge DDL \u2014 and return raw edge rows with NO node JOIN, while \u00a76.1/\u00a72110 and Flow C (\u00a76.7) require the NODE-level scope+visibility gate on JOINed pages/entities endpoints. \u00a77.4 compounds this with stale 'once graph nodes carry a visibility column... until then re-hydrate' prose that contradicts \u00a76.1 (which already adds visibility to pages/entities). As literally coded in \u00a77.3, get_links/get_backlinks under-gate to tenant_id only, leaking out-of-scope and team/private edge metadata + context text intra-tenant for a restricted Persona-C principal. The canonical traverse()/nodeGate/resolveScopedNode path is correct; the fix is to make getLinks/expandFrontier match it (node JOIN + nodeGate), which the spec must pick explicitly. A separate low-severity doc-hygiene miss: \u00a71.5/\u00a72/code-refs still say trust_grade is pushed 'to metadata'/'as metadata filters', contradicting the authoritative \u00a73.2 \u2014 harmless to isolation (ranking only) but the sweep should scrub it."
+  }
+ ]
+}

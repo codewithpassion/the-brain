@@ -1,0 +1,200 @@
+{
+ "iteration": 6,
+ "priorProgression": [
+  26,
+  68,
+  61,
+  62,
+  57
+ ],
+ "aggregateScore": 68,
+ "sweepApplied": [
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s10.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s04.md"
+   ],
+   "changelog": [
+    "s10 \u00a710.1 wrangler.jsonc: added second Vectorize binding {binding:'ENTITY_INDEX', index_name:'brain-entities'} and replaced the 'brain-entities is NOT provisioned in v1' comment with one stating both indexes are v1 and only cross-session semantic dedup is deferred to Phase 3.5.",
+    "s10 \u00a710.4 Vectorize provisioning: added the brain-entities create + four create-metadata-index commands (scope, team_id, visibility, embedding_model) mirroring \u00a73.2, in the same provisioning block as brain-chunks (before the first filtered upsert).",
+    "s10 \u00a710.7 deploy-order runbook (steps 2-3): extended to provision brain-entities alongside brain-chunks and to create its metadata indexes (scope/team_id/visibility/embedding_model) before any filtered upsert \u2014 same stale pattern in the same file.",
+    "s04 \u00a74.5: flipped the 'v1 trim' bullet \u2014 the Workflow now DOES embed entities (canonical_name + description via bge-m3) and upserts to brain-entities (embed-entities step, \u00a76.2); brain-entities is provisioned in v1; ONLY cross-session semantic dedup remains deferred to Phase 3.5 (deterministic LOWER(name)+ON CONFLICT dedup stays in v1)."
+   ],
+   "residual": [
+    "s04 references the 'embed-entities step, \u00a76.2' and \u00a710.1/\u00a710.4 cross-document; those target sections live in other files (the Graph/\u00a76 doc) not in scope for this sweep \u2014 verify they describe the embed-entities step consistently if a later sweep touches them.",
+    "grep-verify confirmed no remaining 'not provisioned' / 'not embed entities' / 'not upsert' phrasing in either file; the sole surviving 'deferred to Phase 3.5' occurrence (s04:239) is the intended residual, now correctly scoped to cross-session SEMANTIC dedup only."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s01.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s02.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s05.md"
+   ],
+   "changelog": [
+    "s01.md \u00a71.3 Non-Goals table (line 53): replaced 'No entity vectors / semantic dedup in v1' row \u2014 now reads 'No cross-session semantic fact dedup in v1', making clear that brain-entities index is provisioned in v1 and only the nearest-vector merge / semantic dedup logic is Phase 3.5.",
+    "s01.md \u00a71.7 scope-boundary table (line 174): updated the Deferred column from 'Entity vectors + semantic dedup (Phase 3.5)' to 'Cross-session semantic fact dedup (Phase 3.5)' to match the new framing.",
+    "s02.md \u00a72.7 L6 substrate line (line 151): replaced 'brain-entities deferred to Phase 3+' with 'two indexes provisioned in v1: brain-chunks 1024d/cosine for chunk search, brain-entities 1024d/cosine for entity search \u2014 \u00a76.6/\u00a76.7'.",
+    "s05.md \u00a75.2 entity_fts paragraph (line 88): replaced 'Entity vectors are deferred to Phase 3.5; v1 search is one index (brain-chunks)' with a statement that v1 provisions two indexes (brain-chunks + brain-entities) and that Phase 3.5 adds cross-session semantic fact dedup on top of that v1 substrate."
+   ],
+   "residual": [
+    "The grep verification confirms zero matches for all stale phrases: 'entity vectors.*deferred', 'brain-entities.*deferred', 'Entity vectors are deferred', 'v1 search is one index', 'entity vectors.*deferred to Phase' across all three files.",
+    "Sections \u00a76.6/\u00a76.7 (referenced for the brain-entities search_entities op) are in a different file (s06.md) not included in this sweep \u2014 the references here assume those sections already describe brain-entities search correctly."
+   ]
+  },
+  {
+   "filesEdited": [
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s07.md",
+    "/tmp/claude-1000/-home-roboto-devel/de8de32f-fcde-4884-89d9-eeaaf43cb4da/scratchpad/s09.md"
+   ],
+   "changelog": [
+    "s07 \u00a77.1/\u00a77.2 (tenant_shards Drizzle, line 99): entityIndex comment \"'brain-entities' (deferred, Phase 3.5)\" -> \"'brain-entities' in v1\" to match the already-correct chunkIndex/dbBinding 'in v1' copy.",
+    "s07 \u00a77.4 create-metadata-index block (lines 539-542): removed the `trust_grade` brain-chunks Vectorize metadata index (contradicts the sidecar-only invariant: trust_grade lives ONLY in memory_use_policy) and added `visibility`; indexed set is now scope, team_id, visibility, embedding_model.",
+    "s07 \u00a77.4 budget note (line 544): \"budget reserved for the above plus `visibility` and `source`\" -> \"plus `source`\" (visibility is now in the indexed block).",
+    "s07 \u00a77.4 ScopedVectorize query (line 518, one line past the named block): dropped `{trust_grade}` from the `filter` comment \u2014 a Vectorize filter can only reference indexed metadata, so leaving it would be a hard contradiction with the corrected index set. This is the query-side head of the same schema bug. Left line 546 (D1 re-check on trust_grade via memory_use_policy JOIN) intact \u2014 that is the correct sidecar location.",
+    "s07 \u00a77.5 epistemic-fact prose (line 625): `visibility \u2208 {private,world}` -> `{private,team,world}` to match the facts DDL CHECK and \u00a77.5 canonical three-value enum. Left already-correct lines 274/388/560 untouched.",
+    "s09 \u00a79.0.1 edge-resolver machine-token branch (line 33): replaced \"`allowedScopes` defaults to `'*'`\" with resolution from the \u00a77.2 membership lookup for (userId, tenantId) \u2014 NULL/owner/admin => '*', else union of restricted grants, never hard-coded '*'.",
+    "s09 \u00a79.0.1 edge-resolver api-key branch (line 34): replaced \"`allowedScopes` defaults to `'*'`\" with resolution from the key's stored `api_keys.allowed_scopes` (pinned at mint time to the intersection with the minter's grant; NULL => '*' only when the minter was '*'), so a restricted key never resolves to '*' \u2014 propagating the \u00a77.2 iter-3 privilege-escalation fix.",
+    "s09 \u00a79.2.2 admin tool catalog (line 178, 'Admin (admin scope only)' list): added `memory.break_glass_read` with a one-line scoped contract (\u00a77.6 audited break-glass read over another member's private chunks/facts; owner/admin only; fails CLOSED 403 for non-admins; writes breakglass_read audit row + high-severity alert per call; intra-tenant only; canaries #14/#15)."
+   ],
+   "residual": [
+    "s09 line 22: the Principal type union `allowedScopes: string[] | '*'` and its comment `('*' = all; the default)` were intentionally left untouched \u2014 '*' remains the legitimate resolved value for a genuinely-unrestricted principal (owner/admin or NULL grant). The fix targeted the resolution logic (a restricted credential must not resolve to '*'), not the type, per advisor guidance."
+   ]
+  }
+ ],
+ "reviews": [
+  {
+   "lens": "cf-correctness",
+   "score": 58,
+   "verdict": "major-revision",
+   "strengths": [
+    "Entity-vectors-in-v1 decision is consistently propagated on its own axis: brain-entities appears in \u00a73.2 (with independent per-index 10M-vector and 50k-namespace ceilings, correctly counted separately from brain-chunks), the \u00a76.2 embed-entities Workflow step (vector.id==entities.id, namespace=tenantId, per-row embedded_at/embedding_model), \u00a75.2, \u00a76.6/\u00a76.7 search_entities, \u00a710.1 ENTITY_INDEX binding, and \u00a710.4 provisioning \u2014 the sweep's primary target is clean.",
+    "Workflows 1 MiB non-stream step-output cap is handled correctly and pervasively: extract-text returns only an R2 staging key + byte size, chunk-text stages chunk content to R2 and returns lean metadata, embed/KG steps read content back from D1/R2 by id, and \u00a76.2 entity steps return counts-only \u2014 with the documented ReadableStream<Uint8Array> escape hatch explicitly acknowledged.",
+    "Workflow step-budget reasoning is sound against real limits: 10,000-step default (correctly noted as raisable to 25,000 via workflows[].limits.steps on Workers Paid, and explicitly NOT assuming the raise) bounded by MAX_CHUNKS_PER_DOC=4000 with deterministic parent_document_id split, plus a MAX_BODY_BYTES=8MiB second key so few-but-huge chunks can't over-load a part.",
+    "Vectorize topK semantics are correct and load-bearing: topK max 100, dropping to 50 only when returnValues:true or returnMetadata:'all' is set \u2014 the query sets neither (returns {id,score}), so full topK=100 is available even with a metadata filter; the recall-cliff fix (fold granted scope into the metadata filter via $in rather than over-fetch) is the right call given 100 is a hard ceiling.",
+    "AI Gateway enforcement-boundary analysis is precise and correctly grounded: AI Gateway is invoked via the gateway option on env.AI.run (not a wrangler binding); native @cf/ neuron-billed Workers AI calls are covered by neither Unified Billing nor BYOK spend-limit rails, so the enforcing per-tenant cap is the app-level token_spend 429 pre-check BEFORE env.AI.run, with gateway metadata retained only for attribution \u2014 and Workers AI request-RATE limits are correctly treated as a separate axis (degrade-or-queue, not user 429).",
+    "D1 100-bound-parameter limit is respected (CHUNK_DB_BATCH_SIZE=10 at ~8 params/row; BFS frontier IN(...) chunked at ~90 ids), EMBED_BATCH_SIZE=50 against the bge-m3 per-call cap, and the namespace=tenantId framing is correctly characterized as a query-time partition (same class as a metadata filter), explicitly NOT a documented security boundary, with the D1 row re-check as the authoritative gate."
+   ],
+   "weaknesses": [
+    {
+     "section": "s10",
+     "issue": "\u00a710.4 (line 4181) and the \u00a710.6 deploy checklist (line 4293) still provision `wrangler vectorize create-metadata-index brain-chunks --property-name=trust_grade --type=string`, directly contradicting \u00a73.2 (line 1060)/\u00a73.1.1 (1542)/\u00a74.3 (1361), which state trust_grade is deliberately NOT a Vectorize metadata index and NOT in the upsert blob (sidecar-only so a promotion never re-upserts a vector). The two provisioning blocks for brain-chunks (\u00a73.2 lines 1067-1071 vs \u00a710.4 lines 4178-4182) disagree on the index list. A CF engineer following \u00a710.4 burns one of the scarce 10 metadata-index slots the design says to keep free.",
+     "severity": "critical",
+     "recommendation": "Delete the `--property-name=trust_grade` create-metadata-index line from \u00a710.4 (4181) and from the \u00a710.6 checklist (4293) so both match \u00a73.2's four-index list (scope, team_id, visibility, embedding_model). Make \u00a73.2's provisioning block the single canonical source and have \u00a710.4/\u00a710.6 reference it verbatim."
+    },
+    {
+     "section": "s10",
+     "issue": "\u00a710.2 environment overrides (lines 4131-4132) declare only `vectorize: [{ index_name: 'brain-chunks(-staging)' }]` for BOTH staging and production; brain-entities is absent from every env block. Because wrangler env vectorize arrays REPLACE the top-level array (they do not merge), staging and production deploy with no ENTITY_INDEX binding \u2014 so every \u00a76.2 embed-entities step and every search_entities call throws at runtime. The \u00a710.2 prose (4127) also still says each env has 'its own brain-chunks Vectorize index' (singular). This is a deploy-breaking sweep gap: brain-entities reached \u00a710.1 but not the env overrides.",
+     "severity": "critical",
+     "recommendation": "Add the second index to both env blocks: staging \u2192 vectorize:[{index_name:'brain-chunks-staging'},{index_name:'brain-entities-staging'}], production \u2192 [{index_name:'brain-chunks'},{index_name:'brain-entities'}]; update the \u00a710.2 prose to say each env has its own brain-chunks AND brain-entities indexes; and add brain-entities-staging to the \u00a710.4 provisioning sequence run per environment."
+    },
+    {
+     "section": "s08",
+     "issue": "\u00a78.3 (line 3571) embeds session chunks and upserts Vectorize metadata `{userId, teamId, scope, sessionId, visibility, trust_grade:'evidence', embedding_model:'bge-m3'}` \u2014 carrying trust_grade INTO the upsert blob, directly violating the \u00a74.3 (1361) canonical upsert shape ('NO trustGrade') and the \u00a73.2 invariant that a trust promotion must never re-upsert a vector. A session chunk later promoted to instruction would require re-writing its vector, the exact harm \u00a73.2 forbids.",
+     "severity": "high",
+     "recommendation": "Remove trust_grade:'evidence' from the \u00a78.3 upsert metadata so it matches the \u00a74.3/\u00a73.2 canonical shape {documentId|sessionId, teamId, scope, visibility, userId, embeddingModel, chunkIndex, path, tenant_id}; trust stays in the memory_use_policy sidecar, LEFT-JOINed at read."
+    },
+    {
+     "section": "s05",
+     "issue": "\u00a75.3.2 is internally self-contradictory on trust_grade: the vectorSearch filter param type (line 1781) includes `trust_grade?: string`, line 1767 calls team_id/scope/trust_grade/embedding_model 'metadata filters within the namespace', yet line 1845 of the same subsection states foldPartitionFilter folds ONLY scope/visibility and trust-grade boosting runs post-hydration on the sidecar. A trust_grade Vectorize filter can never match because trust_grade is not in the upsert blob.",
+     "severity": "high",
+     "recommendation": "Drop trust_grade from the vectorSearch `filter` param type (1781) and from the prose at 1767; state explicitly that trust_grade is never a Vectorize filter and is applied only as a post-hydration boost on the LEFT-JOINed sidecar value (consistent with line 1845 and \u00a73.2)."
+    },
+    {
+     "section": "s07",
+     "issue": "\u00a77.4 (line 3110) lists trust_grade among fields that 'ride as filterable metadata' within the namespace, and line 3121 says the post-query D1 re-check re-checks on `tenant_id/scope/trust_grade/deleted_at`. \u00a77.9 (line 3290) shows the request-flow Vectorize metadata filter as `{scope, trust_grade}`. All contradict \u00a73.2 (trust_grade is sidecar-only, never a Vectorize filter, never re-checked as a vector-metadata field).",
+     "severity": "high",
+     "recommendation": "In \u00a77.4 remove trust_grade from the 'filterable metadata' list (3110) and from the D1 re-check key (3121, leaving tenant_id/scope/deleted_at + visibilityPredicate); in \u00a77.9 (3290) change the filter to {scope} (visibility folded per \u00a75.3.2). Sweep the remaining prose/code-ref mentions (\u00a71.4/97, \u00a72.4/354, \u00a75/541 & 1601, \u00a76/2080, \u00a77.3/3053, \u00a77.10/3325) to drop trust_grade from any Vectorize-metadata phrasing."
+    },
+    {
+     "section": "s10",
+     "issue": "\u00a710.1 vars declares SYNTHESIS_TOKEN_BUDGET='20000' with the comment '< 24k window', but \u00a75.5's buildSynthesisPrompt hardcodes MODEL_CTX_TOKENS=24_000 and derives the budget internally (minus ANSWER_HEADROOM/SYSTEM_QUESTION_RES) \u2014 it never reads env.SYNTHESIS_TOKEN_BUDGET. The var is dead and the two numbers (20k vs 24k) imply different intended budgets.",
+     "severity": "medium",
+     "recommendation": "Either have buildSynthesisPrompt read env.SYNTHESIS_TOKEN_BUDGET as the effective budget cap (and keep MODEL_CTX_TOKENS only as the hard model ceiling for the assertion), or delete the unused var from \u00a710.1 to avoid a misleading config knob."
+    },
+    {
+     "section": "s03",
+     "issue": "\u00a73.2 (line 1060) and \u00a73.1.1 (1542) 'reserve budget for `source` within the 10-index cap', but `source` is never actually provisioned as a metadata index in any provisioning block (\u00a73.2, \u00a77.4, \u00a710.4) nor used as a Vectorize filter anywhere in the search path. It is aspirational reserved budget presented alongside live indexes.",
+     "severity": "low",
+     "recommendation": "Either drop the `source` reservation language or annotate it explicitly as 'reserved, not provisioned in v1' so the 10-index budget accounting (4 live + 1 reserved) is unambiguous to whoever runs the provisioning commands."
+    }
+   ],
+   "missing": [],
+   "summary": "The entity-vectors-in-v1 sweep IS clean on its own axis: brain-entities is consistently propagated across \u00a73.2 (independent per-index 10M-vector / 50k-namespace ceilings), the \u00a76.2 embed-entities Workflow step, \u00a75.2, \u00a76.6/\u00a76.7 search_entities, and the \u00a710.1 ENTITY_INDEX binding + \u00a710.4 provisioning. The genuinely strong CF-primitive reasoning is intact and correct against real V2 limits: the 1 MiB non-stream step-output cap is handled by R2-staging the body/chunks and returning counts-only (\u00a74.3/\u00a76.2) with the ReadableStream escape hatch noted; MAX_CHUNKS_PER_DOC=4000 keeps total steps under the 10k default (raisable to 25k via workflows[].limits.steps); D1's 100-bound-param limit drives CHUNK_DB_BATCH_SIZE=10; topK=100 (correctly noted to drop to 50 only with returnValues/returnMetadata:'all', which the query sets neither) with $in multi-scope folding and the 64B metadata/namespace caveat; and the AI Gateway enforcement-boundary analysis (native @cf/ neuron calls are NOT covered by spend limits, so the app-level token_spend 429 pre-check is the enforcing cap) is precise. BUT the re-score uncovers two UNRESOLVED critical straggler classes of exactly the internal-contradiction type that dragged the prior 57 down \u2014 the sweep closed the entity-vectors axis but left these open. (1) trust_grade-as-Vectorize-metadata: \u00a73.2/\u00a73.1.1/\u00a74.3 emphatically state trust_grade is NOT a Vectorize metadata index and NOT in the upsert blob (sidecar-only, so a promotion never re-upserts a vector), yet \u00a710.4 line 4181 emits a LIVE `wrangler vectorize create-metadata-index brain-chunks --property-name=trust_grade` (a second provisioning block disagreeing with \u00a73.2's), \u00a710.6/4293 repeats it in the deploy checklist, \u00a78.3/3571 actually UPSERTS metadata {trust_grade:'evidence'} into Vectorize, and \u00a75.3.2/\u00a77.4/\u00a77.9 carry it as a query filter and D1 re-check key \u2014 \u00a75.3.2 even self-contradicts (line 1781 filter type has trust_grade?:string while line 1845 says foldPartitionFilter folds only scope/visibility). (2) brain-entities missing from every \u00a710.2 environment override: lines 4131-4132 declare only vectorize:[{index_name:'brain-chunks(-staging)'}] for staging AND production; since wrangler env vectorize arrays REPLACE the top-level array, staging/production would deploy with no ENTITY_INDEX binding, so every embed-entities step and search_entities call throws at runtime \u2014 a deploy-breaking gap, and the \u00a710.2 prose (line 4127) still says each env has 'its own brain-chunks Vectorize index' (singular). Both are squarely CF-primitive-correctness within the two-Vectorize-index reality. Per the lens rule, these unresolved criticals cap the score below 60. Two MEDIUMs: \u00a710.1 vars SYNTHESIS_TOKEN_BUDGET='20000' is dead (unread) \u2014 \u00a75.5 hardcodes MODEL_CTX_TOKENS=24_000 and derives the budget internally; and \u00a73.2's reserved 5th `source` metadata slot is never actually provisioned/used."
+  },
+  {
+   "lens": "completeness",
+   "score": 83,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "All four mandated checkpoints verified consistent: \u00a710.1 ENTITY_INDEX binding, \u00a710.4 provisioning + metadata indexes, \u00a74.5/\u00a76.2 v1 embed-entities Workflow step, and \u00a71/\u00a72/\u00a75/\u00a76/\u00a79 uniformly 'in v1'.",
+    "Deferral language is now surgically scoped: every 'Phase 3.5' reference adjacent to entities is cross-session SEMANTIC dedup only, with repeated explicit disclaimers that provisioning entity vectors does NOT pull in semantic dedup.",
+    "search_entities is coherent end-to-end: \u00a76.7 flow A\u2032 + \u00a79.2.2 catalog + \u00a76.6 mechanics all agree (ScopedVectorize namespace=tenantId, scope/visibility metadata filter, authoritative D1 re-check on entities, optional entity_fts RRF fusion).",
+    "Per-row entity-vector staleness (embedded_at/embed_error/embedding_model/embedding_dims) mirrors chunks and is wired into the \u00a710.4 re-embed sweep and \u00a73.2 embedding_model metadata index.",
+    "Orphan cleanup (clear-prior-extraction) correctly deletes entity vectors against a LIVE v1 index with D1-row-as-existence-gate, closing the stale-vector leak path."
+   ],
+   "weaknesses": [
+    {
+     "section": "s10",
+     "issue": "\u00a73.2 (line 1063) asserts \"The headroom/alert math of \u00a710.7 now tracks both indexes' vector + namespace ceilings\" and line 1062 names the brain-entities-{shard} / tenant_shards.entity_index sharding path (the entity_index schema column exists at lines 824 and 2674), but \u00a710.7's actual Vectorize headroom-alert RESPONSE (line 4310) reads single-index: \"shared across all tenant namespaces ... allocate brain-chunks-{shard} and repoint tenant_shards.chunk_index\" with no mention of the entity-index shard path. This is a forward-reference \u00a73.2 makes that \u00a710.7 does not honor \u2014 a surviving cross-reference straggler of exactly the class the sweep targeted, with the schema column sitting ready but unreferenced in the alert response.",
+     "severity": "medium",
+     "recommendation": "Either (a) extend \u00a710.7 line 4310's alert response to read \"allocate brain-chunks-{shard} AND/OR brain-entities-{shard} and repoint tenant_shards.chunk_index/entity_index per the saturated index\" and change \"shared across all tenant namespaces\" to \"per index\"; or (b) soften \u00a73.2 line 1063 to not claim \u00a710.7 already tracks both. Option (a) is preferred since the entity_index column already exists in schema."
+    },
+    {
+     "section": "s10",
+     "issue": "\u00a710.7 line 4325 uses \"a risky change (e.g. Phase 3.5 entity vectors)\" as the per-tenant rollout-gate example. Entity vectors are now v1; only semantic DEDUP is Phase 3.5. This contradicts the corrected terminology applied everywhere else (e.g. line 4383 'Phase 3.5 entity-vector *dedup*').",
+     "severity": "low",
+     "recommendation": "Change \"Phase 3.5 entity vectors\" to \"Phase 3.5 entity-vector dedup\" (or another genuinely-deferred example) to match the now-uniform terminology."
+    }
+   ],
+   "missing": [],
+   "summary": "The entity-vectors-in-v1 decision is now coherent and consistent end-to-end. All four mandated checkpoints pass: \u00a710.1 wrangler declares ENTITY_INDEX\u2192brain-entities, \u00a710.4 provisions brain-entities + its 4 metadata indexes before first filtered upsert, \u00a74.5/\u00a76.2 EntityExtractionWorkflow has a v1 embed-entities step (embed canonical_name+description via bge-m3 \u2192 upsert brain-entities, vector.id==entities.id, namespace=tenantId), and \u00a71.7/\u00a72.7/\u00a75.2/\u00a75.3/\u00a76.6/\u00a76.7/\u00a79.2.2 uniformly describe brain-entities + search_entities as IN v1. Every surviving \"deferred to Phase 3.5\" hit is correctly and exclusively scoped to cross-session SEMANTIC fact/entity dedup (nearest-vector merge) \u2014 never the index or search. The \u00a76.6 re-extract cleanup deletes orphaned entity vectors against a live v1 index; \u00a76.7 flow A\u2032 defines the scoped search_entities pipeline (metadata-filter gate + D1 re-check + optional entity_fts RRF). The two internal contradictions that dragged the prior 57 (index/search deferral language) are demonstrably resolved. What holds it short of a clean bill: ONE medium-severity survivor of exactly the class the sweep targeted \u2014 \u00a73.2 (line 1063) claims \"\u00a710.7 now tracks both indexes' vector + namespace ceilings\" and \u00a73.2 line 1062 names the brain-entities-{shard}/tenant_shards.entity_index sharding path (and the entity_index schema column exists at lines 824/2674), yet \u00a710.7's actual headroom-alert response (line 4310) only repoints chunk_index/brain-chunks-{shard}. Plus one low wording straggler (line 4325 \"Phase 3.5 entity vectors\" should read \"entity-vector dedup\"). Cleared as deliberate, not oversight: line 2115 defers a private-entity node-space TIER ({world,team} only in v1), which is an allowed scope decision, not an index/search deferral \u2014 search over {world,team} entities is correctly v1."
+  },
+  {
+   "lens": "security-isolation",
+   "score": 63,
+   "verdict": "accept-with-changes",
+   "strengths": [
+    "Break-glass read is exemplary: all four gates (role/explicit-signal/audit+alert/default-path-unchanged) specified concretely in \u00a77.6, listed in the \u00a79.2.2 admin catalog, fails closed to 403 for non-admins, never bypasses tenant_id, and is locked by dedicated canaries #14 (fail-closed) and #15 (returns content AND writes audit+alert)",
+    "Entity (brain-entities) search arm is held to the same isolation contract as the chunk arm by construction: ScopedVectorize namespace=tenantId, scope/visibility folded into the metadata filter, and the authoritative D1 re-check on entities via scopePredicate + {world,team} visibilityPredicate; the EdgeSpec/ENTITY_GRAPH parameterization makes the node gate ride automatically on list_entities/get_entity/find_orphans/traverse, with canary #13 as a required merge check",
+    "The two-axis separation (allowedScopes = data partition vs capabilities = read/write/admin) is now consistently enforced and explained across \u00a71.4, \u00a77.2, \u00a79.0.1 \u2014 the earlier single-scopes collapse is genuinely removed, and the API-key branch correctly routes stored scopes JSON to capabilities (not allowedScopes)",
+    "trust_grade is correctly excluded from every actual upsert write blob (\u00a74.3 line 1359-1362, \u00a74.9 line 1542) and from the canonical \u00a73.2 index list \u2014 the runtime write path never leaks it into a vector, so the defect is confined to provisioning text",
+    "Drop-don't-error / D1-as-existence-authority is applied uniformly across cross-tenant, cross-scope, and intra-tenant-visibility paths, with a 15-row table-driven canary suite and a meta-test that fails if a new surface is added without a canary row"
+   ],
+   "weaknesses": [
+    {
+     "section": "s07",
+     "issue": "Check (a) phantom column: \u00a79.0.1 (line 3721) resolves the API-key branch's allowedScopes from `api_keys.allowed_scopes`, and \u00a77.2 (line 2680, mint-time data-partition derivation / iter-3 escalation fix) pins that same `allowed_scopes` at mint time \u2014 but the AUTHORITATIVE api_keys DDL in \u00a73.1.4 (lines 799-808) defines only `scopes` (the capability axis) and has NO `allowed_scopes` column. The isolation fix that prevents a restricted key from resolving to '*' is wired to a column the schema does not declare, so the resolver as written cannot read it.",
+     "severity": "high",
+     "recommendation": "Add `allowed_scopes TEXT` (JSON string[] | NULL) to the api_keys CREATE TABLE in \u00a73.1.4 (and the Drizzle schema in \u00a77.1), mirroring memberships.allowed_scopes, with a comment that NULL='*' only when the minter was itself '*'. Then the \u00a79.0.1/\u00a77.2 references resolve to a real column. Optionally add a canary asserting a restricted-minter key never resolves allowedScopes='*'."
+    },
+    {
+     "section": "s10",
+     "issue": "Check (d) trust_grade straggler in the canonical provisioning block: \u00a710.4 (line 4181) creates `wrangler vectorize create-metadata-index brain-chunks --property-name=trust_grade`, directly contradicting \u00a73.2 (lines 1060/1072) which states trust_grade is intentionally NOT a Vectorize metadata index. This is the canonical provisioning block cross-referenced by the deploy runbook \u2014 the consistency sweep missed it entirely.",
+     "severity": "high",
+     "recommendation": "Delete the trust_grade create-metadata-index line from \u00a710.4 (line 4181) and ADD the missing `--property-name=visibility` line so the brain-chunks block reads scope/team_id/visibility/embedding_model, matching \u00a73.2 (lines 1068-1071) and \u00a77.4 (lines 3114-3117) verbatim."
+    },
+    {
+     "section": "s10",
+     "issue": "Check (d), second occurrence: \u00a710.7 deploy-order runbook step 3 (line 4293) lists brain-chunks metadata indexes as `team_id/scope/trust_grade/embedding_model` \u2014 same defect as \u00a710.4: includes trust_grade AND omits visibility. Following this runbook would provision a useless trust_grade index and leave the visibility partition filter (used by foldPartitionFilter on the vector arm) UNindexed, silently degrading the restricted-principal topK-budget optimization (canary #10's recall-completeness guarantee) \u2014 backstopped only by the D1 visibilityPredicate.",
+     "severity": "high",
+     "recommendation": "Rewrite line 4293's brain-chunks list to `scope/team_id/visibility/embedding_model` (drop trust_grade, add visibility), making it identical to the corrected \u00a710.4 block. Add a one-line assertion that this list matches \u00a73.2 so future edits stay in sync."
+    },
+    {
+     "section": "s07",
+     "issue": "Check (d), prose occurrence: \u00a77.4 (line 3110) states 'Within the namespace, userId/teamId/scope/visibility/trust_grade/embedding_model ride as filterable metadata.' Listing trust_grade as filterable metadata contradicts \u00a73.2 (trust_grade is neither in the upsert blob nor indexed) and the clean \u00a77.4 command block 4 lines below it (lines 3114-3117). Lower-impact than the runbook commands (prose, not executable) but it is the same trust_grade-into-Vectorize-metadata inconsistency the sweep was meant to eliminate.",
+     "severity": "medium",
+     "recommendation": "Remove trust_grade from the line 3110 'ride as filterable metadata' enumeration (leave userId/teamId/scope/visibility/embedding_model), so the prose agrees with the \u00a77.4 command block immediately below and with \u00a73.2."
+    },
+    {
+     "section": "s10",
+     "issue": "No CI/lint gate asserts that the four Vectorize provisioning blocks (\u00a73.2, \u00a77.4, \u00a710.4, \u00a710.7) agree. The fact that three of four were swept clean while \u00a710.4/\u00a710.7 retained the old shape shows the metadata-index list is hand-duplicated in four places with no single source of truth \u2014 a recurring drift risk for the exact partition-filter columns the isolation guarantee's topK optimization depends on.",
+     "severity": "low",
+     "recommendation": "Designate \u00a73.2 as the single canonical metadata-index list and have \u00a77.4/\u00a710.4/\u00a710.7 say 'identical to \u00a73.2' rather than re-listing, or add a trivial test/lint that diffs the create-metadata-index command lists across sections and fails on divergence."
+    }
+   ],
+   "missing": [],
+   "summary": "Ruthless multi-tenant + intra-tenant isolation re-score after the entity-vectors-in-v1 consistency sweep. Three of the four lens checks land cleanly on the canonical spine: (b) the admin break-glass read is fully and correctly specified \u2014 role-gated (owner/admin via requireRole('admin')), fail-CLOSED (non-admin + breakGlass:true \u2192 403, no fall-through), audited in the same db.batch (action='breakglass_read' with target principal in diff) plus a guaranteed high-severity alert, tenant_id never bypassed, present in the \u00a79.2.2 admin catalog and exercised by canaries #14/#15; (c) the brain-entities search arm carries the identical tenant+scope/visibility gate as the chunk arm (ScopedVectorize namespace=tenantId, foldPartitionFilter on scope/visibility, authoritative D1 re-check via scopePredicate + {world,team} visibilityPredicate, canary #13), with the EdgeSpec parameterization (\u00a76.1) and \u00a73.2/\u00a76.6/\u00a76.7/\u00a79.2.2 all in agreement. The sweep did NOT fully land on two points. (a) The edge resolver's intent is correct \u2014 \u00a79.0.1 line 3721 reads the api-key's stored allowed_scopes pinned to the minter-intersection (no '*' default for restricted keys), and the machine-token branch resolves from membership \u2014 but the AUTHORITATIVE api_keys DDL (\u00a73.1.4 lines 799-808) defines only a `scopes` (capability) column and NO `allowed_scopes` column, so the resolver and the \u00a77.2 mint-time escalation fix both read a column the schema does not define: the fix is wired to a phantom column. (d) trust_grade is correctly kept out of the canonical upsert blob and index list (\u00a73.2, \u00a77.4 command block, \u00a74.3, \u00a74.9 all clean), but the sweep missed the \u00a710.4 provisioning block (line 4181) AND its \u00a710.7 deploy-runbook echo (line 4293), BOTH of which still create a trust_grade metadata index on brain-chunks AND omit the visibility index \u2014 a direct \u00a73.2-vs-\u00a710.4 contradiction on the exact field the sweep targeted; the \u00a77.4 prose (line 3110) also still lists trust_grade as filterable metadata. The visibility-omission half is the isolation-relevant one (visibility IS a real partition filter used by foldPartitionFilter), though it is backstopped by the authoritative D1 visibilityPredicate so it degrades the topK-budget optimization rather than the hard guarantee. No actual write path puts trust_grade into a vector, so this is a consistency/provisioning defect, not a runtime isolation breach \u2014 it does not trip the critical cap. Net: a sound isolation spine with two localized propagation misses the sweep should have caught; both are concrete and mechanical to fix."
+  }
+ ]
+}
