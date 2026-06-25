@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src/routeTree.gen.ts
+.output/
+.nitro/
+.tanstack/
+.vinxi/
+.wrangler/
+worker-configuration.d.ts

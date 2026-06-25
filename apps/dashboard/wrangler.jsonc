@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "brain-dashboard",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The Cloudflare Workers entry for a TanStack Start app. ACTIVE ONLY once the Workers deploy step
+  // is wired (see the note in ./vite.config.ts): add `@cloudflare/vite-plugin` to vite.config.ts,
+  // then `vite build` emits the Worker that this `main` points at. v1 builds the default
+  // (node/Nitro) target so the `bun check` gate (biome + tsc + bun test) stays green off the heavy
+  // Workers adapter. Set BRAIN_API_URL (the apps/api origin) + the CLERK_* vars as Worker secrets.
+  "main": "@tanstack/react-start/server-entry",
+  "assets": { "directory": "./dist/client" },
+  "observability": { "enabled": true }
+}
