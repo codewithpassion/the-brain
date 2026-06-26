@@ -230,6 +230,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     if (
       c.req.path === "/health" ||
       c.req.path === "/authorize" ||
+      c.req.path === "/authorize/orgs" || // org picker endpoint — carries JWT in body, not header
       c.req.path === "/callback" ||
       isMcpPath(c.req.path) ||
       isDeviceFlowPath(c.req.path)

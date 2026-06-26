@@ -6,23 +6,26 @@ import { createOAuthWorker } from "../src/index"
 import { seedChunk, seedDoc, seedMembership, seedOrg } from "./seed"
 
 /**
- * MCP OAuth path canary — minimal-boot proof that the OAuthProvider wrapper is wired correctly.
- * Tests the three deliverables from the gate spec:
+ * MCP OAuth path canary — tests the OAuthProvider wrapper, the hardened callback (T9), the
+ * org picker flow (T10), and the legacy bearer bridge.
  *
- *   1. Discovery: `/.well-known/oauth-authorization-server` returns valid metadata with the
- *      expected endpoints advertised.
+ *   1. Discovery: `/.well-known/oauth-authorization-server` returns valid metadata.
  *
- *   2. OAuth token path: a full authorization_code flow (register → /authorize → /callback →
- *      /oauth/token → /mcp tools/list) produces a tenant-scoped tool response driven by the
- *      access token's `props.principal`.
+ *   2. OAuth token path (T9 hardened): a full authorization_code flow now POSTs
+ *      `{ token, state }` to `/callback` (Clerk JWT never in the URL). The response is
+ *      JSON `{ redirectTo }` and the page JS navigates the browser. The full code→token→/mcp
+ *      chain still works end-to-end.
  *
- *   3. Bearer path (resolveExternalToken): a legacy Clerk JWT on `/mcp` still works unchanged;
- *      the isolation invariant holds — tenant A's OAuth session cannot read tenant B's data.
+ *   3. Org picker (T10):
+ *      - Multi-org user's chosen tenant scopes the grant Principal, verified by D1 tenant
+ *        isolation (team chunk visible; personal chunk absent from results).
+ *      - Non-member choice is rejected with 401.
+ *      - Single non-personal org user: /authorize/orgs returns that org; /callback with its
+ *        id succeeds; fallback to org_${userId} (which doesn't exist) correctly 401s.
  *
- * The worker is constructed with `createOAuthWorker({ clerkVerifier: fakeVerifier })` so no
- * real Clerk network calls occur. The test calls the worker's `.fetch()` directly (not via
- * SELF) so the same fake verifier reaches both the OAuth `/callback` and the
- * `resolveExternalToken` bridge.
+ *   4. Bearer path (resolveExternalToken): legacy Clerk JWT on `/mcp` unchanged.
+ *
+ *   5. Device-flow survives the OAuthProvider wrapper.
  */
 
 const env_ = env as unknown as BrainBindings
@@ -34,6 +37,25 @@ const OAUTH_TENANT = `org_${OAUTH_USER}` // auto-provisioned on first login
 const BEARER_USER = "bearer-test-user"
 const BEARER_TENANT = `org_${BEARER_USER}`
 
+/** Multi-org user for T10 picker tests (has personal org + team org). */
+const MULTI_USER = "multi-org-test-user"
+const MULTI_PERSONAL = `org_${MULTI_USER}`
+const MULTI_TEAM = "team-org-id-for-t10"
+const MULTI_TEAM_SLUG = "team-org-slug-t10"
+
+/**
+ * Non-member tenant (exists in DB; MULTI_USER is NOT a member — for rejection test).
+ */
+const OTHER_TENANT = "other-tenant-not-a-member"
+
+/**
+ * Solo user whose ONLY org is non-personal (guards the org_${userId} fallback trap:
+ * if the page JS mistakenly sends no tenantId for single-org users, the server's
+ * fallback to org_${userId} hits an unknown tenant → 401 instead of their real org).
+ */
+const SOLO_USER = "solo-nonpersonal-user"
+const SOLO_TEAM = "solo-team-org-id"
+
 const fakeVerifier = (userId: string, email?: string): ClerkVerifier => ({
   verify: async (token: string): Promise<ClerkIdentity | null> => {
     if (token === `fake.${userId}.jwt`) return { userId, ...(email ? { email } : {}) }
@@ -41,7 +63,6 @@ const fakeVerifier = (userId: string, email?: string): ClerkVerifier => ({
   },
 })
 
-// Worker using the fake Clerk verifier for the OAuth user.
 const makeWorker = (userId: string) => createOAuthWorker({ clerkVerifier: fakeVerifier(userId) })
 
 const BASE = "https://brain.test"
@@ -57,24 +78,9 @@ const workerFetch = (
 ): Promise<Response> =>
   worker.fetch(new Request(`${BASE}${path}`, init), overrideEnv ?? (env as unknown), makeCtx())
 
-// ── Fake Vectorize + AI (no local emulation; mirror what mcp.canary.test.ts does) ──────────
-// The adversarial fake returns ONLY tenant-A's chunk id for any query — the D1 re-check then
-// drops it if it's cross-tenant. We use this in the isolation test instead of the real
-// CHUNK_INDEX (which throws "needs to be run remotely" locally).
-const vec1024 = (): number[] => Array.from({ length: 1024 }, () => 0)
+// ── Fake Vectorize + AI ──────────────────────────────────────────────────────
 
-// Adversarial fake: returns bearer-chunk (cross-tenant B) FIRST, then oauth-chunk (A).
-// The D1 re-check must DROP bearer-chunk (wrong tenant) and KEEP oauth-chunk (correct tenant).
-// Without this cross-tenant id in the result, "bearer-chunk absent" would be vacuously true.
-const oauthOnlyIndex = {
-  query: async () => ({
-    count: 2,
-    matches: [
-      { id: "bearer-chunk", score: 0.95 }, // cross-tenant — must be DROPPED by D1 re-check
-      { id: "oauth-chunk", score: 0.91 }, // same tenant — must be KEPT
-    ],
-  }),
-} as unknown as Vectorize
+const vec1024 = (): number[] => Array.from({ length: 1024 }, () => 0)
 
 const fakeAi = {
   run: async (_model: string, inputs: Record<string, unknown>) => ({
@@ -82,11 +88,51 @@ const fakeAi = {
   }),
 } as unknown as BrainBindings["AI"]
 
-/** Env with real KV/D1/R2 but faked Vectorize + AI (avoids the "run remotely" crash). */
+/**
+ * Adversarial fake for the OAUTH_USER isolation test: returns bearer-chunk first (cross-tenant
+ * B) then oauth-chunk (A). D1 re-check must drop bearer-chunk and keep oauth-chunk.
+ */
+const oauthOnlyIndex = {
+  query: async () => ({
+    count: 2,
+    matches: [
+      { id: "bearer-chunk", score: 0.95 }, // cross-tenant — must be DROPPED
+      { id: "oauth-chunk", score: 0.91 }, // same tenant — must be KEPT
+    ],
+  }),
+} as unknown as Vectorize
+
+/** Env with real KV/D1/R2 but faked Vectorize + AI for OAUTH_USER isolation test. */
 const mcpEnv = {
   ...env_,
   CHUNK_INDEX: oauthOnlyIndex,
   ENTITY_INDEX: oauthOnlyIndex,
+  AI: fakeAi,
+  AI_GATEWAY_ID: "test-gateway",
+} as unknown as SurfaceEnv
+
+/**
+ * Adversarial fake for the T10 team-scoping test: returns multi-personal-chunk first
+ * (cross-tenant — MULTI_PERSONAL) then multi-team-chunk (MULTI_TEAM). When the OAuth token
+ * is correctly scoped to MULTI_TEAM, the D1 re-check must DROP multi-personal-chunk and KEEP
+ * multi-team-chunk. If the token were mistakenly scoped to MULTI_PERSONAL, the result would
+ * be inverted — making this a discriminating isolation test.
+ */
+const multiTeamOnlyIndex = {
+  query: async () => ({
+    count: 2,
+    matches: [
+      { id: "multi-personal-chunk", score: 0.95 }, // cross-tenant — must be DROPPED
+      { id: "multi-team-chunk", score: 0.91 }, // same tenant — must be KEPT
+    ],
+  }),
+} as unknown as Vectorize
+
+/** Env with faked Vectorize pointing at MULTI_TEAM chunks for T10 scoping test. */
+const multiTeamMcpEnv = {
+  ...env_,
+  CHUNK_INDEX: multiTeamOnlyIndex,
+  ENTITY_INDEX: multiTeamOnlyIndex,
   AI: fakeAi,
   AI_GATEWAY_ID: "test-gateway",
 } as unknown as SurfaceEnv
@@ -105,16 +151,66 @@ const pkce = async (): Promise<{ verifier: string; challenge: string }> => {
   return { verifier, challenge: base64url(digest) }
 }
 
+// ─── Helper: extract stateToken from /authorize HTML ────────────────────────
+/**
+ * The /authorize handler embeds `const STATE_TOKEN = "<hex>";` in the page HTML.
+ * Parsing it here is more reliable than a KV list that may pick up stale tokens.
+ */
+const extractStateToken = (html: string): string => {
+  const m = html.match(/STATE_TOKEN\s*=\s*"([0-9a-f]{64})"/)
+  if (!m?.[1]) throw new Error("STATE_TOKEN not found in /authorize HTML")
+  return m[1]
+}
+
+/** Run a minimal /authorize and return the embedded state token. */
+const authorizeAndGetState = async (
+  worker: ReturnType<typeof createOAuthWorker>,
+  clientId: string,
+  redirectUri: string,
+  scope: string,
+  challenge: string,
+): Promise<string> => {
+  const authRes = await workerFetch(
+    worker,
+    `/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      scope,
+    })}`,
+  )
+  expect(authRes.status).toBe(200)
+  const html = await authRes.text()
+  return extractStateToken(html)
+}
+
+/** POST { token, state, tenantId? } to /callback → return parsed response. */
+const postCallback = async (
+  worker: ReturnType<typeof createOAuthWorker>,
+  token: string,
+  stateToken: string,
+  tenantId?: string,
+): Promise<{ status: number; redirectTo?: string; error?: string }> => {
+  const body: Record<string, string> = { token, state: stateToken }
+  if (tenantId !== undefined) body.tenantId = tenantId
+  const res = await workerFetch(worker, "/callback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const json = (await res.json()) as { redirectTo?: string; error?: string }
+  return { status: res.status, ...json }
+}
+
 // ─── Seed ───────────────────────────────────────────────────────────────────
 
 beforeAll(async () => {
-  // Auto-provision org for OAUTH_USER (triggered by first resolvePrincipal call in /callback).
-  // seedOrg / seedMembership are not needed — resolvePrincipal does it. Pre-seed a document
-  // so tools/list + a search have real rows to operate on.
-  await seedOrg(OAUTH_TENANT, `u-oauth`)
+  // OAUTH_USER: single personal org.
+  await seedOrg(OAUTH_TENANT, "u-oauth")
   await seedMembership({ tenantId: OAUTH_TENANT, userId: OAUTH_USER })
   await seedDoc({ id: "oauth-doc", tenantId: OAUTH_TENANT, slug: "oauth-doc" })
-  // Distinctive marker so we can assert tenant A's content IS present (non-vacuous).
   await seedChunk({
     id: "oauth-chunk",
     tenantId: OAUTH_TENANT,
@@ -122,8 +218,8 @@ beforeAll(async () => {
     content: "oauthuniquesentinel the answer is in tenant A only",
   })
 
-  // Seed tenant B for isolation check.
-  await seedOrg(BEARER_TENANT, `u-bearer`)
+  // BEARER_USER: single personal org (for legacy bearer + tenant isolation tests).
+  await seedOrg(BEARER_TENANT, "u-bearer")
   await seedMembership({ tenantId: BEARER_TENANT, userId: BEARER_USER })
   await seedDoc({ id: "bearer-doc", tenantId: BEARER_TENANT, slug: "bearer-doc" })
   await seedChunk({
@@ -132,6 +228,35 @@ beforeAll(async () => {
     documentId: "bearer-doc",
     content: "bearertenantsentinel this must not leak to tenant A",
   })
+
+  // MULTI_USER: personal org + team org (for T10 picker + scoping + rejection tests).
+  await seedOrg(MULTI_PERSONAL, "u-multi")
+  await seedMembership({ tenantId: MULTI_PERSONAL, userId: MULTI_USER })
+  await seedDoc({ id: "multi-personal-doc", tenantId: MULTI_PERSONAL, slug: "multi-personal-doc" })
+  await seedChunk({
+    id: "multi-personal-chunk",
+    tenantId: MULTI_PERSONAL,
+    documentId: "multi-personal-doc",
+    content: "multipersonalsentinel personal org content must not appear in team search",
+  })
+  await seedOrg(MULTI_TEAM, MULTI_TEAM_SLUG)
+  await seedMembership({ tenantId: MULTI_TEAM, userId: MULTI_USER, role: "member" })
+  await seedDoc({ id: "multi-team-doc", tenantId: MULTI_TEAM, slug: "multi-team-doc" })
+  await seedChunk({
+    id: "multi-team-chunk",
+    tenantId: MULTI_TEAM,
+    documentId: "multi-team-doc",
+    content: "multiteamsentinel team org content confirms MULTI_TEAM scoping",
+  })
+
+  // OTHER_TENANT: exists in DB but MULTI_USER is NOT a member (for rejection test).
+  await seedOrg(OTHER_TENANT, "other-tenant-slug-t10")
+
+  // SOLO_USER: only one membership in a non-personal org (no personal org seeded).
+  // Guards the org_${userId} fallback trap: if the page JS mistakenly sends no tenantId,
+  // the server fallback hits an unknown tenant → 401 instead of the real org.
+  await seedOrg(SOLO_TEAM, "solo-team-slug")
+  await seedMembership({ tenantId: SOLO_TEAM, userId: SOLO_USER, role: "member" })
 })
 
 // ─── 1. Discovery ────────────────────────────────────────────────────────────
@@ -152,10 +277,10 @@ describe("OAuth 2.1 discovery", () => {
   })
 })
 
-// ─── 2. Full OAuth code flow ─────────────────────────────────────────────────
+// ─── 2. Full OAuth code flow (T9: POST /callback, JWT never in URL) ───────────
 
-describe("OAuth authorization_code flow → MCP tools/list", () => {
-  test("register → authorize → callback → token → /mcp tools/list works end-to-end", async () => {
+describe("OAuth authorization_code flow → MCP tools/list (T9: POST /callback)", () => {
+  test("register → authorize → POST /callback → token → /mcp tools/list works end-to-end", async () => {
     const worker = makeWorker(OAUTH_USER)
 
     // 2a. Dynamic client registration.
@@ -167,7 +292,7 @@ describe("OAuth authorization_code flow → MCP tools/list", () => {
         redirect_uris: [`${BASE}/mcp-redirect`],
         grant_types: ["authorization_code"],
         response_types: ["code"],
-        token_endpoint_auth_method: "none", // public client
+        token_endpoint_auth_method: "none",
       }),
     })
     expect(regRes.status).toBe(201)
@@ -175,50 +300,31 @@ describe("OAuth authorization_code flow → MCP tools/list", () => {
     const clientId = regBody.client_id
     expect(typeof clientId).toBe("string")
 
-    // 2b. Initiate /authorize — this stores OAuth state in OAUTH_KV and returns the sign-in HTML.
+    // 2b. /authorize returns HTML with embedded state token (T9: no token in URL).
     const { verifier, challenge } = await pkce()
-    const authParams = new URLSearchParams({
-      response_type: "code",
-      client_id: clientId,
-      redirect_uri: `${BASE}/mcp-redirect`,
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-      scope: "brain:read brain:write",
-    })
-    const authRes = await workerFetch(worker, `/authorize?${authParams}`)
-    // The authorize handler returns an HTML page with the Clerk sign-in.
-    expect(authRes.status).toBe(200)
-    expect(authRes.headers.get("content-type")).toContain("text/html")
-
-    // 2c. Extract the state token from OAUTH_KV (the test env has direct KV access).
-    //     The /authorize handler stores the OAuth request as `oauth:state:<stateToken>`.
-    const kvList = await env_.OAUTH_KV.list({ prefix: "oauth:state:" })
-    // There should be exactly one pending state (from the authorize call above).
-    expect(kvList.keys.length).toBeGreaterThan(0)
-    const stateKey = kvList.keys[0]?.name ?? ""
-    const stateToken = stateKey.replace("oauth:state:", "")
+    const stateToken = await authorizeAndGetState(
+      worker,
+      clientId,
+      `${BASE}/mcp-redirect`,
+      "brain:read brain:write",
+      challenge,
+    )
     expect(stateToken).toBeTruthy()
 
-    // 2d. Simulate the Clerk sign-in callback with a fake Clerk JWT.
-    //     The real browser flow would POST this after loading Clerk JS and signing in.
+    // 2c. POST { token, state } to /callback (T9: Clerk JWT never in the URL).
+    //     OAUTH_USER has a single personal org → server defaults to it.
     const clerkJwt = `fake.${OAUTH_USER}.jwt`
-    const callbackParams = new URLSearchParams({
-      token: clerkJwt,
-      state: stateToken,
-    })
-    const callbackRes = await workerFetch(worker, `/callback?${callbackParams}`)
-    // Should redirect to the client's redirect_uri with an auth code.
-    expect(callbackRes.status).toBe(302)
-    const location = callbackRes.headers.get("location") ?? ""
-    expect(location).toContain(`${BASE}/mcp-redirect`)
-    expect(location).toContain("code=")
+    const cbResult = await postCallback(worker, clerkJwt, stateToken)
+    // /callback returns JSON { redirectTo }, NOT a 302 redirect.
+    expect(cbResult.status).toBe(200)
+    expect(cbResult.redirectTo).toContain(`${BASE}/mcp-redirect`)
+    expect(cbResult.redirectTo).toContain("code=")
 
-    // 2e. Extract the auth code from the redirect URI.
-    const codeUrl = new URL(location)
-    const code = codeUrl.searchParams.get("code") ?? ""
+    // 2d. Extract the auth code from the JSON redirectTo URL.
+    const code = new URL(cbResult.redirectTo ?? "").searchParams.get("code") ?? ""
     expect(code).toBeTruthy()
 
-    // 2f. Exchange the code for an access token.
+    // 2e. Exchange the code for an access token.
     const tokenRes = await workerFetch(worker, "/oauth/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -232,12 +338,11 @@ describe("OAuth authorization_code flow → MCP tools/list", () => {
     })
     expect(tokenRes.status).toBe(200)
     const tokenBody = (await tokenRes.json()) as { access_token: string; token_type: string }
-    // RFC 6749 allows "Bearer" or "bearer" — compare case-insensitively.
     expect(tokenBody.token_type.toLowerCase()).toBe("bearer")
     expect(typeof tokenBody.access_token).toBe("string")
     const accessToken = tokenBody.access_token
 
-    // 2g. Use the OAuth access token on /mcp (stateless path) → tools/list.
+    // 2f. Use the OAuth access token on /mcp → tools/list.
     const initRes = await workerFetch(worker, "/mcp", {
       method: "POST",
       headers: {
@@ -245,12 +350,7 @@ describe("OAuth authorization_code flow → MCP tools/list", () => {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     })
     expect(initRes.status).toBe(200)
     const initBody = (await initRes.json()) as {
@@ -258,16 +358,245 @@ describe("OAuth authorization_code flow → MCP tools/list", () => {
       error?: unknown
     }
     expect(initBody.error).toBeUndefined()
-    // The tool catalog is non-empty (the full registry is registered for an owner principal).
     expect((initBody.result?.tools ?? []).length).toBeGreaterThan(0)
+  })
+
+  test("GET /callback is gone — JWT must never be placed in the URL", async () => {
+    const worker = makeWorker(OAUTH_USER)
+    const res = await workerFetch(worker, "/callback?token=fake&state=fake")
+    expect(res.status).not.toBe(302) // no redirect — the old GET handler is gone
+    expect(res.status).not.toBe(200) // not a success response
   })
 })
 
-// ─── 3. Legacy bearer path (resolveExternalToken) + isolation ─────────────────
+// ─── 3. T10 — org picker ──────────────────────────────────────────────────────
+
+describe("T10 — org picker on /authorize for multi-org users", () => {
+  test("POST /authorize/orgs returns both orgs for a multi-org user", async () => {
+    const worker = makeWorker(MULTI_USER)
+    const res = await workerFetch(worker, "/authorize/orgs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: `fake.${MULTI_USER}.jwt` }),
+    })
+    expect(res.status).toBe(200)
+    const { orgs } = (await res.json()) as { orgs: { id: string; name: string }[] }
+    expect(orgs.length).toBe(2)
+    const ids = orgs.map((o) => o.id)
+    expect(ids).toContain(MULTI_PERSONAL)
+    expect(ids).toContain(MULTI_TEAM)
+  })
+
+  test("POST /authorize/orgs returns 401 for an invalid Clerk token", async () => {
+    const worker = makeWorker(MULTI_USER)
+    const res = await workerFetch(worker, "/authorize/orgs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "invalid.jwt.token" }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  test("chosen team org scopes the grant Principal — D1 isolation: team chunk present, personal chunk absent", async () => {
+    // This test is discriminating: the adversarial fake index returns multi-personal-chunk
+    // first (cross-tenant) then multi-team-chunk (correct tenant). If the OAuth token were
+    // scoped to MULTI_PERSONAL instead of MULTI_TEAM, the results would be inverted.
+    const worker = makeWorker(MULTI_USER)
+
+    // Register a client for the MULTI_USER flow.
+    const regRes = await workerFetch(worker, "/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "multi-org-scoping-client",
+        redirect_uris: [`${BASE}/multi-redirect`],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    })
+    const { client_id: clientId } = (await regRes.json()) as { client_id: string }
+
+    const { verifier, challenge } = await pkce()
+    const stateToken = await authorizeAndGetState(
+      worker,
+      clientId,
+      `${BASE}/multi-redirect`,
+      "brain:read",
+      challenge,
+    )
+
+    // POST /callback with MULTI_TEAM as the chosen org (org picker selection).
+    const cbResult = await postCallback(worker, `fake.${MULTI_USER}.jwt`, stateToken, MULTI_TEAM)
+    expect(cbResult.status).toBe(200)
+    const code = new URL(cbResult.redirectTo ?? "").searchParams.get("code") ?? ""
+    expect(code).toBeTruthy()
+
+    // Exchange code → access token.
+    const tokenRes = await workerFetch(worker, "/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: `${BASE}/multi-redirect`,
+        client_id: clientId,
+        code_verifier: verifier,
+      }).toString(),
+    })
+    expect(tokenRes.status).toBe(200)
+    const { access_token: accessToken } = (await tokenRes.json()) as { access_token: string }
+
+    // Search via /mcp with the team-scoped token + adversarial fake index.
+    // The adversarial index returns multi-personal-chunk first; D1 re-check must DROP it
+    // (wrong tenant) and KEEP multi-team-chunk (correct tenant for this token).
+    const searchRes = await workerFetch(
+      worker,
+      "/mcp",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "search", arguments: { query: "sentinel", topK: 5 } },
+        }),
+      },
+      multiTeamMcpEnv,
+    )
+    expect(searchRes.status).toBe(200)
+    const searchBody = (await searchRes.json()) as {
+      result?: { content: { text: string }[]; isError?: boolean }
+      error?: unknown
+    }
+    expect(searchBody.error).toBeUndefined()
+    expect(searchBody.result?.isError ?? false).toBe(false)
+
+    const text = searchBody.result?.content[0]?.text ?? ""
+
+    // NON-VACUOUS: adversarial index returned multi-team-chunk; D1 re-check KEPT it
+    // because it belongs to MULTI_TEAM (the token's tenant).
+    expect(text).toContain("multiteamsentinel")
+    expect(text).toContain("multi-team-chunk")
+
+    // ISOLATION: multi-personal-chunk was DROPPED by D1 re-check (wrong tenant).
+    expect(text).not.toContain("multipersonalsentinel")
+    expect(text).not.toContain("multi-personal-chunk")
+  })
+
+  test("non-member tenantId in POST /callback is rejected with 401", async () => {
+    const worker = makeWorker(MULTI_USER)
+
+    const regRes = await workerFetch(worker, "/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "non-member-test-client",
+        redirect_uris: [`${BASE}/non-member-redirect`],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    })
+    const { client_id: clientId } = (await regRes.json()) as { client_id: string }
+
+    const { challenge } = await pkce()
+    const stateToken = await authorizeAndGetState(
+      worker,
+      clientId,
+      `${BASE}/non-member-redirect`,
+      "brain:read",
+      challenge,
+    )
+
+    // POST /callback with OTHER_TENANT — MULTI_USER has no membership there.
+    const cbResult = await postCallback(worker, `fake.${MULTI_USER}.jwt`, stateToken, OTHER_TENANT)
+    expect(cbResult.status).toBe(401)
+    expect(cbResult.error).toBeTruthy()
+  })
+
+  test("POST /authorize/orgs returns 1 org for a single-org user (picker skipped in browser)", async () => {
+    // OAUTH_USER has exactly one org (personal). /authorize/orgs confirms this.
+    // The page JS would auto-submit orgs[0].id without showing the picker (in-browser).
+    const worker = makeWorker(OAUTH_USER)
+    const res = await workerFetch(worker, "/authorize/orgs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: `fake.${OAUTH_USER}.jwt` }),
+    })
+    expect(res.status).toBe(200)
+    const { orgs } = (await res.json()) as { orgs: { id: string }[] }
+    expect(orgs.length).toBe(1)
+    expect(orgs[0]?.id).toBe(OAUTH_TENANT)
+  })
+
+  test("single non-personal org user: /authorize/orgs returns that org; /callback with its id succeeds", async () => {
+    // SOLO_USER's only org is SOLO_TEAM (not org_${SOLO_USER}).
+    // This test guards the fallback trap: if the page JS mistakenly sends no tenantId,
+    // /callback falls back to org_${SOLO_USER} which doesn't exist → 401.
+    // The correct path is to submit orgs[0].id = SOLO_TEAM.
+    const worker = makeWorker(SOLO_USER)
+
+    // Confirm /authorize/orgs returns the non-personal org.
+    const orgsRes = await workerFetch(worker, "/authorize/orgs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: `fake.${SOLO_USER}.jwt` }),
+    })
+    expect(orgsRes.status).toBe(200)
+    const { orgs } = (await orgsRes.json()) as { orgs: { id: string }[] }
+    expect(orgs.length).toBe(1)
+    expect(orgs[0]?.id).toBe(SOLO_TEAM) // not org_${SOLO_USER}
+
+    // Register a client so we can get a state token.
+    const regRes = await workerFetch(worker, "/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "solo-org-test-client",
+        redirect_uris: [`${BASE}/solo-redirect`],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    })
+    const { client_id: clientId } = (await regRes.json()) as { client_id: string }
+
+    // Happy path: submit orgs[0].id → succeeds, scopes to SOLO_TEAM.
+    const stateOk = await authorizeAndGetState(
+      worker,
+      clientId,
+      `${BASE}/solo-redirect`,
+      "brain:read",
+      (await pkce()).challenge,
+    )
+    const cbOk = await postCallback(worker, `fake.${SOLO_USER}.jwt`, stateOk, SOLO_TEAM)
+    expect(cbOk.status).toBe(200)
+    expect(cbOk.redirectTo).toContain("code=")
+
+    // Fallback trap: no tenantId → server falls to org_${SOLO_USER} which doesn't exist → 401.
+    // (State token not burned on the non-member 401 path, but we get a fresh one anyway.)
+    const stateFallback = await authorizeAndGetState(
+      worker,
+      clientId,
+      `${BASE}/solo-redirect`,
+      "brain:read",
+      (await pkce()).challenge,
+    )
+    const cbFallback = await postCallback(worker, `fake.${SOLO_USER}.jwt`, stateFallback)
+    expect(cbFallback.status).toBe(401) // org_${SOLO_USER} unknown → "unknown active tenant"
+  })
+})
+
+// ─── 4. Legacy bearer path (resolveExternalToken) + isolation ─────────────────
 
 describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
   test("a Clerk JWT on /mcp reaches the MCP server (resolveExternalToken path)", async () => {
-    // The BEARER_USER has already been seeded with their own org.
     const worker = makeWorker(BEARER_USER)
     const clerkJwt = `fake.${BEARER_USER}.jwt`
 
@@ -277,7 +606,6 @@ describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
         Authorization: `Bearer ${clerkJwt}`,
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
-        // X-Brain-Tenant needed for existing users with memberships (invariant 17).
         "X-Brain-Tenant": BEARER_TENANT,
       },
       body: JSON.stringify({
@@ -314,11 +642,8 @@ describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
   })
 
   test("OAuth token props are tenant-scoped: tenant A's token reads only A's chunks", async () => {
-    // Issue an OAuth token for OAUTH_USER (tenant A) and verify it only sees A's chunks
-    // and NOT BEARER_USER's chunks (tenant B) — the D1 re-check invariant (invariant 3).
     const worker = makeWorker(OAUTH_USER)
 
-    // Register client and run the full OAuth flow to get an access_token for OAUTH_TENANT.
     const regRes = await workerFetch(worker, "/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -333,29 +658,18 @@ describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
     const { client_id: clientId } = (await regRes.json()) as { client_id: string }
 
     const { verifier, challenge } = await pkce()
-    await workerFetch(
+    const stateToken = await authorizeAndGetState(
       worker,
-      `/authorize?${new URLSearchParams({
-        response_type: "code",
-        client_id: clientId,
-        redirect_uri: `${BASE}/redirect`,
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-        scope: "brain:read",
-      })}`,
+      clientId,
+      `${BASE}/redirect`,
+      "brain:read",
+      challenge,
     )
 
-    // Read state from KV.
-    const kvList = await env_.OAUTH_KV.list({ prefix: "oauth:state:" })
-    const stateToken = (
-      kvList.keys.find((k) => k.name.startsWith("oauth:state:"))?.name ?? ""
-    ).replace("oauth:state:", "")
-
-    const callbackRes = await workerFetch(
-      worker,
-      `/callback?${new URLSearchParams({ token: `fake.${OAUTH_USER}.jwt`, state: stateToken })}`,
-    )
-    const code = new URL(callbackRes.headers.get("location") ?? "").searchParams.get("code") ?? ""
+    // T9: POST { token, state } → JSON { redirectTo }.
+    const cbResult = await postCallback(worker, `fake.${OAUTH_USER}.jwt`, stateToken)
+    expect(cbResult.status).toBe(200)
+    const code = new URL(cbResult.redirectTo ?? "").searchParams.get("code") ?? ""
 
     const tokenBody = (await (
       await workerFetch(worker, "/oauth/token", {
@@ -372,11 +686,6 @@ describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
     ).json()) as { access_token: string }
     const accessToken = tokenBody.access_token
 
-    // Call `search` via /mcp with the OAuth access token, using the faked Vectorize env.
-    // The adversarial fake vector index returns "oauth-chunk" for any query; the D1 re-check
-    // then validates it belongs to the principal's tenant. We pass `mcpEnv` (which has faked
-    // CHUNK_INDEX/AI but real OAUTH_KV/DB) so the access-token lookup still works while
-    // Vectorize is locally available without a remote connection.
     const searchRes = await workerFetch(
       worker,
       "/mcp",
@@ -406,21 +715,18 @@ describe("Legacy bearer path (resolveExternalToken) + tenant isolation", () => {
 
     const text = searchBody.result?.content[0]?.text ?? ""
 
-    // NON-VACUOUS: the adversarial vector arm returned "oauth-chunk" for this query;
-    // the D1 re-check KEPT it (it belongs to OAUTH_TENANT) — so the text must contain
-    // the unique content we seeded into that chunk.
+    // NON-VACUOUS: adversarial index returned "oauth-chunk"; D1 re-check KEPT it (correct tenant).
     expect(text).toContain("oauthuniquesentinel")
     expect(text).toContain("oauth-chunk")
 
-    // ISOLATION: tenant B's chunk ("bearer-chunk") was NOT in the fake index result,
-    // but even if it had been, the D1 re-check would have dropped it. Assert absence.
+    // ISOLATION: bearer-chunk was DROPPED by D1 re-check (wrong tenant).
     expect(text).not.toContain("bearer-chunk")
     expect(text).not.toContain("bearertenantsentinel")
     expect(text).not.toContain(BEARER_TENANT)
   })
 })
 
-// ─── 4. Device-flow /token is unaffected by the OAuthProvider ──────────────
+// ─── 5. Device-flow /token is unaffected by the OAuthProvider ──────────────
 
 describe("Device-flow /token survives the OAuthProvider wrapper", () => {
   test("POST /token with an unknown grant_type reaches the Hono app (device-flow handler)", async () => {
@@ -433,10 +739,7 @@ describe("Device-flow /token survives the OAuthProvider wrapper", () => {
         device_code: "nonexistent-code",
       }).toString(),
     })
-    // The device-flow handler should answer (error "authorization_pending" or similar).
-    // Critically, it should NOT return a 404 (meaning the defaultHandler received it).
     expect(res.status).not.toBe(404)
-    // device_code exchange for a nonexistent code returns 400 with a JSON error body.
     expect(res.status).toBe(400)
     const body = (await res.json()) as { error?: string }
     expect(typeof body.error).toBe("string")

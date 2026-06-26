@@ -26,7 +26,7 @@ export {
   mintMachineToken,
   resolveApiKeyPrincipal,
 } from "./mint"
-export { deleteOAuthState, loadOAuthState, storeOAuthState } from "./oauth-state"
+export { deleteOAuthState, listOrgsForUserId, loadOAuthState, storeOAuthState } from "./oauth-state"
 export type { MembershipForPrincipal } from "./principal"
 export {
   aggregateMemberships,
