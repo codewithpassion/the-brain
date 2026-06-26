@@ -153,6 +153,8 @@ describe("add_member", () => {
     expect(row?.role).toBe("member")
     expect(row?.tenant_id).toBe("org1")
     expect(row?.allowed_scopes).toBeNull() // default '*'
+    // Provenance: the adding principal's userId is recorded as created_by.
+    expect(row?.created_by).toBe("actor")
   })
 
   test("stores a member.add audit row (actor recorded)", async () => {

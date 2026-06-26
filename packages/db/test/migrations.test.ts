@@ -77,8 +77,8 @@ const BASE_TABLES = [
 ]
 
 describe("migrations apply cleanly", () => {
-  test("there are at least three migration files (base + FTS/expression + orgs.created_by)", () => {
-    expect(migrationFiles().length).toBeGreaterThanOrEqual(3)
+  test("there are at least five migration files (base + FTS/expression + orgs.created_by + api_keys.created_at + memberships.created_by)", () => {
+    expect(migrationFiles().length).toBeGreaterThanOrEqual(5)
   })
 
   test("loading every migration in order does not throw", () => {
@@ -215,6 +215,12 @@ describe("PRD §3 faithfulness invariants survived generation", () => {
   test("orgs has created_by column (added in migration 0002)", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(orgs)`).all() as { name: string }[]).map((c) => c.name)
+    expect(cols(freshDb())).toContain("created_by")
+  })
+
+  test("memberships has created_by column (added in migration 0004)", () => {
+    const cols = (db: Database) =>
+      (db.query(`PRAGMA table_info(memberships)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("created_by")
   })
 

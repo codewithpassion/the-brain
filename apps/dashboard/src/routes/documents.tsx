@@ -75,6 +75,7 @@ function DocumentsPage() {
                     <th className="pb-1 font-medium">Title</th>
                     <th className="pb-1 font-medium">Status</th>
                     <th className="pb-1 font-medium">Chunks</th>
+                    <th className="pb-1 font-medium">Added by</th>
                     <th className="pb-1 font-medium">Created</th>
                   </tr>
                 </thead>
@@ -89,6 +90,9 @@ function DocumentsPage() {
                         <Badge variant={docStatusVariant(doc.status)}>{doc.status}</Badge>
                       </td>
                       <td className="py-1.5 text-neutral-600">{doc.chunkCount}</td>
+                      <td className="py-1.5 font-mono text-xs text-neutral-500" title={doc.userId}>
+                        {doc.userId.slice(0, 12)}…
+                      </td>
                       <td className="py-1.5 text-neutral-600">{doc.createdAt}</td>
                     </tr>
                   ))}

@@ -177,6 +177,7 @@ export const autoProvisionOrg = async (
       teamId: null,
       role: "owner",
       allowedScopes: null,
+      createdBy: userId, // owner created their own membership on first login
     })
     .onConflictDoNothing()
   const found = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, tenantId)).limit(1)

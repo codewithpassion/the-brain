@@ -49,6 +49,9 @@ export const memberships = sqliteTable(
     teamId: text("team_id"), // NULL = tenant-wide membership
     role: text("role").notNull(), // 'owner'|'admin'|'member'|'readonly'
     allowedScopes: text("allowed_scopes"), // DATA-partition grant: JSON string[] | NULL(='*')
+    // createdBy: the Clerk userId of the admin who added this membership. NULL for memberships that
+    // existed before this column was added (auto-provisioned personal memberships + org-create).
+    createdBy: text("created_by"),
     createdAt: text("created_at").notNull().default(isoNow),
   },
   (t) => [

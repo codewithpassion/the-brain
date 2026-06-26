@@ -251,6 +251,7 @@ export const LIST_DOCUMENTS_OP = defineOp({
         title: z.string().nullable(),
         status: z.string(),
         chunkCount: z.number().int(),
+        userId: z.string(), // authorship — the user who ingested the document
         createdAt: z.string().nullable(),
       }),
     ),
@@ -263,6 +264,7 @@ export type ListDocumentsRow = {
   title: string | null
   status: string
   chunkCount: number
+  userId: string
   createdAt: string | null
 }
 
@@ -279,6 +281,7 @@ export const listDocumentsCore = async (
       title: documents.title,
       status: documents.status,
       chunkCount: documents.chunkCount,
+      userId: documents.userId,
       createdAt: documents.createdAt,
     })
     .from(documents)
@@ -294,6 +297,7 @@ export const listDocumentsCore = async (
       title: r.title ?? null,
       status: r.status,
       chunkCount: r.chunkCount ?? 0,
+      userId: r.userId,
       createdAt: r.createdAt ?? null,
     })),
   }
@@ -323,6 +327,7 @@ export const LIST_SESSIONS_OP = defineOp({
         title: z.string().nullable(),
         status: z.string(),
         turnCount: z.number().int(),
+        userId: z.string(), // authorship — the user who owns the session
         lastActivityAt: z.string(),
         startedAt: z.string(),
       }),
@@ -336,6 +341,7 @@ export type ListSessionRow = {
   title: string | null
   status: string
   turnCount: number
+  userId: string
   lastActivityAt: string
   startedAt: string
 }
@@ -354,6 +360,7 @@ export const listSessionsCore = async (
       title: sessionsTable.title,
       status: sessionsTable.status,
       turnCount: sessionsTable.turnCount,
+      userId: sessionsTable.userId,
       lastActivityAt: sessionsTable.lastActivityAt,
       startedAt: sessionsTable.startedAt,
     })
@@ -650,6 +657,7 @@ export const createOrgCore = async (
     teamId: null,
     role: "owner",
     allowedScopes: null, // NULL = '*' (unrestricted)
+    createdBy: principal.userId, // owner created their own membership when creating the org
   })
   return { id, slug }
 }
@@ -902,6 +910,7 @@ export const addMemberCore = async (
     teamId: null,
     role: input.role,
     allowedScopes,
+    createdBy: principal.userId, // the admin who added this member
   })
 
   // Audit: actor = principal.userId, target = the newly added userId.

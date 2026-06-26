@@ -77,6 +77,7 @@ function SessionsPage() {
                     <th className="pb-1 font-medium">Title</th>
                     <th className="pb-1 font-medium">Status</th>
                     <th className="pb-1 font-medium">Turns</th>
+                    <th className="pb-1 font-medium">User</th>
                     <th className="pb-1 font-medium">Last activity</th>
                   </tr>
                 </thead>
@@ -89,6 +90,9 @@ function SessionsPage() {
                         <Badge variant={sessionStatusVariant(s.status)}>{s.status}</Badge>
                       </td>
                       <td className="py-1.5 text-neutral-600">{s.turnCount}</td>
+                      <td className="py-1.5 font-mono text-xs text-neutral-500" title={s.userId}>
+                        {s.userId.slice(0, 12)}…
+                      </td>
                       <td className="py-1.5 text-neutral-600">{s.lastActivityAt}</td>
                     </tr>
                   ))}

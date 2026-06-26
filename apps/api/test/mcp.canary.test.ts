@@ -246,4 +246,29 @@ describe("MCP cross-tenant isolation canary (invariant 3) — real local D1 in w
     expect(text).not.toContain(B_MARKER)
     expect(text).not.toContain(CHUNK_B)
   })
+
+  // ── Write provenance: MCP dispatch path carries principal.userId into writes ─────────────────
+  // Prove that a write tool dispatched through `callMcpTool` → `op.invoke` → the store
+  // records the principal's userId, not a stale/missing actor. `capture_turn` is the
+  // representative write: it creates or updates a `sessions` row with `user_id = principal.userId`.
+  test("write provenance: capture_turn via MCP records user_id = principal.userId in D1", async () => {
+    const { text, isError } = await toolCall(principalA, "capture_turn", {
+      sessionId: "mcp-prov-session",
+      role: "user",
+      content: "provenance test turn",
+      client: "cli",
+    })
+    expect(isError).toBe(false)
+    // Parse the brain session id from the tool result.
+    const result = JSON.parse(text) as { brainSessionId?: string }
+    expect(typeof result.brainSessionId).toBe("string")
+    const brainSessionId = result.brainSessionId as string
+
+    // Verify the session row in D1 has user_id = the principal's userId ("ownerA").
+    const row = await env_.DB.prepare("SELECT user_id FROM sessions WHERE id = ? AND tenant_id = ?")
+      .bind(brainSessionId, principalA.tenantId)
+      .first<{ user_id: string }>()
+    expect(row).not.toBeNull()
+    expect(row?.user_id).toBe(principalA.userId)
+  })
 })

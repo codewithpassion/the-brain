@@ -43,6 +43,9 @@ describe("list_documents", () => {
     expect(out.documents.every((d) => typeof d.slug === "string")).toBe(true)
     expect(out.documents.every((d) => typeof d.status === "string")).toBe(true)
     expect(out.documents.every((d) => typeof d.chunkCount === "number")).toBe(true)
+    // Provenance: userId (the ingestor) must be recorded on every document row.
+    expect(out.documents.every((d) => typeof d.userId === "string")).toBe(true)
+    expect(out.documents.every((d) => d.userId === "userA")).toBe(true)
   })
 
   test("respects limit", async () => {
@@ -89,6 +92,9 @@ describe("list_sessions", () => {
     expect(out.sessions.every((s) => typeof s.client === "string")).toBe(true)
     expect(out.sessions.every((s) => typeof s.turnCount === "number")).toBe(true)
     expect(out.sessions.every((s) => typeof s.lastActivityAt === "string")).toBe(true)
+    // Provenance: userId (the session owner) must be recorded on every session row.
+    expect(out.sessions.every((s) => typeof s.userId === "string")).toBe(true)
+    expect(out.sessions.every((s) => s.userId === "userA")).toBe(true)
   })
 
   test("respects limit", async () => {

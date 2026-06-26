@@ -95,6 +95,7 @@ export interface SessionRow {
   title: string
   status: string
   turnCount: number
+  userId: string
   lastActivityAt: string
   startedAt: string
 }
@@ -135,6 +136,7 @@ export interface DocumentRow {
   title: string
   status: string
   chunkCount: number
+  userId: string
   createdAt: string
 }
 
