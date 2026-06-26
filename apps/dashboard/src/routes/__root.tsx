@@ -9,8 +9,16 @@
  * — never in client code, never in a loader's client output.
  */
 import { ClerkProvider, Show, UserButton } from "@clerk/tanstack-react-start"
-import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router"
+import {
+  createRootRoute,
+  HeadContent,
+  Link,
+  Outlet,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { OrgSwitcher } from "../components/OrgSwitcher"
 import { TenantIndicator } from "../components/TenantIndicator"
 import { getClientEnv } from "../env"
@@ -72,32 +80,106 @@ function RootComponent() {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { location } = useRouterState()
+
+  // Close the mobile menu whenever the route changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is in deps to trigger the close on navigation; setMenuOpen is stable
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
   return (
     <html lang="en" className="bg-neutral-50 text-neutral-900">
       <head>
         <HeadContent />
       </head>
       <body className="min-h-screen">
-        <header className="flex items-center gap-4 border-neutral-200 border-b bg-white px-6 py-3">
-          <span className="font-semibold text-lg tracking-tight">🧠 The Brain</span>
-          <nav className="flex flex-wrap gap-1 text-sm">
-            {NAV.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                activeOptions={{ exact: item.to === "/" }}
-                className="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100"
-                activeProps={{ className: "rounded-md px-3 py-1.5 bg-neutral-900 text-white" }}
+        <header className="border-neutral-200 border-b bg-white">
+          {/* ── Top bar ── */}
+          <div className="flex items-center gap-4 px-6 py-3">
+            <span className="font-semibold text-lg tracking-tight">🧠 The Brain</span>
+
+            {/* Desktop nav — hidden below md */}
+            <nav className="hidden flex-wrap gap-1 text-sm md:flex">
+              {NAV.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  activeOptions={{ exact: item.to === "/" }}
+                  className="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100"
+                  activeProps={{ className: "rounded-md px-3 py-1.5 bg-neutral-900 text-white" }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+
+            {/* Right controls */}
+            <div className="ml-auto flex items-center gap-3">
+              <OrgSwitcher />
+              {/* TenantIndicator: desktop only — shown inside mobile menu instead */}
+              <div className="hidden md:block">
+                <TenantIndicator />
+              </div>
+              <AuthControl />
+              {/* Hamburger toggle — mobile only */}
+              <button
+                type="button"
+                aria-label="Toggle navigation menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((o) => !o)}
+                className="rounded-md p-1.5 text-neutral-600 hover:bg-neutral-100 md:hidden"
               >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-          <div className="ml-auto flex items-center gap-3">
-            <OrgSwitcher />
-            <TenantIndicator />
-            <AuthControl />
+                {menuOpen ? (
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 4l12 12M16 4L4 16" />
+                  </svg>
+                ) : (
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 5h14M3 10h14M3 15h14" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* ── Mobile menu — visible when open, hidden on md+ ── */}
+          {menuOpen && (
+            <div className="border-neutral-200 border-t px-4 pb-3 pt-2 md:hidden">
+              <nav className="flex flex-col gap-1 text-sm" aria-label="Mobile navigation">
+                {NAV.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    activeOptions={{ exact: item.to === "/" }}
+                    className="rounded-md px-3 py-2 text-neutral-600 hover:bg-neutral-100"
+                    activeProps={{ className: "rounded-md px-3 py-2 bg-neutral-900 text-white" }}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+              <div className="mt-3 border-t border-neutral-100 pt-3">
+                <TenantIndicator />
+              </div>
+            </div>
+          )}
         </header>
         <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
         <Scripts />
