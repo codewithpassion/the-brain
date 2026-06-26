@@ -13,9 +13,13 @@
  * INTEGRATION GATE (Phase 1e) must lock the real shape against the live model before this
  * remap is trusted in prod; until green, prod degrades to RRF order. `remapRerank` parses
  * defensively (drops rows whose `id` is not a valid candidate index).
+ *
+ * Provider routing: when `deps.openaiConfig` is set, routes to the openai-compatible
+ * `/v1/rerank` endpoint (Cohere-style response). The response is normalized into the same
+ * `BgeRerankOutput` shape so the SINGLE `remapRerank` handles both paths (invariant 20).
  */
 import { RERANK_MODEL } from "@brain/shared"
-import { type AiDeps, aiGateway } from "./gateway"
+import { type AiDeps, aiGateway, type OpenAiCompatConfig } from "./gateway"
 
 export interface RerankCandidate {
   text: string
@@ -29,6 +33,10 @@ export interface RerankHit {
 
 interface BgeRerankOutput {
   response?: { id?: number; score?: number }[]
+}
+
+interface OpenAiRerankResponse {
+  results?: { index: number; relevance_score: number }[]
 }
 
 /** RRF/identity order over the first `topK` candidates — the degrade target. */
@@ -63,6 +71,39 @@ export const remapRerank = (
 }
 
 /**
+ * openai-compatible rerank via POST /v1/rerank (Cohere-style).
+ * Normalizes `{ results: [{ index, relevance_score }] }` → `BgeRerankOutput` so
+ * `remapRerank` handles both paths (invariant 20: single auditable remap).
+ */
+const runRerankOpenAi = async (
+  cfg: OpenAiCompatConfig,
+  query: string,
+  candidates: RerankCandidate[],
+  topK: number,
+): Promise<BgeRerankOutput | null> => {
+  const model = cfg.rerankModel ?? RERANK_MODEL
+  const fetchFn = cfg.fetch ?? globalThis.fetch
+  const res = await fetchFn(`${cfg.baseUrl}/v1/rerank`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      query,
+      documents: candidates.map((c) => c.text),
+      top_n: topK,
+    }),
+  })
+  if (!res.ok) return null
+  const json = (await res.json()) as OpenAiRerankResponse
+  const results = json.results
+  if (!results) return null
+  // Normalize to BgeRerankOutput — remapRerank handles it (invariant 20: single remap)
+  return {
+    response: results.map((r) => ({ id: r.index, score: r.relevance_score })),
+  }
+}
+
+/**
  * READ path. Never throws; on missing binding, malformed output, or a thrown AI error,
  * returns identity (RRF) order over the first `topK` candidates (invariant 14).
  */
@@ -74,11 +115,18 @@ export const rerank = async (
 ): Promise<RerankHit[]> => {
   if (candidates.length === 0) return []
   try {
-    const res = (await deps.ai.run(
-      RERANK_MODEL,
-      { query, contexts: candidates.map((candidate) => ({ text: candidate.text })), top_k: topK },
-      aiGateway(deps.gatewayId, deps.tenantId),
-    )) as BgeRerankOutput
+    let res: BgeRerankOutput
+    if (deps.openaiConfig) {
+      const raw = await runRerankOpenAi(deps.openaiConfig, query, candidates, topK)
+      if (!raw) return identityOrder(candidates.length, topK)
+      res = raw
+    } else {
+      res = (await deps.ai.run(
+        RERANK_MODEL,
+        { query, contexts: candidates.map((candidate) => ({ text: candidate.text })), top_k: topK },
+        aiGateway(deps.gatewayId, deps.tenantId),
+      )) as BgeRerankOutput
+    }
     const remapped = remapRerank(candidates.length, res)
     return remapped ? remapped.slice(0, topK) : identityOrder(candidates.length, topK)
   } catch {

@@ -49,6 +49,7 @@ import {
   runReembedSweep,
 } from "./backfill"
 import type { ApiBindings } from "./bindings"
+import { isDeviceFlowPath, mountDeviceFlow } from "./device-flow/routes"
 import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
 import { isMcpPath, mountMcp } from "./mcp/routes"
@@ -166,7 +167,8 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   //    the active-tenant selector, which this generic resolver cannot see — so they are skipped
   //    here and resolve their own Principal in `mountMcp` (still `resolvePrincipal` at the edge).
   app.use("*", async (c, next) => {
-    if (c.req.path === "/health" || isMcpPath(c.req.path)) return next()
+    if (c.req.path === "/health" || isMcpPath(c.req.path) || isDeviceFlowPath(c.req.path))
+      return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
       ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
     })
@@ -175,6 +177,11 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   })
 
   app.get("/health", (c) => c.json({ status: "ok" }))
+
+  // ── CLI OAuth 2.1 device-flow (RFC 8628): /device_authorization, /activate, /token. ──
+  mountDeviceFlow(app, {
+    ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
+  })
 
   // ── MCP transports (PRD §9.2): agent-facing op-registry catalog over the resolved Principal. ──
   mountMcp(app, { ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}) })

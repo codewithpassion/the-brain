@@ -5,12 +5,38 @@
  * output, thrown AI error) returns `null` so `think` degrades to evidence-without-
  * synthesis. The token-budget-guarded prompt PACKING (`buildSynthesisPrompt`) is the
  * Phase-2 retrieval pipeline; this chokepoint is just the guarded model call.
+ *
+ * Provider routing: when `deps.openaiConfig` is set, routes to the openai-compatible
+ * `/v1/chat/completions` endpoint instead of `env.AI.run`.
  */
 import { EXTRACT_MODEL, GENERATION_MODEL } from "@brain/shared"
-import { type AiDeps, aiGateway } from "./gateway"
+import { type AiDeps, aiGateway, type OpenAiCompatConfig } from "./gateway"
 
 interface LlamaGenOutput {
   response?: string
+}
+
+interface OpenAiChatResponse {
+  choices?: { message?: { content?: string } }[]
+}
+
+/** openai-compatible chat via POST /v1/chat/completions. Returns null on any failure. */
+const runGenOpenAi = async (
+  cfg: OpenAiCompatConfig,
+  messages: { role: string; content: string }[],
+  model: string,
+  extra?: Record<string, unknown>,
+): Promise<string | null> => {
+  const fetchFn = cfg.fetch ?? globalThis.fetch
+  const res = await fetchFn(`${cfg.baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, ...extra }),
+  })
+  if (!res.ok) return null
+  const json = (await res.json()) as OpenAiChatResponse
+  const content = json.choices?.[0]?.message?.content
+  return typeof content === "string" && content.length > 0 ? content : null
 }
 
 /**
@@ -22,12 +48,16 @@ export const gen = async (
   prompt: string,
   system?: string,
 ): Promise<string | null> => {
-  const messages = system
+  const messages: { role: string; content: string }[] = system
     ? [
         { role: "system", content: system },
         { role: "user", content: prompt },
       ]
     : [{ role: "user", content: prompt }]
+  if (deps.openaiConfig) {
+    const model = deps.openaiConfig.genModel ?? GENERATION_MODEL
+    return runGenOpenAi(deps.openaiConfig, messages, model).catch(() => null)
+  }
   try {
     const res = (await deps.ai.run(
       GENERATION_MODEL,
@@ -52,12 +82,18 @@ export const genExtract = async (
   prompt: string,
   system?: string,
 ): Promise<string | null> => {
-  const messages = system
+  const messages: { role: string; content: string }[] = system
     ? [
         { role: "system", content: system },
         { role: "user", content: prompt },
       ]
     : [{ role: "user", content: prompt }]
+  if (deps.openaiConfig) {
+    const model = deps.openaiConfig.extractModel ?? EXTRACT_MODEL
+    return runGenOpenAi(deps.openaiConfig, messages, model, {
+      response_format: { type: "json_object" },
+    }).catch(() => null)
+  }
   try {
     const res = (await deps.ai.run(
       EXTRACT_MODEL,

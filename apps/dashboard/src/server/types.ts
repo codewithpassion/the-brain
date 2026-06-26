@@ -127,6 +127,21 @@ export interface ListAuditResult {
   entries: AuditEntry[]
 }
 
+// --- Document types ---
+
+export interface DocumentRow {
+  id: string
+  slug: string
+  title: string
+  status: string
+  chunkCount: number
+  createdAt: string
+}
+
+export interface ListDocumentsResult {
+  documents: DocumentRow[]
+}
+
 // --- Jobs types ---
 
 export interface BackfillRun {

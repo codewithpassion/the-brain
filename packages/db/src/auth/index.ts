@@ -6,6 +6,13 @@
  */
 export type { ClerkIdentity, ClerkVerifier } from "./clerk"
 export { createClerkVerifier, makeClerkVerifier } from "./clerk"
+export type { DeviceAuthResponse, TokenError, TokenSuccess } from "./device"
+export {
+  approveDeviceSession,
+  createDeviceSession,
+  exchangeDeviceToken,
+  refreshDeviceToken,
+} from "./device"
 export { AuthError } from "./errors"
 export type {
   MintApiKeyInput,

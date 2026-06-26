@@ -15,6 +15,7 @@ import type {
   FindOrphansResult,
   ListAuditResult,
   ListBackfillRunsResult,
+  ListDocumentsResult,
   ListEntitiesResult,
   ListSessionsResult,
   MembershipsResult,
@@ -56,11 +57,19 @@ export const think = createServerFn({ method: "POST" })
     }
   })
 
-/**
- * Documents view — DERIVED from a `search` (v1 exposes no list-documents op). Distinct documents are
- * folded from the hits (best score + a representative snippet per document). Honestly NOT a full
- * catalog: it lists documents MATCHING the query.
- */
+/** `list_documents` — the full document catalog for this tenant. */
+export const getDocuments = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListDocumentsResult>> => {
+    try {
+      const out = await brainCall<ListDocumentsResult>("list_documents", true, { limit: 100 })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** Content search — DERIVED from a `search` hit-fold; used by the documents search box. */
 export const listDocuments = createServerFn({ method: "POST" })
   .validator((d: { query: string }) => d)
   .handler(async ({ data }): Promise<Result<DerivedDocument[]>> => {
