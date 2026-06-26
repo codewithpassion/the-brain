@@ -4,6 +4,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
+import { EntityGraph } from "../components/EntityGraph"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
@@ -92,6 +93,20 @@ function GraphPage() {
           Explore entities, traverse links, and find orphaned nodes.
         </p>
       </header>
+
+      {(entities.ok || searchList !== null) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Entity graph ({baseList.length}
+              {baseList.length !== 1 ? " entities" : " entity"})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EntityGraph entities={baseList} onNodeSelect={onSelect} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex gap-2">
         <form onSubmit={onSearch} className="flex flex-1 gap-2">

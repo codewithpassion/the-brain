@@ -7,8 +7,11 @@ import { useEffect, useState } from "react"
 import { getSessionInfo } from "../server/fns"
 import { Badge } from "./ui/badge"
 
+const MCP_BASE = "https://brain-api.dominik-fretz.workers.dev/mcp"
+
 export function TenantIndicator() {
   const [tenant, setTenant] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -24,10 +27,32 @@ export function TenantIndicator() {
     }
   }, [])
 
+  function handleCopy() {
+    if (tenant === null) return
+    navigator.clipboard
+      .writeText(`${MCP_BASE}/${tenant}`)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {
+        /* clipboard write failed — ignore */
+      })
+  }
+
   if (tenant === null) return null
   return (
     <Badge variant="secondary" title="Server-pinned active tenant (invariant 17)">
       tenant: <span className="ml-1 font-mono">{tenant}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title="Copy MCP server URL"
+        className="ml-2 cursor-pointer opacity-60 transition-opacity hover:opacity-100"
+        aria-label="Copy MCP server URL"
+      >
+        {copied ? "Copied!" : "Copy MCP"}
+      </button>
     </Badge>
   )
 }
