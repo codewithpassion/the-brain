@@ -236,13 +236,19 @@ const listLimitInput = z.object({
 
 // ── LIST_DOCUMENTS_OP ─────────────────────────────────────────────────────
 
-/** `list_documents` — newest-first tenant doc list for the dashboard. */
+/** `list_documents` — newest-first tenant doc list for the dashboard, with optional filters. */
 export const LIST_DOCUMENTS_OP = defineOp({
   name: "list_documents",
-  description: "List this tenant's documents, newest first (dashboard read view).",
+  description:
+    "List this tenant's documents, newest first (dashboard read view). Filterable by tag, path prefix, and created_at date range.",
   capability: "read",
   readOnly: true,
-  input: listLimitInput,
+  input: listLimitInput.extend({
+    tag: z.string().optional(), // filter: document has this tag (exact match within JSON array)
+    path: z.string().optional(), // filter: document path equals or is under this prefix
+    since: z.string().optional(), // filter: created_at >= this ISO date string
+    until: z.string().optional(), // filter: created_at <= this ISO date string
+  }),
   output: z.object({
     documents: z.array(
       z.object({
@@ -253,10 +259,20 @@ export const LIST_DOCUMENTS_OP = defineOp({
         chunkCount: z.number().int(),
         userId: z.string(), // authorship — the user who ingested the document
         createdAt: z.string().nullable(),
+        tags: z.array(z.string()),
+        path: z.string().nullable(),
       }),
     ),
   }),
 })
+
+export interface ListDocumentsInput {
+  limit?: number
+  tag?: string
+  path?: string
+  since?: string
+  until?: string
+}
 
 export type ListDocumentsRow = {
   id: string
@@ -266,12 +282,14 @@ export type ListDocumentsRow = {
   chunkCount: number
   userId: string
   createdAt: string | null
+  tags: string[]
+  path: string | null
 }
 
 export const listDocumentsCore = async (
   db: BrainDrizzle,
   principal: Principal,
-  input: { limit?: number },
+  input: ListDocumentsInput,
 ): Promise<{ documents: ListDocumentsRow[] }> => {
   const limit = input.limit ?? 50
   const rows = await db
@@ -283,10 +301,26 @@ export const listDocumentsCore = async (
       chunkCount: documents.chunkCount,
       userId: documents.userId,
       createdAt: documents.createdAt,
+      tags: documents.tags,
+      path: documents.path,
     })
     .from(documents)
     .where(
-      and(eq(documents.tenantId, principal.tenantId), scopePredicate(principal, documents.scope)),
+      and(
+        eq(documents.tenantId, principal.tenantId),
+        scopePredicate(principal, documents.scope),
+        // tag filter: JSON array contains the given tag (exact element match)
+        input.tag !== undefined
+          ? sql`EXISTS (SELECT 1 FROM json_each(${documents.tags}) WHERE value = ${input.tag})`
+          : undefined,
+        // path filter: exact match OR true child (prefix + "/")
+        input.path !== undefined
+          ? sql`(${documents.path} = ${input.path} OR ${documents.path} LIKE ${`${input.path}/%`})`
+          : undefined,
+        // date range filters on created_at (ISO 8601 sorts lexicographically)
+        input.since !== undefined ? sql`${documents.createdAt} >= ${input.since}` : undefined,
+        input.until !== undefined ? sql`${documents.createdAt} <= ${input.until}` : undefined,
+      ),
     )
     .orderBy(desc(documents.createdAt))
     .limit(limit)
@@ -299,11 +333,13 @@ export const listDocumentsCore = async (
       chunkCount: r.chunkCount ?? 0,
       userId: r.userId,
       createdAt: r.createdAt ?? null,
+      tags: JSON.parse(r.tags ?? "[]") as string[],
+      path: r.path ?? null,
     })),
   }
 }
 
-export const listDocumentsOp: AdminBoundOp<{ limit?: number }, { documents: ListDocumentsRow[] }> =
+export const listDocumentsOp: AdminBoundOp<ListDocumentsInput, { documents: ListDocumentsRow[] }> =
   {
     def: LIST_DOCUMENTS_OP,
     handler: (ctx, input) => listDocumentsCore(drizzle(ctx.env.DB), ctx.principal, input),

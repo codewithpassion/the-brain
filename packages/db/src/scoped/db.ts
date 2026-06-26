@@ -60,6 +60,22 @@ interface AuditSpec {
   diff?: string | null
 }
 
+/**
+ * Normalize a path namespace string:
+ *   - Collapse duplicate slashes, ensure a leading "/", remove trailing "/".
+ *   - Returns null for absent/empty input.
+ * Examples: "project/x" → "/project/x", "/project/x/" → "/project/x"
+ */
+export const normalizePath = (raw: string | null | undefined): string | null => {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  let p = trimmed.replace(/\/+/g, "/")
+  if (!p.startsWith("/")) p = `/${p}`
+  if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1)
+  return p
+}
+
 /** `insertDocument` input — `tenantId` is NEVER accepted; the chokepoint forces it. */
 export interface InsertDocumentInput {
   id?: string
@@ -76,6 +92,8 @@ export interface InsertDocumentInput {
   sourceKind?: string | null
   sourceUri?: string | null
   ingestedVia?: string | null
+  tags?: string[] | null
+  path?: string | null
 }
 
 /** `insertChunks` per-row input — `tenantId` is NEVER accepted; the chokepoint forces it. */
@@ -525,6 +543,8 @@ export class ScopedDB {
       sourceKind: doc.sourceKind ?? null,
       sourceUri: doc.sourceUri ?? null,
       ingestedVia: doc.ingestedVia ?? null,
+      tags: doc.tags !== null && doc.tags !== undefined ? JSON.stringify(doc.tags) : "[]",
+      path: doc.path ?? null,
       createdAt: now,
       updatedAt: now,
     })

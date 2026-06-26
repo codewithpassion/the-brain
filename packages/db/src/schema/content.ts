@@ -38,6 +38,7 @@ export const documents = sqliteTable(
     ingestedVia: text("ingested_via"),
     ingestedAt: text("ingested_at"),
     tags: text("tags").default("[]"),
+    path: text("path"), // optional namespace prefix, e.g. "/project/x"
     metadata: text("metadata"),
     createdAt: text("created_at"),
     updatedAt: text("updated_at"),

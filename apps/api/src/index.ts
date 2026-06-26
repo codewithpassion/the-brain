@@ -22,6 +22,7 @@ import {
   GRAPH_OPS,
   type GraphOpDeps,
   MEMORY_REVIEW_OP,
+  normalizePath,
   type OpenAiCompatConfig,
   RECALL_OP,
   resolvePrincipal,
@@ -73,6 +74,19 @@ import {
   type SessionBindings,
   sessionServicesFor,
 } from "./sessions"
+
+/**
+ * Parse a comma-separated tags string (or undefined) into a trimmed, non-empty string array.
+ * Accepts "tag1, tag2" or "tag1" → ["tag1", "tag2"] / ["tag1"].
+ */
+const parseTags = (raw: string | undefined): string[] | undefined => {
+  if (raw === undefined) return undefined
+  const tags = raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+  return tags.length > 0 ? tags : undefined
+}
 
 /** Content types the slice accepts directly (passthrough + normalize; §4.3). */
 const ALLOWED_CONTENT_TYPES = new Set(["text/markdown", "text/plain"])
@@ -299,6 +313,8 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     }
     const raw = new TextDecoder().decode(buf)
     const scope = c.req.query("scope") ?? undefined
+    const tags = parseTags(c.req.query("tags") ?? undefined)
+    const path = normalizePath(c.req.query("path") ?? undefined)
 
     // Fingerprint over the EXTRACTED markdown (formatting-insensitive dedup, invariant 15).
     const markdown = toMarkdown(raw, contentType)
@@ -319,6 +335,8 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
         bodyR2Key: r2Key,
         status: "pending",
         ...(scope !== undefined ? { scope } : {}),
+        ...(tags !== undefined ? { tags } : {}),
+        ...(path !== null ? { path } : {}),
       })
     } catch {
       const existing = (await services.db.listDocuments()).find(
@@ -379,6 +397,8 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     const contentType = baseContentType(c.req.header("content-type"))
     const scope = c.req.query("scope") ?? undefined
     const title = c.req.query("title") ?? undefined
+    const tags = parseTags(c.req.query("tags") ?? undefined)
+    const path = normalizePath(c.req.query("path") ?? undefined)
 
     // Extract to markdown. Text types → passthrough normalize; binary/HTML → ai.toMarkdown.
     let markdown: string
@@ -425,6 +445,8 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
         status: "pending",
         ...(scope !== undefined ? { scope } : {}),
         ...(title !== undefined ? { title } : {}),
+        ...(tags !== undefined ? { tags } : {}),
+        ...(path !== null ? { path } : {}),
       })
     } catch {
       const existing = (await services.db.listDocuments()).find(

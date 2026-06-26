@@ -14,7 +14,7 @@ export type {
   UpdateDocumentStatusInput,
   UpsertMemoryPolicyInput,
 } from "./db"
-export { ScopedDB } from "./db"
+export { normalizePath, ScopedDB } from "./db"
 export type { VisibilityColumns } from "./predicates"
 export { scopePredicate, visibilityPredicate } from "./predicates"
 export type { R2PutBody } from "./r2"

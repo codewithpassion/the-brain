@@ -68,6 +68,93 @@ describe("list_documents", () => {
     const out = await listDocumentsCore(db, readP("t1"), {})
     expect(out.documents).toEqual([])
   })
+
+  test("output includes tags (parsed from JSON) and path", async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, tags, path, created_at)
+       VALUES ('d1', 't1', 'userA', 'slug-d1', 'indexed', 'fp-d1', '["alpha","beta"]', '/project/x', '2026-06-25T10:00:00.000Z')`,
+    )
+    const out = await listDocumentsCore(db, adminP("t1"), {})
+    expect(out.documents[0]?.tags).toEqual(["alpha", "beta"])
+    expect(out.documents[0]?.path).toBe("/project/x")
+  })
+
+  test("tag filter: returns only docs containing the tag", async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, tags)
+       VALUES ('d1', 't1', 'userA', 'slug-d1', 'indexed', 'fp-d1', '["alpha","beta"]')`,
+    )
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, tags)
+       VALUES ('d2', 't1', 'userA', 'slug-d2', 'indexed', 'fp-d2', '["gamma"]')`,
+    )
+
+    const out = await listDocumentsCore(db, adminP("t1"), { tag: "alpha" })
+    expect(out.documents.map((d) => d.id)).toEqual(["d1"])
+    expect(out.documents.every((d) => d.tags.includes("alpha"))).toBe(true)
+
+    // partial substring "alph" must NOT match (exact element, not LIKE)
+    const miss = await listDocumentsCore(db, adminP("t1"), { tag: "alph" })
+    expect(miss.documents).toEqual([])
+  })
+
+  test("path filter: matches exact path and children, but not sibling prefixes", async () => {
+    const { sqlite, db } = makeDb()
+    const rows = [
+      { id: "d1", slug: "s1", fp: "f1", path: "/project" }, // exact match
+      { id: "d2", slug: "s2", fp: "f2", path: "/project/x" }, // child
+      { id: "d3", slug: "s3", fp: "f3", path: "/projectfoo" }, // sibling — must NOT match
+      { id: "d4", slug: "s4", fp: "f4", path: "/other" }, // unrelated — must NOT match
+    ]
+    for (const r of rows) {
+      sqlite.run(
+        `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path)
+         VALUES (?, 't1', 'userA', ?, 'indexed', ?, ?)`,
+        [r.id, r.slug, r.fp, r.path],
+      )
+    }
+
+    const out = await listDocumentsCore(db, adminP("t1"), { path: "/project" })
+    const ids = out.documents.map((d) => d.id).sort()
+    expect(ids).toEqual(["d1", "d2"])
+  })
+
+  test("date range filter: since + until narrow by created_at", async () => {
+    const { sqlite, db } = makeDb()
+    const rows = [
+      { id: "d1", slug: "s1", fp: "f1", createdAt: "2026-06-01T00:00:00.000Z" },
+      { id: "d2", slug: "s2", fp: "f2", createdAt: "2026-06-15T00:00:00.000Z" },
+      { id: "d3", slug: "s3", fp: "f3", createdAt: "2026-06-30T00:00:00.000Z" },
+    ]
+    for (const r of rows) {
+      sqlite.run(
+        `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, created_at)
+         VALUES (?, 't1', 'userA', ?, 'indexed', ?, ?)`,
+        [r.id, r.slug, r.fp, r.createdAt],
+      )
+    }
+
+    // since only
+    const sinceOut = await listDocumentsCore(db, adminP("t1"), {
+      since: "2026-06-10T00:00:00.000Z",
+    })
+    expect(sinceOut.documents.map((d) => d.id).sort()).toEqual(["d2", "d3"])
+
+    // until only
+    const untilOut = await listDocumentsCore(db, adminP("t1"), {
+      until: "2026-06-20T00:00:00.000Z",
+    })
+    expect(untilOut.documents.map((d) => d.id).sort()).toEqual(["d1", "d2"])
+
+    // since + until together
+    const rangeOut = await listDocumentsCore(db, adminP("t1"), {
+      since: "2026-06-10T00:00:00.000Z",
+      until: "2026-06-20T00:00:00.000Z",
+    })
+    expect(rangeOut.documents.map((d) => d.id)).toEqual(["d2"])
+  })
 })
 
 // ── list_sessions ─────────────────────────────────────────────────────────────
