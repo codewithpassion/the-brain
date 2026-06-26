@@ -34,3 +34,17 @@ export const fingerprint = async (content: string): Promise<string> => {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   return toHex(digest)
 }
+
+/**
+ * A Cloudflare Workflows instance id is capped at 64 characters (charset
+ * `[a-zA-Z0-9_-]`). Our logical deterministic ids (e.g. `ingest-${tenantId}-${fp}`)
+ * run well over that, so hash the logical id to a 64-char hex digest: deterministic
+ * (same logical id → same instance id, preserving idempotency) and within the
+ * length + charset limit. The logical id (tenant + content) keeps instances unique
+ * per tenant; durable dedup still rests on the (tenant,scope,fingerprint) UNIQUE
+ * index, not the instance id (invariant 15).
+ */
+export const workflowInstanceId = async (logical: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(logical))
+  return toHex(digest)
+}

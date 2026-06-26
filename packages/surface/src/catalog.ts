@@ -57,7 +57,7 @@ import {
   type ThinkResult,
   thinkOp,
 } from "@brain/db"
-import { fingerprint, toMarkdown } from "@brain/ingest"
+import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
 import type { SurfaceContext } from "./context"
 
@@ -229,7 +229,7 @@ const finalizeSessionSurfaceOp: SurfaceOp = {
     const workflow = ctx.env.SESSION_PROMOTE
     if (workflow) {
       await workflow.create({
-        id: `promote-${ctx.principal.tenantId}-${brainSessionId}`,
+        id: await workflowInstanceId(`promote-${ctx.principal.tenantId}-${brainSessionId}`),
         params: { principal: ctx.principal, promote },
       })
     } else {
@@ -354,7 +354,7 @@ const ingestDocumentSurfaceOp: SurfaceOp = {
     const workflow = ctx.env.BATCH_INGEST
     if (workflow) {
       await workflow.create({
-        id: `ingest-${ctx.principal.tenantId}-${fp}`,
+        id: await workflowInstanceId(`ingest-${ctx.principal.tenantId}-${fp}`),
         params: { principal: ctx.principal, ingest: ingestParams },
       })
       return { documentId: docId, slug, status: "accepted", chunkCount: 0 }

@@ -3,6 +3,7 @@
  * mounts under auth + scoped-services construction. Each COMPOSES the `@brain/db` ops; none
  * touches a raw binding. The orchestrator owns Hono wiring (parse, 4xx, `executionCtx`).
  */
+
 import {
   auditExport,
   type BreakGlassReadResult,
@@ -20,6 +21,7 @@ import {
   type SessionServices,
   submitMemoryReview,
 } from "@brain/db"
+import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { SessionBindings } from "./bindings"
 import type { SessionPromoteWorkflowParams } from "./workflow"
@@ -60,7 +62,10 @@ export const handleFinalizeSession = async (
   const workflow = options.inline ? undefined : env.SESSION_PROMOTE
   if (workflow) {
     const params: SessionPromoteWorkflowParams = { principal, promote }
-    await workflow.create({ id: `promote-${principal.tenantId}-${brainSessionId}`, params })
+    await workflow.create({
+      id: await workflowInstanceId(`promote-${principal.tenantId}-${brainSessionId}`),
+      params,
+    })
   } else {
     await runSessionPromote(services, promote)
   }

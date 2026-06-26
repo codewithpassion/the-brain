@@ -13,6 +13,7 @@
  * Both build a SYSTEM `Principal` from the explicit `tenant_id` (no token, no secret — §7.8);
  * all writes still go through `Scoped*`/the stores (bindings remove the wire, not the gate).
  */
+
 import {
   auditExport,
   createSessionServices,
@@ -21,6 +22,7 @@ import {
   listTenantIds,
   runSessionPromote,
 } from "@brain/db"
+import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { SessionBindings } from "./bindings"
 import type { SessionPromoteWorkflowParams } from "./workflow"
@@ -78,7 +80,10 @@ export const runIdlePromotionSweep = async (
     }
     if (workflow) {
       const params: SessionPromoteWorkflowParams = { principal, promote }
-      await workflow.create({ id: `promote-${session.tenantId}-${session.id}`, params })
+      await workflow.create({
+        id: await workflowInstanceId(`promote-${session.tenantId}-${session.id}`),
+        params,
+      })
     } else {
       const services = createSessionServices(env, principal)
       await runSessionPromote(services, promote)

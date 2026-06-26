@@ -18,7 +18,7 @@ export type { DedupGateInput, DedupKey } from "./dedup"
 // ── Fingerprint-based dedup gate ─────────────────────────────────────────────
 export { dedupGate } from "./dedup"
 // ── Content fingerprint (dedup key basis, invariant 15) ──────────────────────
-export { fingerprint, normalizeForFingerprint } from "./fingerprint"
+export { fingerprint, normalizeForFingerprint, workflowInstanceId } from "./fingerprint"
 // ── Extraction to markdown + D1 preview ──────────────────────────────────────
 export { markdownPreview, toMarkdown, UnsupportedContentTypeError } from "./markdown"
 // ── Input text normalization ─────────────────────────────────────────────────

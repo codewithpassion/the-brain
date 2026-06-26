@@ -31,7 +31,7 @@ import {
   searchOp,
   thinkOp,
 } from "@brain/db"
-import { fingerprint, toMarkdown } from "@brain/ingest"
+import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import {
   type AnyOpDef,
   INGEST_WEBHOOK_MAX_BYTES,
@@ -370,7 +370,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     const workflow = options.inlineIngest ? undefined : c.env.BATCH_INGEST
     if (workflow) {
       await workflow.create({
-        id: `ingest-${principal.tenantId}-${fp}`,
+        id: await workflowInstanceId(`ingest-${principal.tenantId}-${fp}`),
         params: { principal, ingest: ingestParams },
       })
       return c.json({ documentId: docId, slug, status: "accepted" as const, chunkCount: 0 })
@@ -480,7 +480,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     const workflow = options.inlineIngest ? undefined : c.env.BATCH_INGEST
     if (workflow) {
       await workflow.create({
-        id: `ingest-${principal.tenantId}-${fp}`,
+        id: await workflowInstanceId(`ingest-${principal.tenantId}-${fp}`),
         params: { principal, ingest: ingestParams },
       })
       return c.json({ documentId: docId, slug, status: "accepted" as const, chunkCount: 0 })
