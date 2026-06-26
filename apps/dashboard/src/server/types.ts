@@ -206,6 +206,37 @@ export interface RemoveMemberResult {
   removed: boolean
 }
 
+// --- API key management ---
+
+export interface ApiKeyRow {
+  id: string
+  name: string
+  keyPrefix: string
+  scopes: string[]
+  allowedScopes: string | null
+  readOnly: boolean
+  createdAt: string | null
+  lastUsedAt: string | null
+  revokedAt: string | null
+}
+
+export interface ListApiKeysResult {
+  keys: ApiKeyRow[]
+}
+
+export interface CreateApiKeyResult {
+  token: string
+  keyId: string
+  keyPrefix: string
+  name: string
+  scopes: string[]
+}
+
+export interface RevokeApiKeyResult {
+  keyId: string
+  revoked: boolean
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

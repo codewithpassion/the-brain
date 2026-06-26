@@ -13,9 +13,11 @@ import type {
   AddMemberResult,
   BrainSessionInfo,
   BrainStats,
+  CreateApiKeyResult,
   CreateOrgResult,
   DerivedDocument,
   FindOrphansResult,
+  ListApiKeysResult,
   ListAuditResult,
   ListBackfillRunsResult,
   ListDocumentsResult,
@@ -25,6 +27,7 @@ import type {
   MembershipsResult,
   RecallResult,
   RemoveMemberResult,
+  RevokeApiKeyResult,
   SearchResult,
   SearchUserByEmailResult,
   ThinkResult,
@@ -373,6 +376,47 @@ export const removeMember = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<Result<RemoveMemberResult>> => {
     try {
       const out = await brainCall<RemoveMemberResult>("remove_member", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- API key management ---
+
+/** `list_api_keys` (admin) — REDACTED tenant key listing (no key_hash, no raw token). */
+export const listApiKeys = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListApiKeysResult>> => {
+    try {
+      const out = await brainCall<ListApiKeysResult>("list_api_keys", true, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `create_api_key` (admin) — mint a bk_ key bound to the active tenant. Returns raw token ONCE. */
+export const createApiKey = createServerFn({ method: "POST" })
+  .validator(
+    (d: { name: string; scopes?: string[]; allowedScopes?: string[] | "*"; readOnly?: boolean }) =>
+      d,
+  )
+  .handler(async ({ data }): Promise<Result<CreateApiKeyResult>> => {
+    try {
+      const out = await brainCall<CreateApiKeyResult>("create_api_key", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `revoke_api_key` (admin) — set revoked_at on a key row (tenant-scoped; no-op if not in tenant). */
+export const revokeApiKey = createServerFn({ method: "POST" })
+  .validator((d: { keyId: string }) => d)
+  .handler(async ({ data }): Promise<Result<RevokeApiKeyResult>> => {
+    try {
+      const out = await brainCall<RevokeApiKeyResult>("revoke_api_key", false, data)
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

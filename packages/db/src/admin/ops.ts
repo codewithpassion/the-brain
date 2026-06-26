@@ -29,6 +29,7 @@ import { AuthError } from "../auth/errors"
 import { mintApiKey } from "../auth/mint"
 import type { BrainBindings } from "../env"
 import {
+  apiKeys,
   backfillRuns,
   chunks,
   documents,
@@ -1111,9 +1112,223 @@ export const removeMemberOp: AdminBoundOp<
   handler: (ctx, input) => removeMemberCore(drizzle(ctx.env.DB), ctx.principal, input),
 }
 
+// ── LIST_API_KEYS_OP ──────────────────────────────────────────────────────────
+
+/** `list_api_keys` — REDACTED tenant key listing (no key_hash, no raw token). */
+export const LIST_API_KEYS_OP = defineOp({
+  name: "list_api_keys",
+  description:
+    "List this tenant's API keys (REDACTED — no key_hash, no raw token). Admin only. read-only.",
+  capability: "admin",
+  readOnly: true,
+  surfaces: ["rest"],
+  input: z.object({}),
+  output: z.object({
+    keys: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        keyPrefix: z.string(),
+        scopes: z.array(z.string()),
+        allowedScopes: z.string().nullable(),
+        readOnly: z.boolean(),
+        createdAt: z.string().nullable(),
+        lastUsedAt: z.string().nullable(),
+        revokedAt: z.string().nullable(),
+      }),
+    ),
+  }),
+})
+
+export interface ApiKeyRow {
+  id: string
+  name: string
+  keyPrefix: string
+  scopes: string[]
+  allowedScopes: string | null
+  readOnly: boolean
+  createdAt: string | null
+  lastUsedAt: string | null
+  revokedAt: string | null
+}
+
+export const listApiKeysCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+): Promise<{ keys: ApiKeyRow[] }> => {
+  assertAdmin(principal)
+  const rows = await db
+    .select({
+      id: apiKeys.id,
+      name: apiKeys.name,
+      keyPrefix: apiKeys.keyPrefix,
+      scopes: apiKeys.scopes,
+      allowedScopes: apiKeys.allowedScopes,
+      readOnly: apiKeys.readOnly,
+      createdAt: apiKeys.createdAt,
+      lastUsedAt: apiKeys.lastUsedAt,
+      revokedAt: apiKeys.revokedAt,
+    })
+    .from(apiKeys)
+    .where(eq(apiKeys.tenantId, principal.tenantId))
+    .orderBy(desc(apiKeys.createdAt))
+  return {
+    keys: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      keyPrefix: r.keyPrefix,
+      scopes: JSON.parse(r.scopes) as string[],
+      allowedScopes: r.allowedScopes,
+      readOnly: r.readOnly === 1,
+      createdAt: r.createdAt,
+      lastUsedAt: r.lastUsedAt,
+      revokedAt: r.revokedAt,
+    })),
+  }
+}
+
+export const listApiKeysOp: AdminBoundOp<Record<string, never>, { keys: ApiKeyRow[] }> = {
+  def: LIST_API_KEYS_OP,
+  handler: (ctx, _input) => listApiKeysCore(drizzle(ctx.env.DB), ctx.principal),
+}
+
+// ── CREATE_API_KEY_OP ─────────────────────────────────────────────────────────
+
+/** `create_api_key` — tenant-admin CRUD entry for minting a `bk_` key (one-clear-create-path). */
+export const CREATE_API_KEY_OP = defineOp({
+  name: "create_api_key",
+  description:
+    "Mint a bk_ API key bound to the active tenant. Returns the raw token ONCE — store it immediately. Admin only.",
+  capability: "admin",
+  readOnly: false,
+  surfaces: ["rest"],
+  input: z.object({
+    name: z.string().min(1),
+    scopes: z.array(CapabilitySchema).optional(),
+    allowedScopes: ScopeGrantSchema.optional(),
+    readOnly: z.boolean().optional(),
+  }),
+  output: z.object({
+    token: z.string(),
+    keyId: z.string(),
+    keyPrefix: z.string(),
+    name: z.string(),
+    scopes: z.array(z.string()),
+  }),
+})
+
+export interface CreateApiKeyInput {
+  name: string
+  scopes?: readonly Capability[]
+  allowedScopes?: readonly string[] | "*"
+  readOnly?: boolean
+}
+
+export interface CreateApiKeyOutput {
+  token: string
+  keyId: string
+  keyPrefix: string
+  name: string
+  scopes: string[]
+}
+
+/**
+ * `create_api_key` core — calls `mintApiKey` (the one minting path; no duplication), writes an
+ * `apikey.create` audit row, and returns the raw token ONCE alongside the stored metadata. The
+ * `scopes` input maps to capabilities (`requestedCapabilities`); `allowedScopes` is the
+ * DATA-partition grant (`requestedScopes`). The escalation guard lives in `mintApiKey`.
+ */
+export const createApiKeyCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: CreateApiKeyInput,
+): Promise<CreateApiKeyOutput> => {
+  assertAdmin(principal)
+  const { token, keyId } = await mintApiKey(db, principal, {
+    name: input.name,
+    ...(input.scopes !== undefined ? { requestedCapabilities: input.scopes } : {}),
+    ...(input.allowedScopes !== undefined ? { requestedScopes: input.allowedScopes } : {}),
+    ...(input.readOnly !== undefined ? { readOnly: input.readOnly } : {}),
+  })
+  await db.insert(memoryAudit).values({
+    id: crypto.randomUUID(),
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    action: "apikey.create",
+    targetId: keyId,
+    at: Date.now(),
+  })
+  // Read back the stored scopes (intersection happened inside mintApiKey).
+  const rows = await db
+    .select({ scopes: apiKeys.scopes })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, keyId))
+    .limit(1)
+  const storedScopes = rows[0]?.scopes ? (JSON.parse(rows[0].scopes) as string[]) : []
+  return { token, keyId, keyPrefix: token.slice(0, 11), name: input.name, scopes: storedScopes }
+}
+
+export const createApiKeyOp: AdminBoundOp<CreateApiKeyInput, CreateApiKeyOutput> = {
+  def: CREATE_API_KEY_OP,
+  handler: (ctx, input) => createApiKeyCore(drizzle(ctx.env.DB), ctx.principal, input),
+}
+
+// ── REVOKE_API_KEY_OP ─────────────────────────────────────────────────────────
+
+/** `revoke_api_key` — set `revoked_at` on an api_key row (tenant-scoped; no-op if not in tenant). */
+export const REVOKE_API_KEY_OP = defineOp({
+  name: "revoke_api_key",
+  description:
+    "Revoke a bk_ API key for the active tenant. No-op if keyId is not in this tenant. Admin only.",
+  capability: "admin",
+  readOnly: false,
+  surfaces: ["rest"],
+  input: z.object({ keyId: z.string().min(1) }),
+  output: z.object({ keyId: z.string(), revoked: z.boolean() }),
+})
+
+export const revokeApiKeyCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { keyId: string },
+): Promise<{ keyId: string; revoked: boolean }> => {
+  assertAdmin(principal)
+  const existing = await db
+    .select({ id: apiKeys.id })
+    .from(apiKeys)
+    .where(and(eq(apiKeys.id, input.keyId), eq(apiKeys.tenantId, principal.tenantId)))
+    .limit(1)
+  if (existing.length === 0) {
+    return { keyId: input.keyId, revoked: false } // not in this tenant — no-op
+  }
+  const now = new Date().toISOString()
+  await db
+    .update(apiKeys)
+    .set({ revokedAt: now })
+    .where(and(eq(apiKeys.id, input.keyId), eq(apiKeys.tenantId, principal.tenantId)))
+  await db.insert(memoryAudit).values({
+    id: crypto.randomUUID(),
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    action: "apikey.revoke",
+    targetId: input.keyId,
+    at: Date.now(),
+  })
+  return { keyId: input.keyId, revoked: true }
+}
+
+export const revokeApiKeyOp: AdminBoundOp<{ keyId: string }, { keyId: string; revoked: boolean }> =
+  {
+    def: REVOKE_API_KEY_OP,
+    handler: (ctx, input) => revokeApiKeyCore(drizzle(ctx.env.DB), ctx.principal, input),
+  }
+
 /** Every bound admin op. */
 export const ADMIN_OPS = [
   mintApiKeyOp,
+  listApiKeysOp,
+  createApiKeyOp,
+  revokeApiKeyOp,
   getTokenSpendOp,
   membershipsOp,
   listDocumentsOp,

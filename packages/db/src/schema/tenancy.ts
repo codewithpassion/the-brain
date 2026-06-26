@@ -83,6 +83,7 @@ export const apiKeys = sqliteTable(
     scopes: text("scopes").notNull().default("[]"), // CAPABILITY axis, e.g. ["read","write"]
     allowedScopes: text("allowed_scopes"), // DATA-partition grant, pinned at mint
     readOnly: integer("read_only").notNull().default(0),
+    createdAt: text("created_at"),
     expiresAt: text("expires_at"),
     lastUsedAt: text("last_used_at"),
     revokedAt: text("revoked_at"),

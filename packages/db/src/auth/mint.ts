@@ -91,6 +91,7 @@ export const mintApiKey = async (
     scopes: JSON.stringify(capabilities),
     allowedScopes: allowedScopes === "*" ? null : JSON.stringify(allowedScopes),
     readOnly: readOnly ? 1 : 0,
+    createdAt: new Date().toISOString(),
     ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
   })
   return { token, keyId }
