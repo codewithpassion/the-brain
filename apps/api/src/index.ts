@@ -22,6 +22,7 @@ import {
   GRAPH_OPS,
   type GraphOpDeps,
   MEMORY_REVIEW_OP,
+  type OpenAiCompatConfig,
   RECALL_OP,
   resolvePrincipal,
   type ScopedServices,
@@ -158,8 +159,33 @@ const GRAPH_ROUTES: readonly (readonly [string, string])[] = [
  */
 export { buildRegistry } from "@brain/surface"
 
+/**
+ * Default service factory: reads `AI_PROVIDER` from env and builds `OpenAiCompatConfig` when
+ * `=== "openai-compatible"`, provided `OPENAI_BASE_URL` and `OPENAI_API_KEY` are also set.
+ * Falls back to Workers AI (`@cf`) when the provider is unset or any required secret is absent
+ * (silently — a misconfigured BYO provider should be caught via `wrangler secret put` tooling).
+ */
+const makeScopedServicesFromEnv: MakeServices = (env, principal) => {
+  let openaiConfig: OpenAiCompatConfig | undefined
+  if (
+    env.AI_PROVIDER === "openai-compatible" &&
+    env.OPENAI_BASE_URL !== undefined &&
+    env.OPENAI_API_KEY !== undefined
+  ) {
+    openaiConfig = {
+      baseUrl: env.OPENAI_BASE_URL,
+      apiKey: env.OPENAI_API_KEY,
+      ...(env.OPENAI_EMBED_MODEL !== undefined ? { embedModel: env.OPENAI_EMBED_MODEL } : {}),
+      ...(env.OPENAI_GEN_MODEL !== undefined ? { genModel: env.OPENAI_GEN_MODEL } : {}),
+      ...(env.OPENAI_EXTRACT_MODEL !== undefined ? { extractModel: env.OPENAI_EXTRACT_MODEL } : {}),
+      ...(env.OPENAI_RERANK_MODEL !== undefined ? { rerankModel: env.OPENAI_RERANK_MODEL } : {}),
+    }
+  }
+  return createScopedServices(env, principal, openaiConfig !== undefined ? { openaiConfig } : {})
+}
+
 export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
-  const makeServices: MakeServices = options.makeServices ?? createScopedServices
+  const makeServices: MakeServices = options.makeServices ?? makeScopedServicesFromEnv
   const app = new Hono<AppEnv>()
 
   // ── Edge auth (invariant 17): resolve ONCE, attach the Principal, 401 on failure. ──

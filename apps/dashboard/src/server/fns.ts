@@ -5,6 +5,7 @@
  * tenant (invariant 17). Read fns return a `{ ok }` envelope so the UI degrades (API down, or a
  * non-admin hitting an admin op) instead of throwing into the error boundary.
  */
+import { env } from "cloudflare:workers"
 import { createServerFn } from "@tanstack/react-start"
 import { brainCall, resolveBrainAuth } from "./brain"
 import { foldDocuments } from "./derive"
@@ -224,3 +225,34 @@ export const getBrainStats = createServerFn({ method: "GET" }).handler(
     }
   },
 )
+
+// --- CLI device-flow activation ---
+
+/**
+ * Approve a pending CLI device-flow session (POST /activate on the API). The Clerk session token
+ * is attached server-side; the user_code comes from the dashboard URL's `?user_code=` param.
+ * Routes through the BRAIN_API service binding (same pattern as brainCall's authFetch).
+ */
+export const activateCliCode = createServerFn({ method: "POST" })
+  .validator((d: { userCode: string }) => d)
+  .handler(async ({ data }): Promise<Result<{ ok: boolean }>> => {
+    try {
+      const { token } = await resolveBrainAuth()
+      const apiBase = (process.env.BRAIN_API_URL ?? "http://localhost:8787").replace(/\/$/, "")
+      const res = await env.BRAIN_API.fetch(`${apiBase}/activate`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Bearer ${token}`,
+        },
+        body: new URLSearchParams({ user_code: data.userCode }).toString(),
+      })
+      if (!res.ok) {
+        const body = (await res.json()) as Record<string, unknown>
+        throw new Error(String(body.error ?? `activation failed (${res.status})`))
+      }
+      return { ok: true, data: { ok: true } }
+    } catch (error) {
+      return fail(error)
+    }
+  })

@@ -78,7 +78,10 @@ export const createDeviceSession = async (
     createdAt: new Date(now * 1000).toISOString(),
   })
 
-  const verificationUri = `${origin}/activate`
+  // Point to the dashboard's CLI approval page when DASHBOARD_URL is set; fall back to the API
+  // origin so local dev (no DASHBOARD_URL) still produces a usable verification_uri.
+  const dashboardBase = env.DASHBOARD_URL || origin
+  const verificationUri = `${dashboardBase}/cli/activate`
   return {
     device_code: deviceCode,
     user_code: userCode,

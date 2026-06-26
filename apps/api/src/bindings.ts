@@ -26,4 +26,21 @@ export type ApiBindings = BrainBindings & {
    * `DurableObjectNamespace` is not a boundary-lint-banned raw-binding type.
    */
   BRAIN_MCP: DurableObjectNamespace
+
+  // ── BYO / openai-compatible provider secrets (set via `wrangler secret put`) ──────────────
+  // These are NOT in wrangler.jsonc (they are secrets, not vars) and therefore absent from the
+  // generated `Env` type. They are typed here so `makeScopedServicesFromEnv` can read them
+  // when `AI_PROVIDER === "openai-compatible"`. All are optional — absent ⇒ Workers AI path.
+  /** Base URL of the openai-compatible endpoint (required when AI_PROVIDER=openai-compatible). */
+  OPENAI_BASE_URL?: string
+  /** API key for the openai-compatible provider (set via `wrangler secret put OPENAI_API_KEY`). */
+  OPENAI_API_KEY?: string
+  /** Override embedding model (default: gateway EMBEDDING_MODEL constant). */
+  OPENAI_EMBED_MODEL?: string
+  /** Override generation model (default: gateway GENERATION_MODEL constant). */
+  OPENAI_GEN_MODEL?: string
+  /** Override extraction model (default: gateway EXTRACT_MODEL constant). */
+  OPENAI_EXTRACT_MODEL?: string
+  /** Override rerank model (default: gateway RERANK_MODEL constant). */
+  OPENAI_RERANK_MODEL?: string
 }

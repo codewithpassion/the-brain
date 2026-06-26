@@ -9,7 +9,7 @@
 import type { Principal } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import { embed, embedForIndex } from "./ai/embed"
-import type { AiDeps } from "./ai/gateway"
+import type { AiDeps, OpenAiCompatConfig } from "./ai/gateway"
 import { gen, genExtract } from "./ai/gen"
 import { type RerankCandidate, type RerankHit, rerank } from "./ai/rerank"
 import type { BrainBindings } from "./env"
@@ -44,6 +44,11 @@ export interface ScopedServices {
 export interface ScopedServicesOptions {
   /** Audit+alert sink for `ScopedDB.breakGlass`; absent ⇒ break-glass fails closed. */
   breakGlassAudit?: BreakGlassAudit
+  /**
+   * When set, all AI chokepoints route to the openai-compatible provider via fetch instead of
+   * `env.AI.run`. Built by the app layer from `AI_PROVIDER` + `OPENAI_*` env vars.
+   */
+  openaiConfig?: OpenAiCompatConfig
 }
 
 export const createScopedServices = (
@@ -52,7 +57,12 @@ export const createScopedServices = (
   options?: ScopedServicesOptions,
 ): ScopedServices => {
   const db = drizzle(env.DB)
-  const aiDeps: AiDeps = { ai: env.AI, gatewayId: env.AI_GATEWAY_ID, tenantId: principal.tenantId }
+  const aiDeps: AiDeps = {
+    ai: env.AI,
+    gatewayId: env.AI_GATEWAY_ID,
+    tenantId: principal.tenantId,
+    ...(options?.openaiConfig !== undefined ? { openaiConfig: options.openaiConfig } : {}),
+  }
   return {
     db: new ScopedDB(db, principal, options?.breakGlassAudit),
     vectors: new ScopedVectorize(env.CHUNK_INDEX, principal),

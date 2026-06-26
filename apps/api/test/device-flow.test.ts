@@ -9,6 +9,7 @@ import {
   type BrainBindings,
   type ClerkIdentity,
   type ClerkVerifier,
+  createDeviceSession,
   resolveApiKeyPrincipal,
 } from "@brain/db"
 import { drizzle } from "drizzle-orm/d1"
@@ -242,6 +243,22 @@ describe("device flow", () => {
     )
     expect(res.status).toBe(400)
     expect(((await res.json()) as { error: string }).error).toBe("expired_token")
+  })
+
+  test("verification_uri uses DASHBOARD_URL when set, falls back to origin otherwise", async () => {
+    // Minimal env — createDeviceSession only reads DB and DASHBOARD_URL.
+    const customDashboard = "https://custom-dashboard.example.com"
+    const customEnv = { DB: env_.DB, DASHBOARD_URL: customDashboard } as unknown as BrainBindings
+    const result = await createDeviceSession(customEnv, "https://api.example.com")
+    expect(result.verification_uri).toBe(`${customDashboard}/cli/activate`)
+    expect(result.verification_uri_complete).toBe(
+      `${customDashboard}/cli/activate?user_code=${encodeURIComponent(result.user_code)}`,
+    )
+
+    // Fallback: empty DASHBOARD_URL ⇒ use origin.
+    const fallbackEnv = { DB: env_.DB, DASHBOARD_URL: "" } as unknown as BrainBindings
+    const fallback = await createDeviceSession(fallbackEnv, "https://api.example.com")
+    expect(fallback.verification_uri).toBe("https://api.example.com/cli/activate")
   })
 
   test("slow_down: second rapid poll while pending returns slow_down (400)", async () => {

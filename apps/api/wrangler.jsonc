@@ -44,9 +44,20 @@
   // DEVICE_FLOW_SECRET (the `bdev_` machine-token HMAC key) is a SECRET — never committed
   // here. Set it locally via `.env` (repo convention: `.env`, NOT `.dev.vars`), which
   // `wrangler dev` auto-loads; in prod set it with `wrangler secret put DEVICE_FLOW_SECRET`.
+  //
+  // AI_PROVIDER: "@cf" = Workers AI (default), "openai-compatible" = BYO provider via fetch.
+  // When set to "openai-compatible", also set the following SECRETS via `wrangler secret put`:
+  //   OPENAI_BASE_URL   — base URL of the openai-compatible endpoint
+  //   OPENAI_API_KEY    — API key (secret)
+  // Optional model overrides (also secrets):
+  //   OPENAI_EMBED_MODEL, OPENAI_GEN_MODEL, OPENAI_EXTRACT_MODEL, OPENAI_RERANK_MODEL
+  //
+  // DASHBOARD_URL: the dashboard origin for device-flow verification URIs (CLI auth page).
   "vars": {
     "CLERK_FRONTEND_API": "electric-bonefish-70.clerk.accounts.dev",
-    "AI_GATEWAY_ID": "default"
+    "AI_GATEWAY_ID": "default",
+    "AI_PROVIDER": "@cf",
+    "DASHBOARD_URL": "https://brain-dashboard.dominik-fretz.workers.dev"
   },
 
   // ── Workflows ────────────────────────────────────────────────────────────────

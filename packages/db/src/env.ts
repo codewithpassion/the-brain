@@ -40,4 +40,15 @@ export interface BrainBindings {
    * `analytics_engine_datasets` in `wrangler.jsonc` (deploy-only).
    */
   ANALYTICS?: AnalyticsEngineDataset
+  /**
+   * AI provider selector. `"@cf"` (default) = Workers AI via AI Gateway; `"openai-compatible"` =
+   * BYO provider via fetch. The app layer reads this and builds `OpenAiCompatConfig` when needed.
+   * Always set (has a default in wrangler.jsonc vars), so typed as required string.
+   */
+  AI_PROVIDER: string
+  /**
+   * Dashboard URL for device-flow verification URIs. Surfaced to CLI users as the page to open in
+   * their browser to approve a CLI auth request. Always set via wrangler.jsonc vars.
+   */
+  DASHBOARD_URL: string
 }
