@@ -40,6 +40,7 @@ import {
   THINK_OP,
 } from "@brain/shared"
 import { appRouter, createTrpcContext, type SurfaceEnv } from "@brain/surface"
+import OAuthProvider from "@cloudflare/workers-oauth-provider"
 import { trpcServer } from "@hono/trpc-server"
 import { Hono } from "hono"
 import {
@@ -54,7 +55,9 @@ import type { ApiBindings } from "./bindings"
 import { isDeviceFlowPath, mountDeviceFlow } from "./device-flow/routes"
 import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
+import { mcpApiHandler } from "./mcp/oauth-handler"
 import { isMcpPath, mountMcp } from "./mcp/routes"
+import { mountOAuthHandlers } from "./oauth/authorize"
 import { makeBudgetPort, makeRecallSink, recordThinkSpend } from "./ports"
 import {
   handleAuditExport,
@@ -219,11 +222,18 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   const app = new Hono<AppEnv>()
 
   // ── Edge auth (invariant 17): resolve ONCE, attach the Principal, 401 on failure. ──
-  //    The MCP transports (`/mcp`, `/mcp/:slug`) OWN their (slug-aware) edge auth — the `:slug` is
-  //    the active-tenant selector, which this generic resolver cannot see — so they are skipped
-  //    here and resolve their own Principal in `mountMcp` (still `resolvePrincipal` at the edge).
+  //    The MCP transports (`/mcp`, `/mcp/:slug`) OWN their edge auth — either via mountMcp
+  //    (direct Hono path, used in tests) or via the OAuthProvider apiHandler + resolveExternalToken
+  //    (production). The OAuth endpoints (/authorize, /callback) are pre-auth (the user is logging
+  //    in), and the device-flow paths bypass auth at the protocol level (RFC 8628).
   app.use("*", async (c, next) => {
-    if (c.req.path === "/health" || isMcpPath(c.req.path) || isDeviceFlowPath(c.req.path))
+    if (
+      c.req.path === "/health" ||
+      c.req.path === "/authorize" ||
+      c.req.path === "/callback" ||
+      isMcpPath(c.req.path) ||
+      isDeviceFlowPath(c.req.path)
+    )
       return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
       ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
@@ -233,6 +243,14 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   })
 
   app.get("/health", (c) => c.json({ status: "ok" }))
+
+  // ── OAuth 2.1 authorize + callback (Connect with OAuth): /authorize, /callback. ──
+  //    Mounted BEFORE device-flow so the auth bypass list comment above is coherent. In the
+  //    production OAuthProvider wrapper, /authorize is served as `defaultHandler` (the OAuthProvider
+  //    does NOT handle it natively). /callback completes the Clerk sign-in → completeAuthorization.
+  mountOAuthHandlers(app, {
+    ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
+  })
 
   // ── CLI OAuth 2.1 device-flow (RFC 8628): /device_authorization, /activate, /token. ──
   mountDeviceFlow(app, {
@@ -625,12 +643,94 @@ const queue = async (
   }
 }
 
-/** The deployed Worker: real Clerk path + real scoped services + cron/queue handlers. */
-const app = createApp()
+/**
+ * Build the full OAuth 2.1-wrapped Worker for a given option set.
+ *
+ * The `OAuthProvider` is the outermost fetch handler:
+ *   - `/.well-known/oauth-authorization-server` (discovery) → served by OAuthProvider
+ *   - `/register`   (RFC 7591 dynamic client registration) → served by OAuthProvider
+ *   - `/oauth/token` (authorization_code + refresh)         → served by OAuthProvider
+ *   - `/mcp`, `/mcp/:slug` (protected MCP resource)        → OAuthProvider validates token →
+ *       forwards to `mcpApiHandler` with `ctx.props.principal`
+ *   - everything else (REST API, device-flow, /authorize, /callback) → `defaultHandler`
+ *     (the Hono app created by `createApp`)
+ *
+ * `resolveExternalToken` bridges legacy bearer tokens (Clerk JWT / `bk_` / `bdev_`) so that
+ * existing callers of `/mcp` with a non-OAuth bearer token continue to work unchanged.
+ *
+ * NOTE: `/oauth/token` is intentionally distinct from `/token` (the device-flow token endpoint,
+ * RFC 8628). Using the same path would create a grant-type conflict; the discovery document
+ * advertises `/oauth/token` so MCP clients resolve it automatically.
+ */
+// OAuthProvider<Env> defaults to Cloudflare.Env which is test-augmented with MIGRATIONS
+// (test/env.d.ts). Our runtime bindings lack that key, so we use `any` as Env — the library
+// uses `env: any` internally, making this safe.
+// biome-ignore lint/suspicious/noExplicitAny: test env augmentation incompatibility (see above)
+type AnyOAuthProvider = OAuthProvider<any>
+
+export const createOAuthWorker = (options: CreateAppOptions = {}): AnyOAuthProvider => {
+  const honoApp = createApp(options)
+
+  return new OAuthProvider({
+    // Protected resource: all /mcp requests require a valid access token.
+    // biome-ignore lint/suspicious/noExplicitAny: see AnyOAuthProvider comment above
+    apiHandlers: { "/mcp": mcpApiHandler as any },
+
+    // Everything else falls through to the Hono app (REST API, device-flow, /authorize, etc.).
+    defaultHandler: {
+      fetch: (req: Request, env: unknown, ctx: ExecutionContext) =>
+        honoApp.fetch(req, env as ApiBindings, ctx),
+      // biome-ignore lint/suspicious/noExplicitAny: see AnyOAuthProvider comment above
+    } as any,
+
+    // OAuth 2.1 endpoints advertised in the discovery document.
+    authorizeEndpoint: "/authorize",
+    tokenEndpoint: "/oauth/token",
+    clientRegistrationEndpoint: "/register",
+
+    // Scopes supported by this provider.
+    scopesSupported: ["brain:read", "brain:write", "brain:admin"],
+
+    // S256 PKCE only (OAuth 2.1 §5); no plain, no implicit.
+    allowPlainPKCE: false,
+    allowImplicitFlow: false,
+
+    /**
+     * Bridge for legacy bearer tokens on the protected `/mcp` resource.
+     *
+     * When the OAuthProvider cannot find the token in its KV (i.e. it is NOT an OAuth-issued
+     * access token), it calls this callback. We delegate to the existing `resolvePrincipal`
+     * which handles Clerk JWT / `bk_` API keys / `bdev_` machine tokens. The resolved
+     * Principal is stored as `props` and forwarded to `mcpApiHandler` — exactly the same
+     * shape as the OAuth grant props.
+     *
+     * The slug is extracted from the URL path so `resolvePrincipal` honours the active-tenant
+     * selector on `/mcp/:slug` requests (matching `mountMcp`'s existing behaviour).
+     */
+    resolveExternalToken: async ({ token: _token, request, env }) => {
+      try {
+        const url = new URL(request.url)
+        const slugMatch = url.pathname.match(/^\/mcp\/([^/]+)\/?$/)
+        const activeTenantSlug = slugMatch?.[1]
+
+        const principal = await resolvePrincipal(env as unknown as WorkerBindings, request, {
+          ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}),
+          ...(activeTenantSlug ? { activeTenantSlug } : {}),
+        })
+        return { props: { principal } }
+      } catch {
+        return null
+      }
+    },
+  })
+}
+
+/** The deployed Worker: OAuth-wrapped Hono app + cron/queue handlers. */
+const oauthWorker = createOAuthWorker()
 
 export default {
   fetch: (req: Request, env: WorkerBindings, ctx: ExecutionContext): Response | Promise<Response> =>
-    app.fetch(req, env, ctx),
+    oauthWorker.fetch(req, env, ctx),
   scheduled,
   queue,
 }

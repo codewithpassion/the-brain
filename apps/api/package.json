@@ -16,6 +16,7 @@
     "@brain/ingest": "workspace:*",
     "@brain/shared": "workspace:*",
     "@brain/surface": "workspace:*",
+    "@cloudflare/workers-oauth-provider": "^0.8.1",
     "@hono/trpc-server": "^0.4.2",
     "@modelcontextprotocol/sdk": "1.26.0",
     "@trpc/server": "^11.18.0",

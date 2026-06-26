@@ -55,6 +55,10 @@
   // DASHBOARD_URL: the dashboard origin for device-flow verification URIs (CLI auth page).
   "vars": {
     "CLERK_FRONTEND_API": "electric-bonefish-70.clerk.accounts.dev",
+    // Clerk publishable key (public, non-secret) — used by the /authorize sign-in HTML page to
+    // initialise the Clerk JS SDK. Obtain from the Clerk dashboard (API Keys → Publishable key).
+    // Set the actual value at deploy: `wrangler vars put CLERK_PUBLISHABLE_KEY pk_live_...`
+    "CLERK_PUBLISHABLE_KEY": "pk_test_ZWxlY3RyaWMtYm9uZWZpc2gtNzAuY2xlcmsuYWNjb3VudHMuZGV2JA",
     "AI_GATEWAY_ID": "default",
     "AI_PROVIDER": "@cf",
     "DASHBOARD_URL": "https://brain-dashboard.dominik-fretz.workers.dev"
