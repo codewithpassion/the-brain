@@ -36,6 +36,7 @@ import {
   facts,
   memberships as membershipsTable,
   memoryAudit,
+  orgs as orgsTable,
   sessions as sessionsTable,
 } from "../schema"
 import { type BrainDrizzle, ScopedDB } from "../scoped/db"
@@ -568,6 +569,170 @@ export const getStatsOp: AdminBoundOp<Record<string, never>, GetStatsOutput> = {
   handler: (ctx, _input) => getStatsCore(drizzle(ctx.env.DB), ctx.principal),
 }
 
+// ── CREATE_ORG_OP ─────────────────────────────────────────────────────────────
+
+/**
+ * `create_org` — create a new org with the calling user as OWNER. Any authenticated user can call
+ * this; it does not modify the caller's current tenant, it creates a brand-new one. `slug` defaults
+ * to a slugified `name` if omitted. On slug conflict the op fails with a clear error (no silent
+ * upsert). Auditable: the caller's userId is stored as `created_by` on the new org row.
+ */
+export const CREATE_ORG_OP = defineOp({
+  name: "create_org",
+  description: "Create a new org and become its owner. Returns the new org id + slug.",
+  capability: "write",
+  readOnly: false,
+  // rest-only: cross-tenant by nature (creates a brand-new tenant). Exposing on mcp/cli would let
+  // a bk_ API key (scoped to the caller's current tenant) or a bdev_ machine token create
+  // unrelated tenants, which is outside the key's intended tenant scope.
+  surfaces: ["rest"],
+  input: z.object({
+    name: z.string().min(1).max(128),
+    slug: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(
+        /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/,
+        "slug must be lowercase alphanumeric with hyphens",
+      )
+      .optional(),
+  }),
+  output: z.object({ id: z.string(), slug: z.string() }),
+})
+
+export interface CreateOrgInput {
+  name: string
+  slug?: string
+}
+
+/** Derive a URL-safe slug from a name. */
+const slugifyName = (name: string): string => {
+  const s = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+  return s.length > 0 ? s : "org"
+}
+
+/** Membership id for a new org: same deterministic pattern as auto-provision. */
+const newMembershipId = (tenantId: string, userId: string): string => `mem_${tenantId}_${userId}`
+
+export const createOrgCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: CreateOrgInput,
+): Promise<{ id: string; slug: string }> => {
+  const slug = input.slug ?? slugifyName(input.name)
+  // Check slug uniqueness before inserting (gives a clear error vs a raw constraint error).
+  const existing = await db
+    .select({ id: orgsTable.id })
+    .from(orgsTable)
+    .where(eq(orgsTable.slug, slug))
+    .limit(1)
+  if (existing.length > 0) {
+    throw new AuthError(409, `slug "${slug}" is already taken`)
+  }
+  const id = crypto.randomUUID()
+  await db.insert(orgsTable).values({
+    id,
+    name: input.name,
+    slug,
+    createdBy: principal.userId,
+  })
+  await db.insert(membershipsTable).values({
+    id: newMembershipId(id, principal.userId),
+    tenantId: id,
+    userId: principal.userId,
+    teamId: null,
+    role: "owner",
+    allowedScopes: null, // NULL = '*' (unrestricted)
+  })
+  return { id, slug }
+}
+
+export const createOrgOp: AdminBoundOp<CreateOrgInput, { id: string; slug: string }> = {
+  def: CREATE_ORG_OP,
+  handler: (ctx, input) => createOrgCore(drizzle(ctx.env.DB), ctx.principal, input),
+}
+
+// ── LIST_ORGS_OP ──────────────────────────────────────────────────────────────
+
+/**
+ * `list_orgs` — list all orgs the calling user is a member of. This op is intentionally
+ * cross-tenant: it reads `memberships` by `user_id` (not `tenant_id`) so it returns the full set
+ * of orgs regardless of which tenant is currently active. This is safe — it only returns the
+ * caller's own memberships, never another user's. Powers the dashboard org switcher.
+ */
+export const LIST_ORGS_OP = defineOp({
+  name: "list_orgs",
+  description:
+    "List all orgs the current user is a member of (cross-org; reads memberships by user_id, not tenant_id). Powers the org switcher.",
+  capability: "read",
+  readOnly: true,
+  // rest-only: cross-tenant enumeration is intentional for the dashboard switcher but should not
+  // be reachable via bk_ API keys (which are scoped to a single tenant) or bdev_ machine tokens.
+  surfaces: ["rest"],
+  input: z.object({}),
+  output: z.object({
+    orgs: z.array(
+      z.object({
+        id: z.string(),
+        slug: z.string(),
+        name: z.string(),
+        role: z.string(),
+      }),
+    ),
+  }),
+})
+
+export interface OrgListRow {
+  id: string
+  slug: string
+  name: string
+  role: string
+}
+
+/**
+ * `list_orgs` core — reads memberships by `principal.userId` across ALL tenants, then JOINs
+ * orgs to resolve slug + name. Cross-tenant by design and safe: it returns only the caller's
+ * own memberships. The highest role per org is surfaced (mirrors `aggregateMemberships`).
+ */
+export const listOrgsCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+): Promise<{ orgs: OrgListRow[] }> => {
+  const rows = await db
+    .select({
+      id: orgsTable.id,
+      slug: orgsTable.slug,
+      name: orgsTable.name,
+      role: membershipsTable.role,
+    })
+    .from(membershipsTable)
+    .innerJoin(orgsTable, eq(membershipsTable.tenantId, orgsTable.id))
+    .where(eq(membershipsTable.userId, principal.userId))
+  // Deduplicate by org id, keeping the highest role (mirrors aggregateMemberships).
+  const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2, member: 1, readonly: 0 }
+  const byId = new Map<string, OrgListRow>()
+  for (const row of rows) {
+    const existing = byId.get(row.id)
+    const existingRank = existing ? (ROLE_RANK[existing.role] ?? 0) : -1
+    const rowRank = ROLE_RANK[row.role] ?? 0
+    if (!existing || rowRank > existingRank) {
+      byId.set(row.id, { id: row.id, slug: row.slug, name: row.name, role: row.role })
+    }
+  }
+  return { orgs: [...byId.values()] }
+}
+
+export const listOrgsOp: AdminBoundOp<Record<string, never>, { orgs: OrgListRow[] }> = {
+  def: LIST_ORGS_OP,
+  handler: (ctx, _input) => listOrgsCore(drizzle(ctx.env.DB), ctx.principal),
+}
+
 /** Every bound admin op. */
 export const ADMIN_OPS = [
   mintApiKeyOp,
@@ -578,6 +743,8 @@ export const ADMIN_OPS = [
   listBackfillRunsOp,
   listAuditOp,
   getStatsOp,
+  createOrgOp,
+  listOrgsOp,
 ] as const
 
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */

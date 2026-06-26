@@ -164,7 +164,10 @@ export const autoProvisionOrg = async (
 ): Promise<string> => {
   const tenantId = orgIdForUser(userId)
   const slug = await slugForUser(userId)
-  await db.insert(orgs).values({ id: tenantId, name: displayName, slug }).onConflictDoNothing()
+  await db
+    .insert(orgs)
+    .values({ id: tenantId, name: displayName, slug, createdBy: userId })
+    .onConflictDoNothing()
   await db
     .insert(memberships)
     .values({

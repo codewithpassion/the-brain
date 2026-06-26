@@ -20,6 +20,9 @@ export const orgs = sqliteTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     flags: text("flags").default("{}"),
+    // createdBy: the Clerk userId of the user who created this org. NULL for orgs that were
+    // auto-provisioned before this column was added (personal orgs from before migration 0002).
+    createdBy: text("created_by"),
     createdAt: text("created_at").notNull().default(isoNow),
   },
   (t) => [uniqueIndex("orgs_slug_ux").on(t.slug)],

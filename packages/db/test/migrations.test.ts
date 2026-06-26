@@ -77,8 +77,8 @@ const BASE_TABLES = [
 ]
 
 describe("migrations apply cleanly", () => {
-  test("there are at least two migration files (base + raw FTS/expression)", () => {
-    expect(migrationFiles().length).toBeGreaterThanOrEqual(2)
+  test("there are at least three migration files (base + FTS/expression + orgs.created_by)", () => {
+    expect(migrationFiles().length).toBeGreaterThanOrEqual(3)
   })
 
   test("loading every migration in order does not throw", () => {
@@ -210,6 +210,12 @@ describe("PRD §3 faithfulness invariants survived generation", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(documents)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).not.toContain("visibility")
+  })
+
+  test("orgs has created_by column (added in migration 0002)", () => {
+    const cols = (db: Database) =>
+      (db.query(`PRAGMA table_info(orgs)`).all() as { name: string }[]).map((c) => c.name)
+    expect(cols(freshDb())).toContain("created_by")
   })
 
   test("expression indexes carry their COALESCE/lower fragments", () => {

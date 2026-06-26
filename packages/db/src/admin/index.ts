@@ -1,11 +1,13 @@
 /**
  * `@brain/db/admin` (PRD §7.1/§9.2.2) — the admin op contracts + bound handlers: `mint_api_key`,
- * `get_token_spend`, `memberships`. Registered into the shared op-registry like every other op
- * family so the MCP/tRPC/CLI catalog cannot drift; the handlers fail CLOSED on a non-admin caller.
+ * `get_token_spend`, `memberships`, `create_org`, `list_orgs`, and dashboard list/stats ops.
+ * Registered into the shared op-registry like every other op family so the MCP/tRPC/CLI catalog
+ * cannot drift; the handlers fail CLOSED on a non-admin caller where required.
  */
 export type {
   AdminBoundOp,
   AdminOpContext,
+  CreateOrgInput,
   GetStatsOutput,
   ListAuditEntry,
   ListBackfillRunRow,
@@ -13,10 +15,14 @@ export type {
   ListSessionRow,
   MembershipOpRow,
   MintApiKeyOpInput,
+  OrgListRow,
   TokenSpendOpOutput,
 } from "./ops"
 export {
   ADMIN_OPS,
+  CREATE_ORG_OP,
+  createOrgCore,
+  createOrgOp,
   GET_STATS_OP,
   GET_TOKEN_SPEND_OP,
   getStatsCore,
@@ -26,6 +32,7 @@ export {
   LIST_AUDIT_OP,
   LIST_BACKFILL_RUNS_OP,
   LIST_DOCUMENTS_OP,
+  LIST_ORGS_OP,
   LIST_SESSIONS_OP,
   listAuditCore,
   listAuditOp,
@@ -33,6 +40,8 @@ export {
   listBackfillRunsOp,
   listDocumentsCore,
   listDocumentsOp,
+  listOrgsCore,
+  listOrgsOp,
   listSessionsCore,
   listSessionsOp,
   MEMBERSHIPS_OP,

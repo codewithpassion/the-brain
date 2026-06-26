@@ -159,6 +159,24 @@ export interface ListBackfillRunsResult {
   runs: BackfillRun[]
 }
 
+// --- Org management ---
+
+export interface OrgRow {
+  id: string
+  slug: string
+  name: string
+  role: string
+}
+
+export interface ListOrgsResult {
+  orgs: OrgRow[]
+}
+
+export interface CreateOrgResult {
+  id: string
+  slug: string
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

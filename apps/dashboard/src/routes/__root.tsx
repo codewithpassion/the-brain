@@ -11,6 +11,7 @@
 import { ClerkProvider, Show, UserButton } from "@clerk/tanstack-react-start"
 import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import { OrgSwitcher } from "../components/OrgSwitcher"
 import { TenantIndicator } from "../components/TenantIndicator"
 import { getClientEnv } from "../env"
 import appCss from "../styles/app.css?url"
@@ -91,6 +92,7 @@ function RootDocument({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <OrgSwitcher />
             <TenantIndicator />
             <AuthControl />
           </div>

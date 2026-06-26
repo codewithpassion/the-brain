@@ -12,12 +12,14 @@ import { foldDocuments } from "./derive"
 import type {
   BrainSessionInfo,
   BrainStats,
+  CreateOrgResult,
   DerivedDocument,
   FindOrphansResult,
   ListAuditResult,
   ListBackfillRunsResult,
   ListDocumentsResult,
   ListEntitiesResult,
+  ListOrgsResult,
   ListSessionsResult,
   MembershipsResult,
   RecallResult,
@@ -275,6 +277,38 @@ export const ingestDocument = createServerFn({ method: "POST" })
       }
       const result = (await res.json()) as IngestResult
       return { ok: true, data: result }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Org management ---
+
+/**
+ * `list_orgs` — all orgs the current user is a member of (cross-org; reads memberships by
+ * user_id, not tenant_id). Powers the org switcher dropdown.
+ */
+export const listOrgs = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListOrgsResult>> => {
+    try {
+      const out = await brainCall<ListOrgsResult>("list_orgs", true, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/**
+ * `create_org` — create a new org with the calling user as owner. Returns `{id, slug}`.
+ * On slug conflict the API returns a 409 error surfaced as `{ok: false}`.
+ */
+export const createOrg = createServerFn({ method: "POST" })
+  .validator((d: { name: string; slug?: string }) => d)
+  .handler(async ({ data }): Promise<Result<CreateOrgResult>> => {
+    try {
+      const out = await brainCall<CreateOrgResult>("create_org", false, data)
+      return { ok: true, data: out }
     } catch (error) {
       return fail(error)
     }

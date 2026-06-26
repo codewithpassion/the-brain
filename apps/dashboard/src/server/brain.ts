@@ -23,6 +23,7 @@
 
 import { env } from "cloudflare:workers"
 import { auth } from "@clerk/tanstack-react-start/server"
+import { getCookie } from "@tanstack/react-start/server"
 import { createTRPCClient, httpBatchLink } from "@trpc/client"
 import type { AnyTRPCRouter } from "@trpc/server"
 import { tenantPinFor } from "./tenant"
@@ -68,13 +69,20 @@ export interface BrainAuth {
 /**
  * Resolve the per-request credential + tenant pin from Clerk (server-side). Throws an Error the
  * server fn surfaces as `null`/unauthenticated when there is no signed-in user or no session token.
+ *
+ * Active-tenant selection: if the `brain_active_tenant` cookie is present (set by the OrgSwitcher
+ * on the client), it is used as the tenant selector for the API call. Otherwise the user's default
+ * personal org (`org_${userId}`) is used. The API re-checks membership on every request, so a
+ * tampered or stale cookie is inert — the API is authoritative on tenant access.
  */
 export const resolveBrainAuth = async (): Promise<BrainAuth> => {
   const session = await auth()
   if (!session.userId) throw new Error("unauthenticated")
   const token = await session.getToken()
   if (!token) throw new Error("no session token")
-  return { token, tenant: tenantPinFor(session.userId), userId: session.userId }
+  const cookieTenant = getCookie("brain_active_tenant")
+  const tenant = cookieTenant ?? tenantPinFor(session.userId)
+  return { token, tenant, userId: session.userId }
 }
 
 /**
