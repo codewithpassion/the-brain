@@ -246,6 +246,102 @@ describe("search handler (rerank OFF, no synthesis)", () => {
   })
 })
 
+// ── Namespace-scoped search (path + tag filter) ─────────────────────────────────
+
+/**
+ * Seed two docs for the SAME tenant: one under /project/x, one under /other.
+ * The fake Vectorize arm surfaces BOTH chunk ids, proving the re-check is the gate.
+ */
+const seedTwoDocs = (p: Parameters<typeof principal>[0] & { tenantId: string }) => {
+  const { sqlite, db } = makeDb()
+  const tid = p.tenantId
+  // /project/x doc + chunk
+  sqlite.run(
+    `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path, tags)
+     VALUES ('doc-px', ?, 'userA', 'slug-px', 'indexed', 'fp-px', '/project/x', '["proj"]')`,
+    [tid],
+  )
+  sqlite.run(
+    `INSERT INTO chunks (id, tenant_id, document_id, visibility, chunk_index, content,
+                         embedding_model, embedding_dims, updated_at, path)
+     VALUES ('chunk-px', ?, 'doc-px', 'world', 0, 'project x content',
+             '@cf/baai/bge-m3', 1024, '2026-06-25T00:00:00.000Z', '/project/x')`,
+    [tid],
+  )
+  // /other doc + chunk
+  sqlite.run(
+    `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path, tags)
+     VALUES ('doc-other', ?, 'userA', 'slug-other', 'indexed', 'fp-other', '/other', '["other"]')`,
+    [tid],
+  )
+  sqlite.run(
+    `INSERT INTO chunks (id, tenant_id, document_id, visibility, chunk_index, content,
+                         embedding_model, embedding_dims, updated_at, path)
+     VALUES ('chunk-other', ?, 'doc-other', 'world', 0, 'other content',
+             '@cf/baai/bge-m3', 1024, '2026-06-25T00:00:00.000Z', '/other')`,
+    [tid],
+  )
+  const rec = recorder()
+  const deps: SearchDeps = {
+    db: new ScopedDB(db, principal(p)),
+    // Adversarial Vectorize: surfaces BOTH chunks for any query.
+    vectors: new ScopedVectorize(
+      fakeIndex([
+        { id: "chunk-px", score: 0.95 },
+        { id: "chunk-other", score: 0.91 },
+      ]),
+      principal(p),
+    ),
+    ai: stubAi(),
+    budget: okBudget(),
+    recall: rec.sink,
+  }
+  return { deps, rec }
+}
+
+describe("namespace-scoped search: path + tag filter via D1 re-check (non-vacuous)", () => {
+  const p = { tenantId: "t1" }
+
+  test("non-vacuity: no filter returns BOTH chunks (adversarial arm surfaces both)", async () => {
+    const { deps } = seedTwoDocs(p)
+    const out = await searchOp.handler(
+      { deps, principal: principal(p) },
+      { query: "content", topK: 12 },
+    )
+    const slugs = out.hits.map((h) => h.slug).sort()
+    expect(slugs).toContain("slug-px")
+    expect(slugs).toContain("slug-other")
+  })
+
+  test("path filter: /project returns only /project/x, drops /other (non-vacuous)", async () => {
+    const { deps } = seedTwoDocs(p)
+    const out = await searchOp.handler(
+      { deps, principal: principal(p) },
+      { query: "content", topK: 12, path: "/project" },
+    )
+    expect(out.hits.map((h) => h.slug)).toEqual(["slug-px"])
+    expect(out.hits.map((h) => h.slug)).not.toContain("slug-other")
+  })
+
+  test("tag filter: 'proj' tag returns only slug-px, drops slug-other", async () => {
+    const { deps } = seedTwoDocs(p)
+    const out = await searchOp.handler(
+      { deps, principal: principal(p) },
+      { query: "content", topK: 12, tag: "proj" },
+    )
+    expect(out.hits.map((h) => h.slug)).toEqual(["slug-px"])
+    expect(out.hits.map((h) => h.slug)).not.toContain("slug-other")
+  })
+
+  test("no-arg search is byte-identical to before (existing tests unaffected)", async () => {
+    // Proves path/tag are truly optional with no side-effect when absent.
+    const p2 = principal({ tenantId: "t1" })
+    const { deps } = seedOne(p2, { matches: [{ id: "chunk-1", score: 0.9 }] })
+    const out = await searchOp.handler({ deps, principal: p2 }, { query: "kryptonite", topK: 12 })
+    expect(out.hits.map((h) => h.slug)).toEqual(["needle-doc"])
+  })
+})
+
 describe("registerSearchOps (build-item 6: op-registry registration)", () => {
   test("registers search / query / think contracts into an OpRegistry", () => {
     const registry = registerSearchOps(new OpRegistry())

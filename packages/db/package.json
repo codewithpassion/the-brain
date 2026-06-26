@@ -16,6 +16,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@brain/ingest": "workspace:*",
     "@brain/shared": "workspace:*",
     "drizzle-orm": "^0.44.6",
     "jose": "^6.0.11",

@@ -31,6 +31,10 @@ export interface RetrievalInput {
   query: string
   topK: number
   scope?: string
+  /** Restrict retrieval to documents under this path prefix (or exact match). */
+  path?: string
+  /** Restrict retrieval to documents that contain this tag. */
+  tag?: string
 }
 
 /** A frozen `OpDef` contract paired with its runtime handler. */
@@ -77,11 +81,25 @@ const writeRecall = async (
   })
 }
 
+/** Build a `ScopedSearchFilter` from optional path/tag inputs (EOPT-safe). */
+const searchFilter = (input: RetrievalInput): { path?: string; tag?: string } | undefined => {
+  if (input.path === undefined && input.tag === undefined) return undefined
+  return {
+    ...(input.path !== undefined ? { path: input.path } : {}),
+    ...(input.tag !== undefined ? { tag: input.tag } : {}),
+  }
+}
+
 /** `search` handler — cheap hybrid, rerank OFF. */
 export const searchOp: BoundOp<RetrievalInput, SearchResult> = {
   def: SEARCH_OP,
   handler: async (ctx, input) => {
-    const ranked = await hybridSearch(ctx.deps, input.query, { topK: input.topK, rerank: false })
+    const f = searchFilter(input)
+    const ranked = await hybridSearch(ctx.deps, input.query, {
+      topK: input.topK,
+      rerank: false,
+      ...(f !== undefined ? { filter: f } : {}),
+    })
     return { hits: ranked.map(toHit) }
   },
 }
@@ -90,7 +108,12 @@ export const searchOp: BoundOp<RetrievalInput, SearchResult> = {
 export const queryOp: BoundOp<RetrievalInput, SearchResult> = {
   def: QUERY_OP,
   handler: async (ctx, input) => {
-    const ranked = await hybridSearch(ctx.deps, input.query, { topK: input.topK, rerank: true })
+    const f = searchFilter(input)
+    const ranked = await hybridSearch(ctx.deps, input.query, {
+      topK: input.topK,
+      rerank: true,
+      ...(f !== undefined ? { filter: f } : {}),
+    })
     await writeRecall(ctx, input.query, ranked)
     return { hits: ranked.map(toHit) }
   },
@@ -100,7 +123,12 @@ export const queryOp: BoundOp<RetrievalInput, SearchResult> = {
 export const thinkOp: BoundOp<RetrievalInput, ThinkResult> = {
   def: THINK_OP,
   handler: async (ctx, input) => {
-    const ranked = await hybridSearch(ctx.deps, input.query, { topK: THINK_TOP_K, rerank: true })
+    const f = searchFilter(input)
+    const ranked = await hybridSearch(ctx.deps, input.query, {
+      topK: THINK_TOP_K,
+      rerank: true,
+      ...(f !== undefined ? { filter: f } : {}),
+    })
     await writeRecall(ctx, input.query, ranked)
 
     const evidence = ranked.map(toHit)

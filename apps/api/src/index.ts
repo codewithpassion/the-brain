@@ -143,15 +143,19 @@ type AppEnv = { Bindings: ApiBindings; Variables: { principal: Principal } }
 const baseContentType = (raw: string | undefined): string =>
   (raw ?? "text/markdown").split(";")[0]?.trim().toLowerCase() ?? "text/markdown"
 
-/** Drop an absent `scope` so the value satisfies `exactOptionalPropertyTypes` (no `undefined`). */
+/** Drop absent optionals so the value satisfies `exactOptionalPropertyTypes` (no `undefined`). */
 const retrievalInput = (parsed: {
   query: string
   topK: number
   scope?: string | undefined
-}): { query: string; topK: number; scope?: string } => ({
+  path?: string | undefined
+  tag?: string | undefined
+}): { query: string; topK: number; scope?: string; path?: string; tag?: string } => ({
   query: parsed.query,
   topK: parsed.topK,
   ...(parsed.scope !== undefined ? { scope: parsed.scope } : {}),
+  ...(parsed.path !== undefined ? { path: parsed.path } : {}),
+  ...(parsed.tag !== undefined ? { tag: parsed.tag } : {}),
 })
 
 /** Compose the concrete `SearchDeps` (budget 429 pre-check + waitUntil recall sink). */
@@ -359,6 +363,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       r2Key,
       contentType,
       scope: scope ?? null,
+      ...(path !== null ? { path } : {}),
     }
 
     // Trigger the durable Workflow at DEPLOY (binding present); run inline in test/local.
@@ -469,6 +474,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       r2Key,
       contentType: "text/markdown",
       scope: scope ?? null,
+      ...(path !== null ? { path } : {}),
     }
 
     const workflow = options.inlineIngest ? undefined : c.env.BATCH_INGEST

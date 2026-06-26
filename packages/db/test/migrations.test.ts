@@ -77,8 +77,8 @@ const BASE_TABLES = [
 ]
 
 describe("migrations apply cleanly", () => {
-  test("there are at least six migration files (base + FTS/expression + orgs.created_by + api_keys.created_at + memberships.created_by + documents.path)", () => {
-    expect(migrationFiles().length).toBeGreaterThanOrEqual(6)
+  test("there are at least seven migration files (base + FTS/expression + orgs.created_by + api_keys.created_at + memberships.created_by + documents.path + chunks.path)", () => {
+    expect(migrationFiles().length).toBeGreaterThanOrEqual(7)
   })
 
   test("loading every migration in order does not throw", () => {
@@ -227,6 +227,12 @@ describe("PRD §3 faithfulness invariants survived generation", () => {
   test("documents has path column (added in migration 0005)", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(documents)`).all() as { name: string }[]).map((c) => c.name)
+    expect(cols(freshDb())).toContain("path")
+  })
+
+  test("chunks has path column (added in migration 0006)", () => {
+    const cols = (db: Database) =>
+      (db.query(`PRAGMA table_info(chunks)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("path")
   })
 

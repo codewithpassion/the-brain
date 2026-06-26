@@ -9,7 +9,7 @@
  * match id. This module never touches a raw binding; it composes the frozen chokepoints.
  */
 import { COSINE_FLOOR } from "@brain/shared"
-import type { ScopedDB } from "../scoped/db"
+import type { ScopedDB, ScopedSearchFilter } from "../scoped/db"
 import type { ScopedVectorize } from "../scoped/vectorize"
 import type { AiPort, Candidate } from "./types"
 import { toCandidate } from "./types"
@@ -28,6 +28,7 @@ export const vectorArm = async (
   query: string,
   topK: number,
   threshold: number = COSINE_FLOOR,
+  filter?: ScopedSearchFilter,
 ): Promise<Candidate[]> => {
   if (query.length === 0) return []
   const embedded = await ai.embed([query])
@@ -53,7 +54,7 @@ export const vectorArm = async (
 
   // THE RE-CHECK: cross-tenant / out-of-scope / hidden / deleted ids are silently dropped.
   // Candidates are built from these survivors ONLY — never from `matches` above.
-  const rows = await db.getChunksByIds([...scoreById.keys()])
+  const rows = await db.getChunksByIds([...scoreById.keys()], filter)
   return rows
     .map((row) => toCandidate(row, scoreById.get(row.id) ?? 0))
     .sort((a, b) => b.armScore - a.armScore)
@@ -66,14 +67,19 @@ export const vectorArm = async (
  * are already bm25-ordered; surviving rows keep that order, and a synthetic descending
  * `armScore` encodes the rank for fusion. Any id dropped at hydration is simply absent.
  */
-export const ftsArm = async (db: ScopedDB, query: string, topK: number): Promise<Candidate[]> => {
+export const ftsArm = async (
+  db: ScopedDB,
+  query: string,
+  topK: number,
+  filter?: ScopedSearchFilter,
+): Promise<Candidate[]> => {
   if (query.length === 0) return []
   const ids = await db.ftsChunkIds(query, topK)
   if (ids.length === 0) return []
 
   // THE RE-CHECK: hydrate re-applies tenant + scope + visibility + soft-delete; a row that
   // fails any predicate is missing from the map, so it can never become a Candidate.
-  const hydrated = await db.hydrateChunks(ids)
+  const hydrated = await db.hydrateChunks(ids, filter)
   const out: Candidate[] = []
   for (let rank = 0; rank < ids.length; rank++) {
     const id = ids[rank]

@@ -41,6 +41,7 @@ export {
   getStatsOp,
   getTokenSpendCore,
   getTokenSpendOp,
+  INGEST_DOCUMENT_OP,
   LIST_API_KEYS_OP,
   LIST_AUDIT_OP,
   LIST_BACKFILL_RUNS_OP,

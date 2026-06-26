@@ -39,12 +39,21 @@ const toBase64 = (buf: ArrayBuffer): string => {
 
 type Tab = "paste" | "file"
 
-type SuccessResult = { slug: string; status: string; documentId: string | null; chunkCount: number }
+type SuccessResult = {
+  slug: string
+  status: string
+  documentId: string | null
+  chunkCount: number
+  tags: string
+  path: string
+}
 
 function IngestPage() {
   const [tab, setTab] = useState<Tab>("paste")
   const [title, setTitle] = useState("")
   const [slug, setSlug] = useState("")
+  const [tags, setTags] = useState("")
+  const [path, setPath] = useState("")
 
   // Paste tab state
   const [pasteText, setPasteText] = useState("")
@@ -107,12 +116,16 @@ function IngestPage() {
 
     setLoading(true)
     const body = toBase64(buf)
+    const submittedTags = tags.trim()
+    const submittedPath = path.trim()
     const res = await ingestDocument({
       data: {
         contentType,
         body,
         ...(slug.trim() ? { slug: slug.trim() } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
+        ...(submittedTags ? { tags: submittedTags } : {}),
+        ...(submittedPath ? { path: submittedPath } : {}),
       },
     })
     setLoading(false)
@@ -123,6 +136,8 @@ function IngestPage() {
         status: res.data.status,
         documentId: res.data.documentId,
         chunkCount: res.data.chunkCount,
+        tags: submittedTags,
+        path: submittedPath,
       })
     } else {
       setError(res.error)
@@ -247,6 +262,29 @@ function IngestPage() {
                   placeholder="my-document"
                 />
               </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="doc-tags" className="font-medium text-sm text-neutral-700">
+                  Tags{" "}
+                  <span className="font-normal text-neutral-400">(optional — comma-separated)</span>
+                </label>
+                <Input
+                  id="doc-tags"
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="architecture, api, v2"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="doc-path" className="font-medium text-sm text-neutral-700">
+                  Path <span className="font-normal text-neutral-400">(optional — namespace)</span>
+                </label>
+                <Input
+                  id="doc-path"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  placeholder="/project/x"
+                />
+              </div>
             </div>
 
             <Button type="submit" disabled={loading} className="w-fit">
@@ -273,7 +311,23 @@ function IngestPage() {
                 {success.status}
               </Badge>
               <span className="font-mono text-sm">{success.slug}</span>
+              {success.path && (
+                <span className="font-mono text-neutral-500 text-xs">{success.path}</span>
+              )}
             </div>
+            {success.tags && (
+              <div className="flex flex-wrap gap-1">
+                {success.tags
+                  .split(",")
+                  .map((t) => t.trim())
+                  .filter(Boolean)
+                  .map((t) => (
+                    <Badge key={t} variant="secondary">
+                      {t}
+                    </Badge>
+                  ))}
+              </div>
+            )}
             {success.status === "indexed" && (
               <p className="text-neutral-600 text-sm">
                 Indexed {success.chunkCount} chunk(s). The document is now searchable.

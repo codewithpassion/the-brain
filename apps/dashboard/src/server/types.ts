@@ -138,6 +138,8 @@ export interface DocumentRow {
   chunkCount: number
   userId: string
   createdAt: string
+  tags: string[]
+  path: string | null
 }
 
 export interface ListDocumentsResult {

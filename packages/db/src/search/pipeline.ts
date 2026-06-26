@@ -25,6 +25,12 @@ export interface HybridOptions {
   armTopK?: number
   /** Whether to run the cross-encoder rerank stage (`search`=off, `query`/`think`=on). */
   rerank: boolean
+  /**
+   * Optional namespace/tag filter applied during the D1 re-check.
+   * Note: Vectorize returns its full top-K BEFORE the re-check, so the effective
+   * candidate pool may shrink. Pushing the filter into Vectorize metadata is deferred.
+   */
+  filter?: { path?: string; tag?: string }
 }
 
 /**
@@ -45,8 +51,8 @@ export const hybridSearch = async (
 
   // Both arms run in parallel; each independently re-checks + hydrates through ScopedDB.
   const [vector, fts] = await Promise.all([
-    vectorArm(deps.db, deps.vectors, deps.ai, query, armTopK),
-    ftsArm(deps.db, query, armTopK),
+    vectorArm(deps.db, deps.vectors, deps.ai, query, armTopK, undefined, options.filter),
+    ftsArm(deps.db, query, armTopK, options.filter),
   ])
 
   const fused = rrfFusion([vector, fts], query).slice(0, candidateTop)

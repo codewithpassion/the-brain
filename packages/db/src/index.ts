@@ -21,6 +21,8 @@ export type { BrainBindings } from "./env"
 export * from "./governance"
 // ── Graph extraction + traversal + entity search (Phase 4) ─────────────────────
 export * from "./graph"
+// ── Ingest pipeline core (shared between API and MCP surface) ─────────────────
+export * from "./ingest"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"

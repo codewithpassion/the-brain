@@ -57,27 +57,37 @@ export const getSessionInfo = createServerFn({ method: "GET" }).handler(
 
 /** `think` — answer + evidence + citations over the tenant's ingested corpus. */
 export const think = createServerFn({ method: "POST" })
-  .validator((d: { query: string }) => d)
+  .validator((d: { query: string; path?: string }) => d)
   .handler(async ({ data }): Promise<Result<ThinkResult>> => {
     try {
-      const out = await brainCall<ThinkResult>("think", true, { query: data.query, topK: 12 })
+      const out = await brainCall<ThinkResult>("think", true, {
+        query: data.query,
+        topK: 12,
+        ...(data.path ? { path: data.path } : {}),
+      })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)
     }
   })
 
-/** `list_documents` — the full document catalog for this tenant. */
-export const getDocuments = createServerFn({ method: "GET" }).handler(
-  async (): Promise<Result<ListDocumentsResult>> => {
+/** `list_documents` — the full document catalog for this tenant, with optional filters. */
+export const getDocuments = createServerFn({ method: "POST" })
+  .validator((d: { tag?: string; path?: string; since?: string; until?: string }) => d)
+  .handler(async ({ data }): Promise<Result<ListDocumentsResult>> => {
     try {
-      const out = await brainCall<ListDocumentsResult>("list_documents", true, { limit: 100 })
+      const out = await brainCall<ListDocumentsResult>("list_documents", true, {
+        limit: 100,
+        ...(data.tag ? { tag: data.tag } : {}),
+        ...(data.path ? { path: data.path } : {}),
+        ...(data.since ? { since: data.since } : {}),
+        ...(data.until ? { until: data.until } : {}),
+      })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)
     }
-  },
-)
+  })
 
 /** Content search — DERIVED from a `search` hit-fold; used by the documents search box. */
 export const listDocuments = createServerFn({ method: "POST" })
@@ -253,7 +263,16 @@ export interface IngestResult {
  * for a uniform decode path server-side.
  */
 export const ingestDocument = createServerFn({ method: "POST" })
-  .validator((d: { contentType: string; body: string; slug?: string; title?: string }) => d)
+  .validator(
+    (d: {
+      contentType: string
+      body: string
+      slug?: string
+      title?: string
+      tags?: string
+      path?: string
+    }) => d,
+  )
   .handler(async ({ data }): Promise<Result<IngestResult>> => {
     try {
       const { token, tenant } = await resolveBrainAuth()
@@ -267,6 +286,8 @@ export const ingestDocument = createServerFn({ method: "POST" })
       const params = new URLSearchParams()
       if (data.slug) params.set("slug", data.slug)
       if (data.title) params.set("title", data.title)
+      if (data.tags) params.set("tags", data.tags)
+      if (data.path) params.set("path", data.path)
       const qs = params.size > 0 ? `?${params.toString()}` : ""
 
       const res = await env.BRAIN_API.fetch(`${apiBase}/documents${qs}`, {

@@ -72,6 +72,7 @@ export const chunks = sqliteTable(
     embeddingDims: integer("embedding_dims").notNull(),
     updatedAt: text("updated_at").notNull(), // drives computeStale (updated_at > embedded_at)
     deletedAt: text("deleted_at"), // soft-delete; search filters deleted_at IS NULL
+    path: text("path"), // namespace prefix mirrored from parent document, e.g. "/project/x"
   },
   (t) => [
     check("chunks_visibility_ck", enumCheck("visibility", VISIBILITIES)),

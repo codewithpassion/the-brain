@@ -33,33 +33,16 @@
  * `documents` row exists, and uses deterministic chunk ids so a retry replaces, never
  * duplicates.
  */
-import type { ScopedServices } from "@brain/db"
 import {
-  chunkDocument,
-  markdownPreview,
-  planParts,
-  toMarkdown,
-  UnsupportedContentTypeError,
-} from "@brain/ingest"
+  type BatchIngestParams,
+  type BatchIngestResult,
+  runBatchIngestCore,
+  type ScopedServices,
+} from "@brain/db"
 import type { Principal } from "@brain/shared"
-import { EMBED_BATCH_SIZE, EMBEDDING_MODEL } from "@brain/shared"
 import { runEntityExtraction } from "./entity-extraction"
 
-/** Per-document ingestion inputs — R2 *references* only (cap-safe), never an inline body. */
-export interface BatchIngestParams {
-  /** The pre-inserted `documents` row id this run finalizes. */
-  documentId: string
-  /** Tenant-RELATIVE R2 key of the raw body (`ScopedR2` adds the `${tenantId}/` prefix). */
-  r2Key: string
-  /** Content type of the raw body; decides extraction + chunking strategy. */
-  contentType: string
-  /** Mirrored onto every chunk (the `allowedScopes` data-partition gate). */
-  scope?: string | null
-  /** Mirrored when `visibility === 'team'`. */
-  teamId?: string | null
-  /** Intra-tenant access tier for the produced chunks (default `world`). */
-  visibility?: string
-}
+export type { BatchIngestParams, BatchIngestResult }
 
 /** The serializable payload the deploy-time `BatchIngestWorkflow` carries (workflow.ts). */
 export interface BatchIngestWorkflowParams {
@@ -69,112 +52,22 @@ export interface BatchIngestWorkflowParams {
   ingest: BatchIngestParams
 }
 
-export interface BatchIngestResult {
-  documentId: string
-  chunkCount: number
-  status: "indexed" | "failed"
-}
-
-/** Deterministic chunk id (`${documentId}:${chunkIndex}`) → retries replace, never duplicate. */
-const chunkId = (documentId: string, chunkIndex: number): string => `${documentId}:${chunkIndex}`
-
+/**
+ * Full ingest pipeline = `runBatchIngestCore` (steps 1–6: chunk + embed + finalize) + KG entity
+ * extraction (Phase 4, non-fatal). The core lives in `@brain/db` so the surface catalog can call
+ * it for the MCP/CLI inline path without needing `cloudflare:workers` from `runEntityExtraction`.
+ */
 export const runBatchIngest = async (
   services: ScopedServices,
   params: BatchIngestParams,
 ): Promise<BatchIngestResult> => {
-  const { documentId } = params
+  const result = await runBatchIngestCore(services, params)
 
-  // 1. status → processing.
-  await services.db.updateDocumentStatus(documentId, { status: "processing" })
-
-  // 2. extract → markdown. Body is read from R2 (a staged reference), never passed inline.
-  const obj = await services.blobs.get(params.r2Key)
-  if (obj === null) {
-    await services.db.updateDocumentStatus(documentId, { status: "failed" })
-    throw new Error(`ingest: body not found in R2 at "${params.r2Key}"`)
-  }
-  const raw = await obj.text()
-
-  let markdown: string
-  try {
-    markdown = toMarkdown(raw, params.contentType)
-  } catch (err) {
-    if (err instanceof UnsupportedContentTypeError) {
-      // TODO(P-later): binary/HTML extraction via the CF document converter (`env.AI.toMarkdown`),
-      // surfaced as a new `ScopedServices.ai` chokepoint. The slice accepts text only; a binary
-      // body lands here and is marked failed rather than silently dropped.
-      await services.db.updateDocumentStatus(documentId, { status: "failed" })
-    }
-    throw err
+  // KG extraction (Phase 4). NON-FATAL: a failure never fails ingest — the doc is indexed
+  // regardless. At deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
+  if (result.status !== "failed") {
+    await runEntityExtraction(services, params.documentId).catch(() => undefined)
   }
 
-  // Empty extraction → failed branch (§4.11): never index a zero-chunk document.
-  if (markdown.trim().length === 0) {
-    await services.db.updateDocumentStatus(documentId, { status: "failed" })
-    return { documentId, chunkCount: 0, status: "failed" }
-  }
-
-  // 3. chunk + part plan. `planParts` proves the §4.3 ceilings; slice docs are a single part.
-  const docChunks = chunkDocument(markdown, { contentType: params.contentType })
-  const parts = planParts(docChunks)
-  if (parts.length > 1) {
-    // TODO(P-later): materialize each ChunkPart as its own `documents` row sharing
-    // `parent_document_id`/`part_index` (§4.3), staging each part body in R2. The slice's
-    // small docs never split; we process the single part below.
-  }
-
-  // 4. insert chunks (tenant_id forced, FTS5 shadow kept in step by DB triggers).
-  const chunkRows = docChunks.map((chunk) => ({
-    id: chunkId(documentId, chunk.chunkIndex),
-    documentId,
-    chunkIndex: chunk.chunkIndex,
-    content: chunk.content,
-    headingPath: chunk.headingPath,
-    tokenCount: chunk.tokenCount,
-    scope: params.scope ?? null,
-    teamId: params.teamId ?? null,
-    visibility: params.visibility ?? "world",
-  }))
-  await services.db.insertChunks(chunkRows)
-
-  // 5. embed (write-path, throws → Workflow retry) → vectorize upsert → mark embedded.
-  const embeddedAt = new Date().toISOString()
-  for (let i = 0; i < chunkRows.length; i += EMBED_BATCH_SIZE) {
-    const batch = chunkRows.slice(i, i + EMBED_BATCH_SIZE)
-    const vectors = await services.ai.embedForIndex(batch.map((row) => row.content))
-    for (let j = 0; j < batch.length; j++) {
-      const row = batch[j]
-      const values = vectors[j]
-      if (row === undefined || values === undefined) continue
-      // Vector first: if the upsert throws the chunk stays un-embedded (embedded_at NULL),
-      // so a retry re-embeds it — we never leave an indexed-but-unvectored chunk.
-      await services.vectors.upsert({
-        id: row.id,
-        values,
-        scope: row.scope,
-        teamId: row.teamId,
-        visibility: row.visibility,
-        embeddingModel: EMBEDDING_MODEL,
-      })
-      await services.db.updateChunkEmbedding(row.id, {
-        embeddingModel: EMBEDDING_MODEL,
-        embeddedAt,
-      })
-    }
-  }
-
-  // 6. KG extraction (Phase 4). NON-FATAL: a failure never fails ingest — the doc is indexed
-  //    regardless (runEntityExtraction never throws; the .catch is belt-and-suspenders). At
-  //    deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
-  await runEntityExtraction(services, documentId).catch(() => undefined)
-
-  // 7. finalize → indexed (D1 keeps the preview only — invariant 13).
-  await services.db.updateDocumentStatus(documentId, {
-    status: "indexed",
-    markdownPreview: markdownPreview(markdown),
-    chunkCount: chunkRows.length,
-    ingestedAt: embeddedAt,
-  })
-
-  return { documentId, chunkCount: chunkRows.length, status: "indexed" }
+  return result
 }

@@ -289,3 +289,94 @@ describe("breakGlass (invariant 8)", () => {
     expect(events).toEqual(["incident-42"])
   })
 })
+
+// ── Path + tag filter in recheckChunks (Task #11 / MCP addition) ─────────────
+
+describe("ScopedDB re-check path/tag filter (search filter in D1 re-check)", () => {
+  /** Seed a document with optional path + tags, and one chunk under it.
+   * The path is mirrored onto the chunk row (matching the production insertChunks behaviour). */
+  const seedDoc = (
+    sqlite: ReturnType<typeof makeDb>["sqlite"],
+    opts: { docId: string; chunkId: string; path?: string; tags?: string[] },
+  ): void => {
+    const tagsJson = JSON.stringify(opts.tags ?? [])
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path, tags)
+       VALUES (?, 't1', 'userA', ?, 'indexed', ?, ?, ?)`,
+      [opts.docId, `slug-${opts.docId}`, `fp-${opts.docId}`, opts.path ?? null, tagsJson],
+    )
+    sqlite.run(
+      `INSERT INTO chunks (id, tenant_id, document_id, visibility, chunk_index, content, embedding_model, embedding_dims, updated_at, path)
+       VALUES (?, 't1', ?, 'world', 0, 'content', '@cf/baai/bge-m3', 1024, '2026-01-01T00:00:00.000Z', ?)`,
+      [opts.chunkId, opts.docId, opts.path ?? null],
+    )
+  }
+
+  test("path filter: matches exact path and true children, excludes siblings", async () => {
+    const { sqlite, db } = makeDb()
+    seedDoc(sqlite, { docId: "d1", chunkId: "c1", path: "/project" }) // exact match
+    seedDoc(sqlite, { docId: "d2", chunkId: "c2", path: "/project/x" }) // child
+    seedDoc(sqlite, { docId: "d3", chunkId: "c3", path: "/projectfoo" }) // sibling — must NOT match
+    seedDoc(sqlite, { docId: "d4", chunkId: "c4", path: "/other" }) // unrelated — must NOT match
+    seedDoc(sqlite, { docId: "d5", chunkId: "c5" }) // no path — must NOT match
+
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    const ids = await sdb.getChunksByIds(["c1", "c2", "c3", "c4", "c5"], { path: "/project" })
+    expect(ids.map((r) => r.id).sort()).toEqual(["c1", "c2"])
+  })
+
+  test("tag filter: exact element match, non-vacuous against substring", async () => {
+    const { sqlite, db } = makeDb()
+    seedDoc(sqlite, { docId: "d1", chunkId: "c1", tags: ["alpha", "beta"] })
+    seedDoc(sqlite, { docId: "d2", chunkId: "c2", tags: ["gamma"] })
+    seedDoc(sqlite, { docId: "d3", chunkId: "c3", tags: [] })
+
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+
+    // "alpha" matches d1 only
+    const byAlpha = await sdb.getChunksByIds(["c1", "c2", "c3"], { tag: "alpha" })
+    expect(byAlpha.map((r) => r.id)).toEqual(["c1"])
+
+    // Substring "alph" must NOT match (json_each exact, not LIKE)
+    const bySubstr = await sdb.getChunksByIds(["c1", "c2", "c3"], { tag: "alph" })
+    expect(bySubstr).toHaveLength(0)
+  })
+
+  test("path + tag combined: must satisfy both predicates", async () => {
+    const { sqlite, db } = makeDb()
+    seedDoc(sqlite, { docId: "d1", chunkId: "c1", path: "/project", tags: ["alpha"] }) // both ✓
+    seedDoc(sqlite, { docId: "d2", chunkId: "c2", path: "/project", tags: ["beta"] }) // path only
+    seedDoc(sqlite, { docId: "d3", chunkId: "c3", path: "/other", tags: ["alpha"] }) // tag only
+
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    const rows = await sdb.getChunksByIds(["c1", "c2", "c3"], { path: "/project", tag: "alpha" })
+    expect(rows.map((r) => r.id)).toEqual(["c1"])
+  })
+
+  test("two-tenant: filter never leaks cross-tenant chunks", async () => {
+    const { sqlite, db } = makeDb()
+    // t1 chunk under /project (path mirrored to chunk)
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path)
+       VALUES ('d-t1', 't1', 'userA', 'slug-t1', 'indexed', 'fp-t1', '/project')`,
+    )
+    sqlite.run(
+      `INSERT INTO chunks (id, tenant_id, document_id, visibility, chunk_index, content, embedding_model, embedding_dims, updated_at, path)
+       VALUES ('c-t1', 't1', 'd-t1', 'world', 0, 'text', '@cf/baai/bge-m3', 1024, '2026-01-01T00:00:00.000Z', '/project')`,
+    )
+    // t2 chunk also under /project (path mirrored to chunk)
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, path)
+       VALUES ('d-t2', 't2', 'userA', 'slug-t2', 'indexed', 'fp-t2', '/project')`,
+    )
+    sqlite.run(
+      `INSERT INTO chunks (id, tenant_id, document_id, visibility, chunk_index, content, embedding_model, embedding_dims, updated_at, path)
+       VALUES ('c-t2', 't2', 'd-t2', 'world', 0, 'text', '@cf/baai/bge-m3', 1024, '2026-01-01T00:00:00.000Z', '/project')`,
+    )
+
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    // Even if the vector arm surfaced c-t2, the re-check scoped to t1 must drop it
+    const rows = await sdb.getChunksByIds(["c-t1", "c-t2"], { path: "/project" })
+    expect(rows.map((r) => r.id)).toEqual(["c-t1"])
+  })
+})

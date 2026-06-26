@@ -132,6 +132,8 @@ export const SEARCH_OP = defineOp({
     query: z.string().min(1),
     topK: z.number().int().min(1).max(50).default(12),
     scope: z.string().optional(),
+    path: z.string().optional(), // restrict to documents under this path prefix (or exact)
+    tag: z.string().optional(), // restrict to documents containing this tag
   }),
   output: z.object({
     hits: z.array(SearchHitSchema),
@@ -148,6 +150,8 @@ export const THINK_OP = defineOp({
     query: z.string().min(1),
     topK: z.number().int().min(1).max(50).default(12),
     scope: z.string().optional(),
+    path: z.string().optional(), // restrict to documents under this path prefix (or exact)
+    tag: z.string().optional(), // restrict to documents containing this tag
   }),
   output: z.object({
     answer: z.string(),

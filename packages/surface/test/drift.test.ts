@@ -90,6 +90,36 @@ describe("surface drift", () => {
     expect(sorted(tools.map((t) => t.name))).toEqual(sorted(readMcp))
   })
 
+  test("list_documents is on the MCP surface (readable by any principal with read cap)", () => {
+    const readPrincipal: Principal = {
+      ...ADMIN,
+      role: "member",
+      capabilities: ["read"],
+      readOnly: false,
+    }
+    const tools = buildMcpTools(readPrincipal)
+    expect(tools.some((t) => t.name === "list_documents")).toBe(true)
+  })
+
+  test("ingest_document is on the MCP surface (visible to a write-capable principal)", () => {
+    const writePrincipal: Principal = {
+      ...ADMIN,
+      role: "member",
+      capabilities: ["read", "write"],
+      readOnly: false,
+    }
+    const tools = buildMcpTools(writePrincipal)
+    expect(tools.some((t) => t.name === "ingest_document")).toBe(true)
+    // ingest_document is a write tool — must not appear for read-only principals
+    const readOnly: Principal = {
+      ...ADMIN,
+      role: "readonly",
+      capabilities: ["read"],
+      readOnly: true,
+    }
+    expect(buildMcpTools(readOnly).some((t) => t.name === "ingest_document")).toBe(false)
+  })
+
   test("MCP inputSchema is a JSON-Schema object derived from the op's Zod input", () => {
     const think = buildMcpTools(ADMIN).find((tool) => tool.name === "think")
     expect(think).toBeDefined()

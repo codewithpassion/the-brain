@@ -24,6 +24,7 @@ export const Route = createFileRoute("/")({
 
 function SearchPage() {
   const [query, setQuery] = useState("")
+  const [namespace, setNamespace] = useState("")
   const [result, setResult] = useState<ThinkResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -34,7 +35,8 @@ function SearchPage() {
     if (q.length === 0 || loading) return
     setLoading(true)
     setError(null)
-    const response = await think({ data: { query: q } })
+    const ns = namespace.trim()
+    const response = await think({ data: { query: q, ...(ns ? { path: ns } : {}) } })
     if (response.ok) {
       setResult(response.data)
     } else {
@@ -53,16 +55,28 @@ function SearchPage() {
         </p>
       </header>
 
-      <form onSubmit={onSubmit} className="flex gap-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. What did we decide about the isolation canary?"
-          aria-label="Question"
-        />
-        <Button type="submit" disabled={loading}>
-          {loading ? "Thinking…" : "Think"}
-        </Button>
+      <form onSubmit={onSubmit} className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="e.g. What did we decide about the isolation canary?"
+            aria-label="Question"
+          />
+          <Button type="submit" disabled={loading}>
+            {loading ? "Thinking…" : "Think"}
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={namespace}
+            onChange={(e) => setNamespace(e.target.value)}
+            placeholder="Path / namespace (optional, e.g. /project/x)"
+            aria-label="Path namespace"
+            className="max-w-72 h-8 text-sm"
+          />
+          {namespace && <span className="text-neutral-400 text-xs">scoped to {namespace}</span>}
+        </div>
       </form>
 
       {error !== null && (

@@ -61,6 +61,17 @@ interface AuditSpec {
 }
 
 /**
+ * Optional filter applied during the D1 re-check (recheckChunks). Both predicates join to
+ * the already-inner-joined `documents` table, so they scope retrieval by namespace/tag.
+ */
+export interface ScopedSearchFilter {
+  /** Restrict to documents whose path equals or is a child of this prefix. */
+  path?: string
+  /** Restrict to documents whose tags JSON array contains this exact value. */
+  tag?: string
+}
+
+/**
  * Normalize a path namespace string:
  *   - Collapse duplicate slashes, ensure a leading "/", remove trailing "/".
  *   - Returns null for absent/empty input.
@@ -271,8 +282,13 @@ export class ScopedDB {
    * predicate is simply absent from the result — dropped, never errored. The id list is
    * chunked into `CHUNK_DB_BATCH_SIZE` groups to respect D1's 100 bound-param cap
    * (invariant 11). `breakGlass` drops only the visibility arm; tenant + scope stay.
+   * Optional `filter` restricts by document path prefix and/or tag (via json_each).
    */
-  private async recheckChunks(ids: string[], breakGlass = false): Promise<ScopedChunk[]> {
+  private async recheckChunks(
+    ids: string[],
+    breakGlass = false,
+    filter?: ScopedSearchFilter,
+  ): Promise<ScopedChunk[]> {
     if (ids.length === 0) return []
     const out: ScopedChunk[] = []
     for (let i = 0; i < ids.length; i += CHUNK_DB_BATCH_SIZE) {
@@ -298,6 +314,15 @@ export class ScopedDB {
             isNull(chunks.deletedAt),
             scopePredicate(this.p, chunks.scope),
             breakGlass ? undefined : visibilityPredicate(this.p, visibilityCols.chunk),
+            // path filter on the INNER-JOINed documents table:
+            // exact match OR true child (e.g. /project matches /project/x but not /projectfoo).
+            filter?.path !== undefined
+              ? sql`(${documents.path} = ${filter.path} OR ${documents.path} LIKE ${`${filter.path}/%`})`
+              : undefined,
+            // tag filter: document's JSON tags array contains this exact value (exact element match).
+            filter?.tag !== undefined
+              ? sql`EXISTS (SELECT 1 FROM json_each(${documents.tags}) WHERE value = ${filter.tag})`
+              : undefined,
           ),
         )
       out.push(...rows)
@@ -306,13 +331,16 @@ export class ScopedDB {
   }
 
   /** Re-check a set of ids (from a vector OR FTS arm) → the surviving scoped chunk rows. */
-  async getChunksByIds(ids: string[]): Promise<ScopedChunk[]> {
-    return this.recheckChunks(ids)
+  async getChunksByIds(ids: string[], filter?: ScopedSearchFilter): Promise<ScopedChunk[]> {
+    return this.recheckChunks(ids, false, filter)
   }
 
   /** Same re-check, keyed by id for the caller to re-attach vector/FTS scores by id. */
-  async hydrateChunks(ids: string[]): Promise<Map<string, ScopedChunk>> {
-    const rows = await this.recheckChunks(ids)
+  async hydrateChunks(
+    ids: string[],
+    filter?: ScopedSearchFilter,
+  ): Promise<Map<string, ScopedChunk>> {
+    const rows = await this.recheckChunks(ids, false, filter)
     return new Map(rows.map((row) => [row.id, row]))
   }
 

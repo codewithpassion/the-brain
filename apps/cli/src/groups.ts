@@ -21,6 +21,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   query: "search",
   think: "search",
   list_documents: "search",
+  ingest_document: "search",
   // graph
   traverse_graph: "graph",
   get_links: "graph",

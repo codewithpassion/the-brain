@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@brain/db": "workspace:*",
+    "@brain/ingest": "workspace:*",
     "@brain/shared": "workspace:*",
     "@trpc/server": "^11.18.0",
     "zod": "^3.25.76"

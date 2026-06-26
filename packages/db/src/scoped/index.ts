@@ -10,6 +10,7 @@ export type {
   ScopedChunk,
   ScopedDocument,
   ScopedFact,
+  ScopedSearchFilter,
   UpdateChunkEmbeddingInput,
   UpdateDocumentStatusInput,
   UpsertMemoryPolicyInput,

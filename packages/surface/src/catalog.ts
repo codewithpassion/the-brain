@@ -35,17 +35,20 @@ import {
   GRAPH_OPS,
   type GraphOpDeps,
   getSessionContext,
+  INGEST_DOCUMENT_OP,
   LIST_SNAPSHOTS_OP,
   listSnapshots,
   MEMORY_REVIEW_OP,
   makeBudgetPort,
   makeRecallSink,
+  normalizePath,
   queryOp,
   RECALL_OP,
   type RecallRequest,
   type RetrievalInput,
   recall,
   recordThinkSpend,
+  runBatchIngestCore,
   runSessionPromote,
   type ScopedServices,
   type SearchDeps,
@@ -54,6 +57,7 @@ import {
   type ThinkResult,
   thinkOp,
 } from "@brain/db"
+import { fingerprint, toMarkdown } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
 import type { SurfaceContext } from "./context"
 
@@ -63,11 +67,19 @@ export interface SurfaceOp {
   invoke: (ctx: SurfaceContext, input: unknown) => Promise<unknown>
 }
 
-/** Drop an absent `scope` so the value satisfies `exactOptionalPropertyTypes` (no forced `undefined`). */
-const retrievalInput = (raw: { query: string; topK: number; scope?: string }): RetrievalInput => ({
+/** Drop absent optionals so the value satisfies `exactOptionalPropertyTypes` (no forced `undefined`). */
+const retrievalInput = (raw: {
+  query: string
+  topK: number
+  scope?: string
+  path?: string
+  tag?: string
+}): RetrievalInput => ({
   query: raw.query,
   topK: raw.topK,
   ...(raw.scope !== undefined ? { scope: raw.scope } : {}),
+  ...(raw.path !== undefined ? { path: raw.path } : {}),
+  ...(raw.tag !== undefined ? { tag: raw.tag } : {}),
 })
 
 /** Compose the concrete `SearchDeps` (budget 429 pre-check + waitUntil recall sink) from services. */
@@ -84,7 +96,13 @@ const searchSurfaceOp = (op: BoundOp<RetrievalInput, unknown>): SurfaceOp => ({
   def: op.def,
   invoke: async (ctx, input) => {
     const services = createScopedServices(ctx.env, ctx.principal)
-    const parsed = op.def.input.parse(input) as { query: string; topK: number; scope?: string }
+    const parsed = op.def.input.parse(input) as {
+      query: string
+      topK: number
+      scope?: string
+      path?: string
+      tag?: string
+    }
     const out = await op.handler(
       { deps: buildSearchDeps(ctx, services), principal: ctx.principal },
       retrievalInput(parsed),
@@ -266,10 +284,93 @@ const adminSurfaceOp = (op: AdminBoundOp<unknown, unknown>): SurfaceOp => ({
     op.handler({ env: ctx.env, principal: ctx.principal }, op.def.input.parse(input)),
 })
 
+// ── Ingest family (ingest_document) ───────────────────────────────────────────
+
 /**
- * The full surface catalog (search → graph → session → governance → admin). The order is purely
- * cosmetic; the generators key off `def.surfaces` / `def.name`, and the drift test asserts every
- * registry op is present here.
+ * `ingest_document` — fingerprint → R2 → insertDocument → BATCH_INGEST workflow (or inline).
+ * Accepts text/markdown and text/plain content. Normalizes path, stores tags as a JSON array,
+ * and sets created_at via insertDocument's forced `now`. Mirrors the POST /documents REST route.
+ */
+const ingestDocumentSurfaceOp: SurfaceOp = {
+  def: INGEST_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const parsed = INGEST_DOCUMENT_OP.input.parse(input) as {
+      content: string
+      title?: string
+      path?: string
+      tags?: string[]
+      contentType: "text/markdown" | "text/plain"
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const contentType = parsed.contentType
+    const markdown = toMarkdown(parsed.content, contentType)
+    if (markdown.trim().length === 0) {
+      throw new Error("ingest_document: extracted markdown is empty — nothing to ingest")
+    }
+    const fp = await fingerprint(markdown)
+    const slug = `doc-${fp.slice(0, 12)}`
+    const documentId = crypto.randomUUID()
+    const r2Key = `documents/${documentId}`
+
+    // Insert the documents row; catch the UNIQUE-constraint conflict → dedup response.
+    let docId: string
+    try {
+      docId = await services.db.insertDocument({
+        id: documentId,
+        slug,
+        fingerprint: fp,
+        contentType: "text/markdown",
+        bodyR2Key: r2Key,
+        status: "pending",
+        ...(parsed.title !== undefined ? { title: parsed.title } : {}),
+        ...(parsed.tags !== undefined ? { tags: parsed.tags } : {}),
+        ...(parsed.path !== undefined ? { path: normalizePath(parsed.path) } : {}),
+      })
+    } catch {
+      const existing = (await services.db.listDocuments()).find(
+        (doc) => doc.fingerprint === fp || doc.slug === slug,
+      )
+      return {
+        documentId: existing?.id ?? null,
+        slug: existing?.slug ?? slug,
+        status: "duplicate",
+        chunkCount: 0,
+      }
+    }
+
+    // Body (extracted markdown) → R2 before triggering the pipeline.
+    await services.blobs.put(r2Key, markdown)
+
+    const normalizedPath = parsed.path !== undefined ? normalizePath(parsed.path) : null
+    const ingestParams = {
+      documentId: docId,
+      r2Key,
+      contentType: "text/markdown",
+      scope: null,
+      ...(normalizedPath !== null ? { path: normalizedPath } : {}),
+    }
+
+    // Deploy: dispatch the durable BATCH_INGEST Workflow; local/test: run inline.
+    const workflow = ctx.env.BATCH_INGEST
+    if (workflow) {
+      await workflow.create({
+        id: `ingest-${ctx.principal.tenantId}-${fp}`,
+        params: { principal: ctx.principal, ingest: ingestParams },
+      })
+      return { documentId: docId, slug, status: "accepted", chunkCount: 0 }
+    }
+
+    const result = await runBatchIngestCore(services, ingestParams)
+    // runBatchIngestCore returns "indexed" | "failed"; both map to "indexed" in the surface
+    // contract (a "failed" result throws inside runBatchIngestCore before returning "failed").
+    return { documentId: docId, slug, status: "indexed" as const, chunkCount: result.chunkCount }
+  },
+}
+
+/**
+ * The full surface catalog (search → graph → session → governance → ingest → admin). The order is
+ * purely cosmetic; the generators key off `def.surfaces` / `def.name`, and the drift test asserts
+ * every registry op is present here.
  */
 export const buildCatalog = (): readonly SurfaceOp[] => [
   searchSurfaceOp(searchOp),
@@ -286,5 +387,6 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   memoryReviewSurfaceOp,
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,
+  ingestDocumentSurfaceOp,
   ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
 ]

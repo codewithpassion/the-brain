@@ -1368,6 +1368,38 @@ export const revokeApiKeyOp: AdminBoundOp<{ keyId: string }, { keyId: string; re
     handler: (ctx, input) => revokeApiKeyCore(drizzle(ctx.env.DB), ctx.principal, input),
   }
 
+// ── INGEST_DOCUMENT_OP ────────────────────────────────────────────────────────
+
+/**
+ * `ingest_document` — ingest a document (text/markdown or text/plain) into the knowledge
+ * base with optional namespace path and tags. Capability `write`; surfaces all three.
+ * The full pipeline (fingerprint → R2 → documents row → chunk → embed → index) runs via the
+ * BATCH_INGEST Workflow when the binding is present, or inline otherwise. Handler lives in
+ * `packages/surface/src/catalog.ts` (it needs `ScopedServices` for R2/AI/Vectorize).
+ */
+export const INGEST_DOCUMENT_OP = defineOp({
+  name: "ingest_document",
+  description:
+    "Ingest a text document into the knowledge base. Accepts text/markdown or text/plain. " +
+    "Supports optional namespace path (e.g. /project/x) and tags array for filtering. " +
+    "Returns accepted (workflow-dispatched) or indexed (inline) status.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    content: z.string().min(1),
+    title: z.string().optional(),
+    path: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    contentType: z.enum(["text/markdown", "text/plain"]).optional().default("text/markdown"),
+  }),
+  output: z.object({
+    documentId: z.string().nullable(),
+    slug: z.string(),
+    status: z.enum(["accepted", "indexed", "duplicate"]),
+    chunkCount: z.number().int(),
+  }),
+})
+
 /** Every bound admin op. */
 export const ADMIN_OPS = [
   mintApiKeyOp,
@@ -1392,5 +1424,7 @@ export const ADMIN_OPS = [
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */
 export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   for (const op of ADMIN_OPS) registry.register(op.def)
+  // ingest_document: registered separately; handler lives in the surface catalog (needs ScopedServices)
+  registry.register(INGEST_DOCUMENT_OP)
   return registry
 }

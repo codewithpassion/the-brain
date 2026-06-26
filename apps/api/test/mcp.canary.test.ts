@@ -271,4 +271,53 @@ describe("MCP cross-tenant isolation canary (invariant 3) — real local D1 in w
     expect(row).not.toBeNull()
     expect(row?.user_id).toBe(principalA.userId)
   })
+
+  // ── ingest_document via MCP dispatch: path/tags + user_id provenance + chunks.path ──────────
+  // Prove the full surface→catalog→runBatchIngestCore path: ingest_document over MCP creates a
+  // documents row with path/tags, user_id = principal.userId, and the produced chunks carry path.
+  test("ingest_document via MCP: creates doc+chunks with path/tags, user_id=principal", async () => {
+    const content = "The needle is in the /project/ingest haystack for MCP ingestion."
+    const { text, isError } = await toolCall(principalA, "ingest_document", {
+      content,
+      title: "MCP Ingest Test",
+      path: "/project/ingest",
+      tags: ["mcp", "test"],
+      contentType: "text/markdown",
+    })
+    expect(isError).toBe(false)
+    const result = JSON.parse(text) as {
+      documentId?: string
+      slug?: string
+      status?: string
+      chunkCount?: number
+      deduped?: boolean
+    }
+    expect(typeof result.documentId).toBe("string")
+    expect(result.status === "indexed" || result.status === "accepted").toBe(true)
+    expect(typeof result.slug).toBe("string")
+
+    const docId = result.documentId as string
+
+    // Verify documents row: user_id = principal.userId (provenance forced), path and tags recorded.
+    const docRow = await env_.DB.prepare(
+      "SELECT user_id, path, tags FROM documents WHERE id = ? AND tenant_id = ?",
+    )
+      .bind(docId, principalA.tenantId)
+      .first<{ user_id: string; path: string | null; tags: string }>()
+    expect(docRow).not.toBeNull()
+    expect(docRow?.user_id).toBe(principalA.userId)
+    expect(docRow?.path).toBe("/project/ingest")
+    expect(JSON.parse(docRow?.tags ?? "[]")).toContain("mcp")
+
+    // Verify chunks: path mirrored from document (only when status = indexed, not accepted).
+    if (result.status === "indexed") {
+      const chunkRow = await env_.DB.prepare(
+        "SELECT path FROM chunks WHERE document_id = ? AND tenant_id = ? LIMIT 1",
+      )
+        .bind(docId, principalA.tenantId)
+        .first<{ path: string | null }>()
+      expect(chunkRow).not.toBeNull()
+      expect(chunkRow?.path).toBe("/project/ingest")
+    }
+  })
 })
