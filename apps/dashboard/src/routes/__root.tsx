@@ -30,6 +30,7 @@ export const Route = createRootRoute({
 const NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Search" },
   { to: "/documents", label: "Documents" },
+  { to: "/ingest", label: "Add" },
   { to: "/stats", label: "Admin / Stats" },
   { to: "/graph", label: "Graph" },
   { to: "/sessions", label: "Sessions" },

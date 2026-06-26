@@ -34,6 +34,7 @@ import { fingerprint, toMarkdown } from "@brain/ingest"
 import {
   type AnyOpDef,
   INGEST_WEBHOOK_MAX_BYTES,
+  MAX_BODY_BYTES,
   type Principal,
   SEARCH_OP,
   THINK_OP,
@@ -72,6 +73,35 @@ import {
 
 /** Content types the slice accepts directly (passthrough + normalize; §4.3). */
 const ALLOWED_CONTENT_TYPES = new Set(["text/markdown", "text/plain"])
+
+/**
+ * Content types handled via CF Workers AI `toMarkdown` conversion (the `ai.toMarkdown`
+ * chokepoint in `ScopedServices`). The upload endpoint accepts these in addition to the
+ * text passthrough types above.
+ */
+const AI_MARKDOWN_TYPES = new Set([
+  "text/html",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+])
+
+/** Map a content-type to a short extension for the `env.AI.toMarkdown` `name` field. */
+const extForContentType = (contentType: string): string => {
+  const map: Record<string, string> = {
+    "text/html": "html",
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+  }
+  return map[contentType] ?? "bin"
+}
 
 /** A function that builds the per-request scoped service bundle (injectable for tests). */
 export type MakeServices = (env: ApiBindings, principal: Principal) => ScopedServices
@@ -295,6 +325,111 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     }
 
     // Trigger the durable Workflow at DEPLOY (binding present); run inline in test/local.
+    const workflow = options.inlineIngest ? undefined : c.env.BATCH_INGEST
+    if (workflow) {
+      await workflow.create({
+        id: `ingest-${principal.tenantId}-${fp}`,
+        params: { principal, ingest: ingestParams },
+      })
+      return c.json({ documentId: docId, slug, status: "accepted" as const, chunkCount: 0 })
+    }
+
+    const result = await runBatchIngest(services, ingestParams)
+    return c.json({ ...result, slug })
+  })
+
+  // ── POST /documents — browser / dashboard document upload (up to MAX_BODY_BYTES 8MiB). ──
+  //    Extends the /ingest pipeline to accept binary/HTML bodies via the `ai.toMarkdown`
+  //    chokepoint in `ScopedServices`. Text types are handled inline (same as /ingest).
+  //    Binary/HTML types are extracted to markdown first, then stored in R2 + run through
+  //    the same fingerprint → documents row → BatchIngest pipeline. The raw /ingest webhook
+  //    (256 KiB cap) is left unchanged for programmatic callers.
+  //
+  //    NOTE: Raw bytes are NOT stored in R2 — the extracted markdown is stored instead.
+  //    This is intentional: ai.toMarkdown for images uses LLM-generated descriptions that
+  //    are non-deterministic. Storing the extraction output deduplicates correctly and
+  //    avoids calling ai.toMarkdown twice (once for fingerprint + once in runBatchIngest).
+  app.post("/documents", async (c) => {
+    const principal = c.get("principal")
+    const services = makeServices(c.env, principal)
+
+    const buf = await c.req.arrayBuffer()
+    if (buf.byteLength > MAX_BODY_BYTES) {
+      throw new HttpError(413, `body exceeds the ${MAX_BODY_BYTES}-byte /documents cap`)
+    }
+    const contentType = baseContentType(c.req.header("content-type"))
+    const scope = c.req.query("scope") ?? undefined
+    const title = c.req.query("title") ?? undefined
+
+    // Extract to markdown. Text types → passthrough normalize; binary/HTML → ai.toMarkdown.
+    let markdown: string
+    if (ALLOWED_CONTENT_TYPES.has(contentType)) {
+      const raw = new TextDecoder().decode(buf)
+      markdown = toMarkdown(raw, contentType)
+    } else if (AI_MARKDOWN_TYPES.has(contentType)) {
+      if (!services.ai.toMarkdown) {
+        throw new HttpError(
+          415,
+          `content type "${contentType}" requires the AI document converter (ai.toMarkdown), which is unavailable on this provider`,
+        )
+      }
+      const ext = extForContentType(contentType)
+      const filename = c.req.header("x-filename") ?? `upload.${ext}`
+      markdown = await services.ai.toMarkdown(filename, buf)
+    } else {
+      throw new HttpError(
+        415,
+        `unsupported content type "${contentType}" — accepted: text/markdown, text/plain, text/html, application/pdf, DOCX, image/*`,
+      )
+    }
+
+    if (markdown.trim().length === 0) {
+      throw new HttpError(422, "extracted markdown is empty — nothing to ingest")
+    }
+
+    // Fingerprint + slug over the extracted markdown (formatting-insensitive dedup, invariant 15).
+    const fp = await fingerprint(markdown)
+    const slug = c.req.query("slug") ?? `doc-${fp.slice(0, 12)}`
+    const documentId = crypto.randomUUID()
+    const r2Key = `documents/${documentId}`
+
+    // Durable dedup: UNIQUE index on (tenant,scope,fingerprint)/(tenant,slug) → catch conflict.
+    let docId: string
+    try {
+      docId = await services.db.insertDocument({
+        id: documentId,
+        slug,
+        fingerprint: fp,
+        // Always store as text/markdown — binary bodies are already extracted above.
+        contentType: "text/markdown",
+        bodyR2Key: r2Key,
+        status: "pending",
+        ...(scope !== undefined ? { scope } : {}),
+        ...(title !== undefined ? { title } : {}),
+      })
+    } catch {
+      const existing = (await services.db.listDocuments()).find(
+        (doc) => doc.fingerprint === fp || doc.slug === slug,
+      )
+      return c.json({
+        documentId: existing?.id ?? null,
+        slug: existing?.slug ?? slug,
+        status: "duplicate" as const,
+        chunkCount: 0,
+        deduped: true,
+      })
+    }
+
+    // Body (extracted markdown) lives in R2; the pipeline reads it from there (invariant 13).
+    await services.blobs.put(r2Key, markdown)
+
+    const ingestParams: BatchIngestParams = {
+      documentId: docId,
+      r2Key,
+      contentType: "text/markdown",
+      scope: scope ?? null,
+    }
+
     const workflow = options.inlineIngest ? undefined : c.env.BATCH_INGEST
     if (workflow) {
       await workflow.create({

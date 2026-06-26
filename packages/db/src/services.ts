@@ -38,6 +38,12 @@ export interface ScopedServices {
     genExtract: (prompt: string, system?: string) => Promise<string | null>
     /** READ path — degrades to RRF/identity order. */
     rerank: (query: string, candidates: RerankCandidate[], topK: number) => Promise<RerankHit[]>
+    /**
+     * CF document converter — markdown extraction for binary/HTML bodies via `env.AI.toMarkdown`
+     * (the Workers AI Markdown Conversion API). OPTIONAL: absent on openai-compatible providers
+     * and in test stubs that omit it. The `/documents` upload handler returns 415 when absent.
+     */
+    toMarkdown?: (name: string, buf: ArrayBuffer) => Promise<string>
   }
 }
 
@@ -75,6 +81,15 @@ export const createScopedServices = (
       gen: (prompt, system) => gen(aiDeps, prompt, system),
       genExtract: (prompt, system) => genExtract(aiDeps, prompt, system),
       rerank: (query, candidates, topK) => rerank(aiDeps, query, candidates, topK),
+      toMarkdown: async (name: string, buf: ArrayBuffer): Promise<string> => {
+        const results = await env.AI.toMarkdown([
+          { name, blob: new Blob([buf], { type: "application/octet-stream" }) },
+        ])
+        const r = results[0]
+        if (r === undefined) throw new Error("toMarkdown: no result returned")
+        if (r.format === "error") throw new Error(r.error)
+        return r.data
+      },
     },
   }
 }

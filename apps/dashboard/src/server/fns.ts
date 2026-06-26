@@ -226,6 +226,60 @@ export const getBrainStats = createServerFn({ method: "GET" }).handler(
   },
 )
 
+// --- Document upload ---
+
+/** Ingest result returned by the API `/documents` endpoint. */
+export interface IngestResult {
+  documentId: string | null
+  slug: string
+  status: "indexed" | "accepted" | "duplicate"
+  chunkCount: number
+  deduped?: boolean
+}
+
+/**
+ * Upload a document to the brain via the `/documents` endpoint. The `body` field is
+ * always base64-encoded so the server fn transport (JSON) handles binary content types
+ * (PDF, DOCX, images) correctly. Text bodies are base64-encoded in the browser too,
+ * for a uniform decode path server-side.
+ */
+export const ingestDocument = createServerFn({ method: "POST" })
+  .validator((d: { contentType: string; body: string; slug?: string; title?: string }) => d)
+  .handler(async ({ data }): Promise<Result<IngestResult>> => {
+    try {
+      const { token, tenant } = await resolveBrainAuth()
+      const apiBase = (process.env.BRAIN_API_URL ?? "http://localhost:8787").replace(/\/$/, "")
+
+      // Decode base64 body → Uint8Array (works for both text and binary content).
+      const binaryStr = atob(data.body)
+      const bytes = new Uint8Array(binaryStr.length)
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+
+      const params = new URLSearchParams()
+      if (data.slug) params.set("slug", data.slug)
+      if (data.title) params.set("title", data.title)
+      const qs = params.size > 0 ? `?${params.toString()}` : ""
+
+      const res = await env.BRAIN_API.fetch(`${apiBase}/documents${qs}`, {
+        method: "POST",
+        headers: {
+          "content-type": data.contentType,
+          authorization: `Bearer ${token}`,
+          "x-brain-tenant": tenant,
+        },
+        body: bytes,
+      })
+      if (!res.ok) {
+        const payload = (await res.json()) as Record<string, unknown>
+        throw new Error(String(payload.error ?? `ingest failed (${res.status})`))
+      }
+      const result = (await res.json()) as IngestResult
+      return { ok: true, data: result }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
 // --- CLI device-flow activation ---
 
 /**
