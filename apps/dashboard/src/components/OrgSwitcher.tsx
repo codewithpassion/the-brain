@@ -6,7 +6,8 @@
  * reloads the page so all server data refreshes against the new tenant. The API re-checks
  * membership on every request, so a tampered cookie is inert — the API is authoritative.
  *
- * Creating: prompts for a name, calls `create_org`, switches to the new org's slug on success.
+ * Creating: shows an inline name+slug form (no browser prompt/alert/confirm), calls `create_org`,
+ * then switches to the new org's slug on success.
  */
 import { useEffect, useRef, useState } from "react"
 import { createOrg, getSessionInfo, listOrgs } from "../server/fns"

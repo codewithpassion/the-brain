@@ -10,6 +10,7 @@ import { createServerFn } from "@tanstack/react-start"
 import { brainCall, resolveBrainAuth } from "./brain"
 import { foldDocuments } from "./derive"
 import type {
+  AddMemberResult,
   BrainSessionInfo,
   BrainStats,
   CreateOrgResult,
@@ -23,10 +24,13 @@ import type {
   ListSessionsResult,
   MembershipsResult,
   RecallResult,
+  RemoveMemberResult,
   SearchResult,
+  SearchUserByEmailResult,
   ThinkResult,
   TokenSpend,
   TraversalResult,
+  UpdateMemberResult,
 } from "./types"
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -308,6 +312,67 @@ export const createOrg = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<Result<CreateOrgResult>> => {
     try {
       const out = await brainCall<CreateOrgResult>("create_org", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Membership management ---
+
+/**
+ * `search_user_by_email` (admin) — look up a Brain user by email via Clerk BAPI.
+ * Returns the user info or null if they haven't signed in yet.
+ */
+export const searchUserByEmail = createServerFn({ method: "POST" })
+  .validator((d: { email: string }) => d)
+  .handler(async ({ data }): Promise<Result<SearchUserByEmailResult>> => {
+    try {
+      const out = await brainCall<SearchUserByEmailResult>("search_user_by_email", true, {
+        email: data.email,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/**
+ * `add_member` (admin) — add a Brain user to the active org by email.
+ */
+export const addMember = createServerFn({ method: "POST" })
+  .validator((d: { email: string; role: string; allowedScopes?: string[] | "*" }) => d)
+  .handler(async ({ data }): Promise<Result<AddMemberResult>> => {
+    try {
+      const out = await brainCall<AddMemberResult>("add_member", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/**
+ * `update_member` (admin) — update a member's role or allowed scopes.
+ */
+export const updateMember = createServerFn({ method: "POST" })
+  .validator((d: { userId: string; role?: string; allowedScopes?: string[] | "*" }) => d)
+  .handler(async ({ data }): Promise<Result<UpdateMemberResult>> => {
+    try {
+      const out = await brainCall<UpdateMemberResult>("update_member", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/**
+ * `remove_member` (admin) — remove a member from the active org.
+ */
+export const removeMember = createServerFn({ method: "POST" })
+  .validator((d: { userId: string }) => d)
+  .handler(async ({ data }): Promise<Result<RemoveMemberResult>> => {
+    try {
+      const out = await brainCall<RemoveMemberResult>("remove_member", false, data)
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

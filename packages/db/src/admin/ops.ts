@@ -733,6 +733,384 @@ export const listOrgsOp: AdminBoundOp<Record<string, never>, { orgs: OrgListRow[
   handler: (ctx, _input) => listOrgsCore(drizzle(ctx.env.DB), ctx.principal),
 }
 
+// ── SEARCH_USER_BY_EMAIL_OP ───────────────────────────────────────────────────
+
+/**
+ * Internal shape of a Clerk BAPI user object (only the fields we consume).
+ * `GET https://api.clerk.com/v1/users?email_address=<email>` → array of these.
+ */
+interface ClerkBapiEmailAddress {
+  id: string
+  email_address: string
+}
+
+interface ClerkBapiUser {
+  id: string
+  email_addresses: ClerkBapiEmailAddress[]
+  primary_email_address_id: string | null
+  first_name: string | null
+  last_name: string | null
+  image_url: string
+}
+
+export interface ClerkUserResult {
+  userId: string
+  email: string
+  firstName?: string
+  lastName?: string
+  imageUrl?: string
+}
+
+/** `search_user_by_email` — look up a Brain user by email via the Clerk Backend API. */
+export const SEARCH_USER_BY_EMAIL_OP = defineOp({
+  name: "search_user_by_email",
+  description:
+    "Look up a Brain user by email address via the Clerk Backend API. Returns user info or null if not found (they must have signed in at least once).",
+  capability: "admin",
+  readOnly: true,
+  surfaces: ["rest"],
+  input: z.object({ email: z.string().email() }),
+  output: z.object({
+    user: z
+      .object({
+        userId: z.string(),
+        email: z.string(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        imageUrl: z.string().optional(),
+      })
+      .nullable(),
+  }),
+})
+
+/**
+ * `search_user_by_email` core — fetches from the Clerk BAPI. Injectable `fetcher` (default =
+ * global `fetch`) lets tests pass a stub without network access.
+ */
+export const searchUserByEmailCore = async (
+  clerkSecretKey: string | undefined,
+  email: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ClerkUserResult | null> => {
+  if (!clerkSecretKey) {
+    throw new AuthError(500, "CLERK_SECRET_KEY is not configured")
+  }
+  const url = `https://api.clerk.com/v1/users?email_address=${encodeURIComponent(email)}`
+  const resp = await fetcher(url, {
+    headers: { Authorization: `Bearer ${clerkSecretKey}` },
+  })
+  if (!resp.ok) {
+    throw new AuthError(502, `Clerk BAPI error: ${resp.status}`)
+  }
+  // The Clerk BAPI returns a bare array in most documented examples, but some versions wrap it in
+  // { data: [...] }. Tolerate both so a future Clerk update doesn't silently break lookups.
+  const payload = (await resp.json()) as ClerkBapiUser[] | { data: ClerkBapiUser[] }
+  const users = Array.isArray(payload)
+    ? payload
+    : ((payload as { data?: ClerkBapiUser[] }).data ?? [])
+  if (users.length === 0) return null
+  const user = users[0]
+  if (user === undefined) return null
+  const primaryEmail =
+    user.email_addresses.find((e) => e.id === user.primary_email_address_id)?.email_address ??
+    user.email_addresses[0]?.email_address ??
+    email
+  return {
+    userId: user.id,
+    email: primaryEmail,
+    ...(user.first_name ? { firstName: user.first_name } : {}),
+    ...(user.last_name ? { lastName: user.last_name } : {}),
+    ...(user.image_url ? { imageUrl: user.image_url } : {}),
+  }
+}
+
+export const searchUserByEmailOp: AdminBoundOp<
+  { email: string },
+  { user: ClerkUserResult | null }
+> = {
+  def: SEARCH_USER_BY_EMAIL_OP,
+  handler: (ctx, input) =>
+    searchUserByEmailCore(ctx.env.CLERK_SECRET_KEY, input.email).then((user) => ({ user })),
+}
+
+// ── ADD_MEMBER_OP ─────────────────────────────────────────────────────────────
+
+/** `add_member` — add a Brain user to the active org by email (owner/admin only). */
+export const ADD_MEMBER_OP = defineOp({
+  name: "add_member",
+  description:
+    "Add a Brain user to the active org by email (owner/admin only). The user must have signed in at least once. Rejects duplicates.",
+  capability: "admin",
+  readOnly: false,
+  surfaces: ["rest"],
+  input: z.object({
+    email: z.string().email(),
+    role: z.enum(["owner", "admin", "member", "readonly"]),
+    allowedScopes: ScopeGrantSchema.optional(),
+  }),
+  output: z.object({ userId: z.string(), membershipId: z.string() }),
+})
+
+export interface AddMemberInput {
+  email: string
+  role: "owner" | "admin" | "member" | "readonly"
+  allowedScopes?: readonly string[] | "*"
+}
+
+export const addMemberCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: AddMemberInput,
+  clerkSecretKey: string | undefined,
+  fetcher: typeof fetch = fetch,
+): Promise<{ userId: string; membershipId: string }> => {
+  assertAdmin(principal)
+
+  // Resolve email → Clerk userId via the BAPI.
+  const clerkUser = await searchUserByEmailCore(clerkSecretKey, input.email, fetcher)
+  if (!clerkUser) {
+    throw new AuthError(404, "no Brain user with that email — they must sign in once first")
+  }
+
+  const { userId } = clerkUser
+  const membershipId = `mem_${principal.tenantId}_${userId}`
+
+  // Reject duplicates (same user already a member of this tenant).
+  const existing = await db
+    .select({ id: membershipsTable.id })
+    .from(membershipsTable)
+    .where(
+      and(eq(membershipsTable.tenantId, principal.tenantId), eq(membershipsTable.userId, userId)),
+    )
+    .limit(1)
+  if (existing.length > 0) {
+    throw new AuthError(409, `user ${userId} is already a member of this org`)
+  }
+
+  const allowedScopes =
+    input.allowedScopes !== undefined
+      ? input.allowedScopes === "*"
+        ? null
+        : JSON.stringify(input.allowedScopes)
+      : null // NULL = '*' (unrestricted)
+
+  await db.insert(membershipsTable).values({
+    id: membershipId,
+    tenantId: principal.tenantId,
+    userId,
+    teamId: null,
+    role: input.role,
+    allowedScopes,
+  })
+
+  // Audit: actor = principal.userId, target = the newly added userId.
+  await db.insert(memoryAudit).values({
+    id: crypto.randomUUID(),
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    action: "member.add",
+    targetId: userId,
+    at: Date.now(),
+  })
+
+  return { userId, membershipId }
+}
+
+export const addMemberOp: AdminBoundOp<AddMemberInput, { userId: string; membershipId: string }> = {
+  def: ADD_MEMBER_OP,
+  handler: (ctx, input) =>
+    addMemberCore(drizzle(ctx.env.DB), ctx.principal, input, ctx.env.CLERK_SECRET_KEY),
+}
+
+// ── UPDATE_MEMBER_OP ──────────────────────────────────────────────────────────
+
+/** `update_member` — update a member's role or allowed scopes (owner/admin only). */
+export const UPDATE_MEMBER_OP = defineOp({
+  name: "update_member",
+  description:
+    "Update a member's role or allowed scopes in the active org (owner/admin only). Protects the last owner from demotion.",
+  capability: "admin",
+  readOnly: false,
+  surfaces: ["rest"],
+  input: z.object({
+    userId: z.string().min(1),
+    role: z.enum(["owner", "admin", "member", "readonly"]).optional(),
+    allowedScopes: ScopeGrantSchema.optional(),
+  }),
+  output: z.object({ userId: z.string(), updated: z.boolean() }),
+})
+
+export interface UpdateMemberInput {
+  userId: string
+  role?: "owner" | "admin" | "member" | "readonly"
+  allowedScopes?: readonly string[] | "*"
+}
+
+/** Count owner-role memberships in this tenant (for the last-owner guard). */
+const countOwners = async (db: BrainDrizzle, tenantId: string): Promise<number> => {
+  const rows = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(membershipsTable)
+    .where(and(eq(membershipsTable.tenantId, tenantId), eq(membershipsTable.role, "owner")))
+  return Number(rows[0]?.count ?? 0)
+}
+
+export const updateMemberCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: UpdateMemberInput,
+): Promise<{ userId: string; updated: boolean }> => {
+  assertAdmin(principal)
+
+  // Fetch the current membership to check role.
+  const existing = await db
+    .select({ id: membershipsTable.id, role: membershipsTable.role })
+    .from(membershipsTable)
+    .where(
+      and(
+        eq(membershipsTable.tenantId, principal.tenantId),
+        eq(membershipsTable.userId, input.userId),
+      ),
+    )
+    .limit(1)
+
+  if (existing.length === 0) {
+    throw new AuthError(404, `user ${input.userId} is not a member of this org`)
+  }
+
+  const current = existing[0]
+  if (current === undefined)
+    throw new AuthError(404, `user ${input.userId} is not a member of this org`)
+
+  // Last-owner guard: prevent demoting the last owner.
+  if (current.role === "owner" && input.role !== undefined && input.role !== "owner") {
+    const ownerCount = await countOwners(db, principal.tenantId)
+    if (ownerCount <= 1) {
+      throw new AuthError(409, "cannot demote the last owner of the org")
+    }
+  }
+
+  if (input.role === undefined && input.allowedScopes === undefined) {
+    return { userId: input.userId, updated: false }
+  }
+
+  await db
+    .update(membershipsTable)
+    .set({
+      ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.allowedScopes !== undefined
+        ? {
+            allowedScopes: input.allowedScopes === "*" ? null : JSON.stringify(input.allowedScopes),
+          }
+        : {}),
+    })
+    .where(
+      and(
+        eq(membershipsTable.tenantId, principal.tenantId),
+        eq(membershipsTable.userId, input.userId),
+      ),
+    )
+
+  const diff: Record<string, unknown> = {}
+  if (input.role !== undefined) diff.role = input.role
+  if (input.allowedScopes !== undefined) diff.allowedScopes = input.allowedScopes
+
+  await db.insert(memoryAudit).values({
+    id: crypto.randomUUID(),
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    action: "member.update",
+    targetId: input.userId,
+    at: Date.now(),
+    diff: JSON.stringify(diff),
+  })
+
+  return { userId: input.userId, updated: true }
+}
+
+export const updateMemberOp: AdminBoundOp<UpdateMemberInput, { userId: string; updated: boolean }> =
+  {
+    def: UPDATE_MEMBER_OP,
+    handler: (ctx, input) => updateMemberCore(drizzle(ctx.env.DB), ctx.principal, input),
+  }
+
+// ── REMOVE_MEMBER_OP ──────────────────────────────────────────────────────────
+
+/** `remove_member` — remove a member from the active org (owner/admin only). */
+export const REMOVE_MEMBER_OP = defineOp({
+  name: "remove_member",
+  description:
+    "Remove a member from the active org (owner/admin only). Protects the last owner from removal.",
+  capability: "admin",
+  readOnly: false,
+  surfaces: ["rest"],
+  input: z.object({ userId: z.string().min(1) }),
+  output: z.object({ userId: z.string(), removed: z.boolean() }),
+})
+
+export const removeMemberCore = async (
+  db: BrainDrizzle,
+  principal: Principal,
+  input: { userId: string },
+): Promise<{ userId: string; removed: boolean }> => {
+  assertAdmin(principal)
+
+  // Fetch the current membership to check role.
+  const existing = await db
+    .select({ id: membershipsTable.id, role: membershipsTable.role })
+    .from(membershipsTable)
+    .where(
+      and(
+        eq(membershipsTable.tenantId, principal.tenantId),
+        eq(membershipsTable.userId, input.userId),
+      ),
+    )
+    .limit(1)
+
+  if (existing.length === 0) {
+    return { userId: input.userId, removed: false }
+  }
+
+  const current = existing[0]
+  if (current === undefined) return { userId: input.userId, removed: false }
+
+  // Last-owner guard: prevent removing the last owner.
+  if (current.role === "owner") {
+    const ownerCount = await countOwners(db, principal.tenantId)
+    if (ownerCount <= 1) {
+      throw new AuthError(409, "cannot remove the last owner of the org")
+    }
+  }
+
+  await db
+    .delete(membershipsTable)
+    .where(
+      and(
+        eq(membershipsTable.tenantId, principal.tenantId),
+        eq(membershipsTable.userId, input.userId),
+      ),
+    )
+
+  await db.insert(memoryAudit).values({
+    id: crypto.randomUUID(),
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    action: "member.remove",
+    targetId: input.userId,
+    at: Date.now(),
+  })
+
+  return { userId: input.userId, removed: true }
+}
+
+export const removeMemberOp: AdminBoundOp<
+  { userId: string },
+  { userId: string; removed: boolean }
+> = {
+  def: REMOVE_MEMBER_OP,
+  handler: (ctx, input) => removeMemberCore(drizzle(ctx.env.DB), ctx.principal, input),
+}
+
 /** Every bound admin op. */
 export const ADMIN_OPS = [
   mintApiKeyOp,
@@ -745,6 +1123,10 @@ export const ADMIN_OPS = [
   getStatsOp,
   createOrgOp,
   listOrgsOp,
+  searchUserByEmailOp,
+  addMemberOp,
+  updateMemberOp,
+  removeMemberOp,
 ] as const
 
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */

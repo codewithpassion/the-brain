@@ -5,8 +5,10 @@
  * cannot drift; the handlers fail CLOSED on a non-admin caller where required.
  */
 export type {
+  AddMemberInput,
   AdminBoundOp,
   AdminOpContext,
+  ClerkUserResult,
   CreateOrgInput,
   GetStatsOutput,
   ListAuditEntry,
@@ -17,9 +19,13 @@ export type {
   MintApiKeyOpInput,
   OrgListRow,
   TokenSpendOpOutput,
+  UpdateMemberInput,
 } from "./ops"
 export {
+  ADD_MEMBER_OP,
   ADMIN_OPS,
+  addMemberCore,
+  addMemberOp,
   CREATE_ORG_OP,
   createOrgCore,
   createOrgOp,
@@ -50,5 +56,14 @@ export {
   membershipsOp,
   mintApiKeyCore,
   mintApiKeyOp,
+  REMOVE_MEMBER_OP,
   registerAdminOps,
+  removeMemberCore,
+  removeMemberOp,
+  SEARCH_USER_BY_EMAIL_OP,
+  searchUserByEmailCore,
+  searchUserByEmailOp,
+  UPDATE_MEMBER_OP,
+  updateMemberCore,
+  updateMemberOp,
 } from "./ops"

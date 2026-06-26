@@ -177,6 +177,35 @@ export interface CreateOrgResult {
   slug: string
 }
 
+// --- Membership management ---
+
+export interface SearchUserResult {
+  userId: string
+  email: string
+  firstName?: string
+  lastName?: string
+  imageUrl?: string
+}
+
+export interface SearchUserByEmailResult {
+  user: SearchUserResult | null
+}
+
+export interface AddMemberResult {
+  userId: string
+  membershipId: string
+}
+
+export interface UpdateMemberResult {
+  userId: string
+  updated: boolean
+}
+
+export interface RemoveMemberResult {
+  userId: string
+  removed: boolean
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

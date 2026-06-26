@@ -51,4 +51,10 @@ export interface BrainBindings {
    * their browser to approve a CLI auth request. Always set via wrangler.jsonc vars.
    */
   DASHBOARD_URL: string
+  /**
+   * Clerk Backend API secret key (`sk_live_…` / `sk_test_…`). Used by `search_user_by_email` to
+   * resolve a Clerk user from their email address via `GET /v1/users?email_address=`. Set via
+   * `wrangler secret put CLERK_SECRET_KEY`; absent in the local test harness (tests stub the fetch).
+   */
+  CLERK_SECRET_KEY?: string
 }

@@ -33,6 +33,7 @@ const NAV: readonly { to: string; label: string }[] = [
   { to: "/documents", label: "Documents" },
   { to: "/ingest", label: "Add" },
   { to: "/stats", label: "Admin / Stats" },
+  { to: "/members", label: "Members" },
   { to: "/graph", label: "Graph" },
   { to: "/sessions", label: "Sessions" },
   { to: "/audit", label: "Audit" },
