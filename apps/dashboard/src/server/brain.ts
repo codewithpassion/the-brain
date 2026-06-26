@@ -21,12 +21,13 @@
  * forged tenant header changes nothing.
  */
 
+import { env } from "cloudflare:workers"
 import { auth } from "@clerk/tanstack-react-start/server"
 import { createTRPCClient, httpBatchLink } from "@trpc/client"
 import type { AnyTRPCRouter } from "@trpc/server"
 import { tenantPinFor } from "./tenant"
 
-/** The deployed API origin (server-to-server). Co-located with apps/api in v1; override via env. */
+/** The deployed API origin. Used only when no service binding is available (local dev). */
 const apiUrl = (): string =>
   (process.env.BRAIN_API_URL ?? "http://localhost:8787").replace(/\/$/, "")
 
@@ -39,14 +40,19 @@ interface DynamicProcedure {
 /** The exact fetch shape `httpBatchLink.fetch` accepts (tRPC's `FetchEsque`, derived not imported). */
 type TrpcFetch = NonNullable<Parameters<typeof httpBatchLink>[0]["fetch"]>
 
-/** A fetch that attaches the server-held bearer + the server-pinned tenant to every API call. */
+/** A fetch that attaches the server-held bearer + the server-pinned tenant to every API call.
+ *  In production, routes through the BRAIN_API service binding (avoids worker-to-worker loopback).
+ *  In local dev (no binding), falls back to global fetch against the public URL. */
 const authFetch =
   (token: string, tenant: string): TrpcFetch =>
   (input, init) => {
     const headers = new Headers((init as RequestInit | undefined)?.headers)
     headers.set("authorization", `Bearer ${token}`)
     headers.set("x-brain-tenant", tenant)
-    return fetch(input as Parameters<typeof fetch>[0], {
+    // Route through the BRAIN_API service binding (typed by `wrangler types` →
+    // worker-configuration.d.ts). A public-URL fetch to another Worker on the same
+    // account is blocked by Cloudflare (error 1042); the binding avoids that.
+    return env.BRAIN_API.fetch(input as Parameters<typeof fetch>[0], {
       ...(init as RequestInit),
       headers,
     })

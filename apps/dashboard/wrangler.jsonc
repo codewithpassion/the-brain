@@ -3,7 +3,7 @@
   "name": "brain-dashboard",
   "account_id": "a12823016aa16d0a8dd2678b258bd751",
   "compatibility_date": "2026-06-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   // TanStack Start on Workers: `@cloudflare/vite-plugin` (vite.config.ts, `ssr` env) bundles this
   // entry into the deployable Worker at `vite build`; `assets` is omitted on purpose — the plugin
   // auto-points the Worker at the emitted client build output.
@@ -14,5 +14,6 @@
   "vars": {
     "CLERK_PUBLISHABLE_KEY": "pk_test_ZWxlY3RyaWMtYm9uZWZpc2gtNzAuY2xlcmsuYWNjb3VudHMuZGV2JA",
     "BRAIN_API_URL": "https://brain-api.dominik-fretz.workers.dev"
-  }
+  },
+  "services": [{ "binding": "BRAIN_API", "service": "brain-api" }]
 }
