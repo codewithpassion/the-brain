@@ -8,7 +8,13 @@
 import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
 import type { SessionServices } from "./services"
-import { type CaptureTurnResult, type RecalledFact, transcriptKey } from "./store"
+import {
+  type CaptureTurnResult,
+  type PinnedPage,
+  type RecalledFact,
+  type SnapshotRow,
+  transcriptKey,
+} from "./store"
 
 // ── Op contracts (handler-free; registered into the shared registry) ──────────────
 
@@ -41,10 +47,12 @@ export const FINALIZE_SESSION_OP = defineOp({
   output: z.object({ brainSessionId: z.string(), status: z.string() }),
 })
 
-/** `get_session_context` — the SessionStart projection (snapshot DEFERRED → live state). */
+/** `get_session_context` — the SessionStart projection; resolves pinned snapshots (§8.5). */
 export const GET_SESSION_CONTEXT_OP = defineOp({
   name: "get_session_context",
-  description: "Return the brain context for a session (recent turns + visible hot-memory facts).",
+  description:
+    "Return the brain context for a session (recent turns + visible hot-memory facts). " +
+    "When snapshotId is provided, also returns pinned page_versions content (immutable, §8.5).",
   capability: "read",
   readOnly: true,
   input: z.object({ brainSessionId: z.string().min(1), snapshotId: z.string().optional() }),
@@ -52,6 +60,50 @@ export const GET_SESSION_CONTEXT_OP = defineOp({
     turns: z.array(z.object({ idx: z.number(), role: z.string(), content: z.string().nullable() })),
     facts: z.array(z.object({ id: z.number(), fact: z.string(), kind: z.string() })),
     snapshotStubbed: z.boolean(),
+    pinnedPages: z
+      .array(
+        z.object({
+          pageVersionId: z.string(),
+          pageId: z.string(),
+          compiledTruth: z.string(),
+          frontmatter: z.string(),
+          snapshotAt: z.string(),
+        }),
+      )
+      .optional(),
+  }),
+})
+
+/** `create_snapshot` — pin the current page versions into an immutable brain snapshot (§8.5). */
+export const CREATE_SNAPSHOT_OP = defineOp({
+  name: "create_snapshot",
+  description: "Pin the current page versions into an immutable brain snapshot (§8.5).",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    label: z.string().min(1),
+    scope: z.string().optional(),
+  }),
+  output: z.object({ snapshotId: z.string() }),
+})
+
+/** `list_snapshots` — list brain snapshots for the tenant, newest-first. */
+export const LIST_SNAPSHOTS_OP = defineOp({
+  name: "list_snapshots",
+  description: "List brain snapshots for the tenant (newest-first, §8.5).",
+  capability: "read",
+  readOnly: true,
+  input: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+  output: z.object({
+    snapshots: z.array(
+      z.object({
+        id: z.string(),
+        scope: z.string().nullable(),
+        label: z.string(),
+        createdBy: z.string(),
+        createdAt: z.string(),
+      }),
+    ),
   }),
 })
 
@@ -91,6 +143,8 @@ export const SESSION_OPS: readonly AnyOpDef[] = [
   GET_SESSION_CONTEXT_OP,
   RECALL_OP,
   FORGET_FACT_OP,
+  CREATE_SNAPSHOT_OP,
+  LIST_SNAPSHOTS_OP,
 ]
 
 /** Register the session op contracts into a shared `OpRegistry` (handlers bind in the Worker). */
@@ -141,18 +195,21 @@ export const captureTurn = async (
   return result
 }
 
-/** The `get_session_context` projection (snapshot DEFERRED — live state, snapshot stubbed). */
+/** The `get_session_context` projection (§8.5). */
 export interface SessionContext {
   turns: { idx: number; role: string; content: string | null }[]
   facts: { id: number; fact: string; kind: string }[]
   snapshotStubbed: boolean
+  /** Pinned page_versions content when a snapshotId was resolved (§8.5); absent on live path. */
+  pinnedPages?: PinnedPage[]
 }
 
 /**
- * Return the brain context for a session: the recent turns + the visible hot-memory facts for
- * the session (recall is visibility-gated through `SessionStore`). `snapshotId` is ACCEPTED but
- * DEFERRED (§8.5): live state is returned and `snapshotStubbed` is set true when one was asked
- * for, so the caller knows the frozen view is not yet wired.
+ * Return the brain context for a session (§8.5). When `snapshotId` is provided, resolves the
+ * `brain_snapshots.manifest` and returns the PINNED `page_versions` content — immutable, never
+ * live pages — in `pinnedPages`. A cross-tenant or not-found snapshotId yields `pinnedPages: []`
+ * (drop-don't-error). The live-path behavior (no snapshotId) is unchanged: recent turns + visible
+ * hot-memory facts. `snapshotStubbed` is always false — the snapshot path is fully implemented.
  */
 export const getSessionContext = async (
   services: SessionServices,
@@ -161,11 +218,34 @@ export const getSessionContext = async (
 ): Promise<SessionContext> => {
   const turns = await services.sessions.recentTurns(brainSessionId)
   const facts = await services.sessions.recall({ sessionId: brainSessionId, limit: 50 })
-  return {
+  const base = {
     turns: turns.map((t) => ({ idx: t.idx, role: t.role, content: t.content })),
     facts: facts.map((f) => ({ id: f.id, fact: f.fact, kind: f.kind })),
-    snapshotStubbed: snapshotId !== undefined,
+    snapshotStubbed: false,
   }
+  if (snapshotId === undefined) return base
+  // Snapshot path: resolve pinned page_versions; null → cross-tenant/not-found → empty (drop-don't-error).
+  const pinned = await services.sessions.resolveSnapshot(snapshotId)
+  return { ...base, pinnedPages: pinned ?? [] }
+}
+
+// ── Snapshot coordination fns (§8.5) ───────────────────────────────────────────────
+
+/** Pin the current page versions into an immutable brain snapshot. */
+export const createSnapshot = async (
+  services: SessionServices,
+  label: string,
+  scope?: string | null,
+): Promise<string> => {
+  return services.sessions.createSnapshot(label, scope)
+}
+
+/** List brain snapshots for the tenant, newest-first. */
+export const listSnapshots = async (
+  services: SessionServices,
+  limit?: number,
+): Promise<SnapshotRow[]> => {
+  return services.sessions.listSnapshots(limit)
 }
 
 /** A recall request as the route handler parses it. */

@@ -22,10 +22,12 @@ import {
   breakGlassRead,
   CAPTURE_TURN_OP,
   type CaptureTurnRequest,
+  CREATE_SNAPSHOT_OP,
   captureTurn,
   createBreakGlassAuditSink,
   createScopedServices,
   createSessionServices,
+  createSnapshot,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
   forgetFact,
@@ -33,6 +35,8 @@ import {
   GRAPH_OPS,
   type GraphOpDeps,
   getSessionContext,
+  LIST_SNAPSHOTS_OP,
+  listSnapshots,
   MEMORY_REVIEW_OP,
   makeBudgetPort,
   makeRecallSink,
@@ -162,6 +166,28 @@ const forgetFactSurfaceOp: SurfaceOp = {
   },
 }
 
+const createSnapshotSurfaceOp: SurfaceOp = {
+  def: CREATE_SNAPSHOT_OP,
+  invoke: async (ctx, input) => {
+    const { label, scope } = CREATE_SNAPSHOT_OP.input.parse(input)
+    const snapshotId = await createSnapshot(
+      sessionServices(ctx),
+      label,
+      scope !== undefined ? scope : null,
+    )
+    return { snapshotId }
+  },
+}
+
+const listSnapshotsSurfaceOp: SurfaceOp = {
+  def: LIST_SNAPSHOTS_OP,
+  invoke: async (ctx, input) => {
+    const { limit } = LIST_SNAPSHOTS_OP.input.parse(input)
+    const snapshots = await listSnapshots(sessionServices(ctx), limit)
+    return { snapshots }
+  },
+}
+
 /**
  * `finalize_session` — mark `finalizing`, then dispatch `SessionPromoteWorkflow`
  * (`promote-${tenantId}-${sessionId}`, idempotent) when the binding is present, else run the
@@ -255,6 +281,8 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   getSessionContextSurfaceOp,
   recallSurfaceOp,
   forgetFactSurfaceOp,
+  createSnapshotSurfaceOp,
+  listSnapshotsSurfaceOp,
   memoryReviewSurfaceOp,
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,

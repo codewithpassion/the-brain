@@ -225,6 +225,129 @@ describe("intra-tenant authorship gate (invariant 8) — sessions/turns/forget a
   })
 })
 
+// ── Frozen-snapshot injection tests (§8.5) ─────────────────────────────────────────
+
+/** Insert a minimal `pages` row for snapshot tests. */
+const insertPage = (
+  sqlite: ReturnType<typeof makeDb>["sqlite"],
+  row: {
+    id: string
+    tenantId: string
+    slug: string
+    compiledTruth?: string
+    scope?: string | null
+  },
+): void => {
+  sqlite.run(
+    `INSERT INTO pages (id, tenant_id, slug, compiled_truth, frontmatter, created_at, updated_at)
+     VALUES (?, ?, ?, ?, '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    [row.id, row.tenantId, row.slug, row.compiledTruth ?? "initial content"],
+  )
+}
+
+describe("createSnapshot + resolveSnapshot (§8.5) — frozen-snapshot injection", () => {
+  test("createSnapshot pins current page content; resolveSnapshot returns pinned even after live edit", async () => {
+    const { sqlite, db } = makeDb()
+    const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+
+    // Insert a live page.
+    insertPage(sqlite, {
+      id: "page-1",
+      tenantId: "t1",
+      slug: "my-page",
+      compiledTruth: "v1 content",
+    })
+
+    // Create a snapshot — pins the current page_versions.
+    const snapId = await store.createSnapshot("my-snap")
+    expect(typeof snapId).toBe("string")
+
+    // Verify brain_snapshots row was created.
+    const snap = sqlite
+      .query("SELECT label, manifest FROM brain_snapshots WHERE id = ?")
+      .get(snapId) as {
+      label: string
+      manifest: string
+    }
+    expect(snap.label).toBe("my-snap")
+    const manifest = JSON.parse(snap.manifest) as { pageVersionIds: string[] }
+    expect(manifest.pageVersionIds).toHaveLength(1)
+
+    // Verify a page_versions row was created with the pinned content.
+    const pv = sqlite
+      .query("SELECT compiled_truth FROM page_versions WHERE id = ?")
+      .get(manifest.pageVersionIds[0]) as { compiled_truth: string }
+    expect(pv.compiled_truth).toBe("v1 content")
+
+    // Now EDIT the live page.
+    sqlite.run("UPDATE pages SET compiled_truth = 'v2 edited' WHERE id = 'page-1'")
+
+    // resolveSnapshot still returns PINNED content (v1) — not the live edit (v2).
+    const pinned = await store.resolveSnapshot(snapId)
+    expect(pinned).not.toBeNull()
+    expect(pinned).toHaveLength(1)
+    expect(pinned?.[0].compiledTruth).toBe("v1 content") // pinned, not v2
+    expect(pinned?.[0].pageId).toBe("page-1")
+  })
+
+  test("a cross-tenant snapshotId returns null (drop-don't-error)", async () => {
+    const { sqlite, db } = makeDb()
+    // Create snapshot as tenant t1.
+    insertPage(sqlite, { id: "page-1", tenantId: "t1", slug: "pg-1" })
+    const storeT1 = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+    const snapId = await storeT1.createSnapshot("snap-t1")
+
+    // Attempt to resolve from tenant t2 — should return null (no existence leak).
+    const storeT2 = new SessionStore(withBatch(db), principal({ tenantId: "t2", userId: "userA" }))
+    const result = await storeT2.resolveSnapshot(snapId)
+    expect(result).toBeNull()
+  })
+
+  test("createSnapshot with no pages produces an empty manifest; resolveSnapshot returns []", async () => {
+    const { db } = makeDb()
+    const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+    const snapId = await store.createSnapshot("empty-snap")
+    const pinned = await store.resolveSnapshot(snapId)
+    expect(pinned).not.toBeNull()
+    expect(pinned).toHaveLength(0)
+  })
+
+  test("createSnapshot audit row is written in-batch", async () => {
+    const { sqlite, db } = makeDb()
+    insertPage(sqlite, { id: "p1", tenantId: "t1", slug: "pg-1" })
+    const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+    const snapId = await store.createSnapshot("audited")
+    const audit = sqlite.query("SELECT action FROM memory_audit WHERE target_id = ?").get(snapId) as
+      | { action: string }
+      | undefined
+    expect(audit?.action).toBe("snapshot.create")
+  })
+
+  test("listSnapshots returns tenant-scoped snapshots newest-first", async () => {
+    const { sqlite, db } = makeDb()
+    insertPage(sqlite, { id: "p1", tenantId: "t1", slug: "pg-1" })
+    const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+    await store.createSnapshot("first")
+    await sleep(8) // ensure distinct created_at timestamps for deterministic ordering
+    await store.createSnapshot("second")
+    const snaps = await store.listSnapshots()
+    expect(snaps.length).toBe(2)
+    // newest-first
+    expect(snaps[0].label).toBe("second")
+    expect(snaps[1].label).toBe("first")
+  })
+
+  test("getSessionContext non-snapshot path is unchanged (snapshotStubbed always false)", async () => {
+    const { db } = makeDb()
+    const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
+    // No turns or facts inserted — just proves it returns the right shape.
+    const turns = await store.recentTurns("nonexistent-session")
+    const recalled = await store.recall({ limit: 10 })
+    expect(turns).toHaveLength(0)
+    expect(recalled).toHaveLength(0)
+  })
+})
+
 describe("recall (invariant 8) — visibility predicate drops other users' private facts", () => {
   test("user B never recalls user A's private fact; world + own private are returned", async () => {
     const { sqlite, db } = makeDb()

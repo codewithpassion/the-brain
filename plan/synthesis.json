@@ -11,44 +11,31 @@
       "path": "packages/db",
       "kind": "library",
       "purpose": "Drizzle D1 schema + migrations + FTS5 trigger DDL; the ONLY module allowed to import raw env.DB/Vectorize/R2; houses ScopedDB/ScopedVectorize/ScopedR2, hybrid-search helpers (fts/vector/rrf/rerank/synthesis-budget), embed()/gen()/rerank() chokepoints, ai-gateway + ops-metrics wrappers.",
-      "dependsOn": [
-        "packages/shared"
-      ]
+      "dependsOn": ["packages/shared"]
     },
     {
       "path": "packages/ingest",
       "kind": "library",
       "purpose": "Platform-neutral Importer SDK (begin/nextBatch/finalize, runImporterContract) lifted from openbrains minus Convex; fingerprint/normalize, source adapters (gmail, ob1, github, net-new chatgpt + claude-code), workers-ai embeddings wrapper.",
-      "dependsOn": [
-        "packages/shared",
-        "packages/db"
-      ]
+      "dependsOn": ["packages/shared", "packages/db"]
     },
     {
       "path": "apps/api",
       "kind": "worker-app",
       "purpose": "The single deployed Worker: Hono REST + tRPC router, MCP Durable Object (BrainMCP/McpAgent), webhook /ingest, OAuth transport, all Workflow classes (Enumerator/BatchIngest/EntityExtraction/SessionPromote), all Queue consumers (brain-backfill/brain-reembed +DLQs), scheduled() cron. resolvePrincipal at the edge.",
-      "dependsOn": [
-        "packages/shared",
-        "packages/db",
-        "packages/ingest"
-      ]
+      "dependsOn": ["packages/shared", "packages/db", "packages/ingest"]
     },
     {
       "path": "apps/cli",
       "kind": "cli",
       "purpose": "`brain` Commander program acting as a tRPC client over appRouter; OAuth 2.1 device-flow auth, --tenant/-t selector, --json output.",
-      "dependsOn": [
-        "packages/shared"
-      ]
+      "dependsOn": ["packages/shared"]
     },
     {
       "path": "apps/dashboard",
       "kind": "frontend-app",
       "purpose": "TanStack Start + shadcn dashboard; co-located in apps/api Worker for v1 (no Service Binding), createServerFn data layer calling scoped services directly; Clerk auth, server-side session-pinned tenant.",
-      "dependsOn": [
-        "packages/shared"
-      ]
+      "dependsOn": ["packages/shared"]
     }
   ],
   "buildOrder": [

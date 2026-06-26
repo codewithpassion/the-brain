@@ -19,7 +19,12 @@
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import type { ScopedServices } from "@brain/db"
-import { createScopedServices, type ExtractedEntityInput, mergeVisibility } from "@brain/db"
+import {
+  createScopedServices,
+  type ExtractedEntityInput,
+  mergeVisibility,
+  upsertEntityWithVectorDedup,
+} from "@brain/db"
 import type { Principal } from "@brain/shared"
 import { EMBED_BATCH_SIZE, EMBEDDING_MODEL, KG_BATCH_SIZE } from "@brain/shared"
 import type { ApiBindings } from "./bindings"
@@ -210,7 +215,10 @@ export const runEntityExtraction = async (
       }
     }
 
-    // 4. store-kg: upsert entities (+ mentions), then relate (endpoints resolved by scope+name).
+    // 4. store-kg: upsert entities with Phase 3.5 vector dedup (+ mentions), then relate.
+    // Each entity goes through deterministic-key-first → vector-nearest fallback → create.
+    // When a new entity is created or vector-deduped, its vector is upserted INLINE so the
+    // NEXT entity in this batch can match against it (within-batch ordering guarantee).
     const nameToId = new Map<string, string>()
     const toEmbed: {
       id: string
@@ -220,20 +228,31 @@ export const runEntityExtraction = async (
       teamId: string | null
     }[] = []
     for (const entity of extractedEntities) {
-      const id = await services.graph.upsertEntity(entity)
+      const result = await upsertEntityWithVectorDedup(
+        services.graph,
+        services.entityVectors,
+        (texts) => services.ai.embed(texts),
+        entity,
+      )
+      const id = result.id
       nameToId.set(nameKey(entity.scope, entity.name), id)
       base.entitiesUpserted++
       for (const chunkId of new Set(entity.chunkIds)) {
         await services.graph.mention(id, "chunk", chunkId)
         base.mentions++
       }
-      toEmbed.push({
-        id,
-        text: `${entity.name}\n${entity.description}`.trim(),
-        scope: entity.scope,
-        visibility: entity.visibility,
-        teamId: entity.teamId,
-      })
+      // Only queue step-5 embedding when NOT already embedded inline by the dedup pipeline.
+      // Deterministic hits (result.embedded = false) still refresh the vector in step 5;
+      // vector-dedup hits and new creations (result.embedded = true) are already done.
+      if (!result.embedded) {
+        toEmbed.push({
+          id,
+          text: `${entity.name}\n${entity.description}`.trim(),
+          scope: entity.scope,
+          visibility: entity.visibility,
+          teamId: entity.teamId,
+        })
+      }
     }
     for (const relation of extractedRelations) {
       const fromId = nameToId.get(nameKey(relation.scope, relation.source))

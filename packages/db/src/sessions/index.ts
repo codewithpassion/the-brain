@@ -17,12 +17,16 @@ export type {
 } from "./ops"
 export {
   CAPTURE_TURN_OP,
+  CREATE_SNAPSHOT_OP,
   captureTurn,
+  createSnapshot,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
   forgetFact,
   GET_SESSION_CONTEXT_OP,
   getSessionContext,
+  LIST_SNAPSHOTS_OP,
+  listSnapshots,
   RECALL_OP,
   recall,
   registerSessionOps,
@@ -35,10 +39,13 @@ export { createSessionServices } from "./services"
 export type {
   CaptureTurnInput,
   CaptureTurnResult,
+  PinnedPage,
   PromotedFact,
   RecalledFact,
   RecallQuery,
   SessionRow,
   SessionTurnRow,
+  SnapshotManifest,
+  SnapshotRow,
 } from "./store"
 export { SessionStore, TURN_INLINE_MAX, transcriptKey } from "./store"

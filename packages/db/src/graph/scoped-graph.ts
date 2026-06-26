@@ -727,6 +727,108 @@ export class ScopedGraph {
     return head.id
   }
 
+  // ── Phase 3.5 dedup helpers (called by upsertEntityWithVectorDedup in dedup.ts) ──
+
+  /**
+   * Deterministic key lookup (read-only): returns the existing entity row (id + merge
+   * payload) if `(tenant, COALESCE(scope,''), kind, lower(name))` matches, null on miss.
+   * Called FIRST in the Phase 3.5 pipeline before vector-nearest fallback.
+   */
+  async findEntityByKey(
+    name: string,
+    kind: string,
+    scope: string | null,
+  ): Promise<{
+    id: string
+    aliases: string
+    sourceChunkIds: string
+    visibility: string
+    teamId: string | null
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: entities.id,
+        aliases: entities.aliases,
+        sourceChunkIds: entities.sourceChunkIds,
+        visibility: entities.visibility,
+        teamId: entities.teamId,
+      })
+      .from(entities)
+      .where(
+        and(
+          eq(entities.tenantId, this.p.tenantId),
+          sql`COALESCE(${entities.scope}, '') = COALESCE(${scope ?? null}, '')`,
+          eq(entities.kind, kind),
+          sql`lower(${entities.canonicalName}) = lower(${name})`,
+        ),
+      )
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /**
+   * Merge an `ExtractedEntityInput` into an existing entity (by id): union `input.aliases`
+   * with existing aliases, union chunk ids, increment mention_count, max-permissive
+   * visibility. Does NOT add `input.name` as an alias — the caller adds the surface name
+   * before calling when needed (vector-dedup path in `upsertEntityWithVectorDedup`).
+   */
+  async mergeEntityInto(targetId: string, input: ExtractedEntityInput): Promise<void> {
+    const rows = await this.db
+      .select({
+        aliases: entities.aliases,
+        sourceChunkIds: entities.sourceChunkIds,
+        visibility: entities.visibility,
+        teamId: entities.teamId,
+      })
+      .from(entities)
+      .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, targetId)))
+      .limit(1)
+    const existing = rows[0]
+    if (!existing) return
+    const aliases = dedupeCapped([...parseStringArray(existing.aliases), ...input.aliases], 50)
+    const chunks = uniq([...parseStringArray(existing.sourceChunkIds), ...input.chunkIds])
+    const tier = mergeVisibility(
+      { visibility: existing.visibility, teamId: existing.teamId },
+      { visibility: input.visibility, teamId: input.teamId },
+    )
+    await this.db
+      .update(entities)
+      .set({
+        aliases: JSON.stringify(aliases),
+        sourceChunkIds: JSON.stringify(chunks),
+        mentionCount: sql`${entities.mentionCount} + ${input.chunkIds.length}`,
+        visibility: tier.visibility,
+        teamId: tier.teamId,
+        updatedAt: now(),
+      })
+      .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, targetId)))
+  }
+
+  /**
+   * Insert a new entity row after BOTH deterministic-key AND vector-nearest checks miss.
+   * Returns the new id. Does NOT query for existing rows — only call once both checks fail.
+   */
+  async createEntity(input: ExtractedEntityInput): Promise<string> {
+    const id = crypto.randomUUID()
+    const stamp = now()
+    await this.db.insert(entities).values({
+      id,
+      tenantId: this.p.tenantId,
+      scope: input.scope,
+      kind: input.kind,
+      canonicalName: input.name,
+      aliases: JSON.stringify(dedupeCapped(input.aliases, 50)),
+      description: input.description,
+      sourceChunkIds: JSON.stringify(uniq(input.chunkIds)),
+      mentionCount: input.chunkIds.length,
+      visibility: input.visibility,
+      teamId: input.teamId,
+      createdAt: stamp,
+      updatedAt: stamp,
+    })
+    return id
+  }
+
   /** Relate two entities; on conflict union evidence + take MAX confidence (openbrains). */
   async relate(input: ExtractedRelationInput, fromId: string, toId: string): Promise<void> {
     const existing = await this.db

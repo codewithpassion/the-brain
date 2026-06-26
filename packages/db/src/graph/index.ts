@@ -1,8 +1,11 @@
 /**
- * `@brain/db` graph sub-barrel (Phase 4) — generalized BFS traversal, entity vector/keyword
- * search, the typed-link/tag/timeline/orphan reads, and the op registry. Re-exported once
- * from the package root barrel (`src/index.ts`).
+ * `@brain/db` graph sub-barrel (Phase 4 + Phase 3.5 dedup) — generalized BFS traversal,
+ * entity vector/keyword search, the typed-link/tag/timeline/orphan reads, the op registry,
+ * and the Phase 3.5 cross-session semantic entity dedup pipeline. Re-exported once from
+ * the package root barrel (`src/index.ts`).
  */
+export type { EmbedFn, EntityDedupResult } from "./dedup"
+export { upsertEntityWithVectorDedup } from "./dedup"
 export type {
   EntityHit,
   EntitySearchDeps,

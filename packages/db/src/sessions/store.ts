@@ -32,7 +32,16 @@ import {
   type SQL,
 } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
-import { facts, memoryAudit, memoryProvenance, sessions, sessionTurns } from "../schema"
+import {
+  brainSnapshots,
+  facts,
+  memoryAudit,
+  memoryProvenance,
+  pages,
+  pageVersions,
+  sessions,
+  sessionTurns,
+} from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
 
@@ -131,6 +140,29 @@ export interface RecallQuery {
   /** SQL `LIKE` grep over the `fact` text (newest-first). */
   grep?: string
   limit?: number
+}
+
+/** The JSON shape stored in `brain_snapshots.manifest` (§8.5). */
+export interface SnapshotManifest {
+  pageVersionIds: string[]
+}
+
+/** A pinned `page_versions` row resolved from a snapshot manifest (§8.5). */
+export interface PinnedPage {
+  pageVersionId: string
+  pageId: string
+  compiledTruth: string
+  frontmatter: string
+  snapshotAt: string
+}
+
+/** A snapshot row after a tenant-scoped read. */
+export interface SnapshotRow {
+  id: string
+  scope: string | null
+  label: string
+  createdBy: string
+  createdAt: string
 }
 
 export class SessionStore {
@@ -510,5 +542,138 @@ export class SessionStore {
         ),
       )
       .orderBy(desc(facts.createdAt))
+  }
+
+  // ── FROZEN-SNAPSHOT INJECTION (§8.5) ─────────────────────────────────────────────
+
+  /**
+   * Pin the current page versions into a `brain_snapshots` row (§8.5). For each live page in the
+   * tenant (optionally filtered by `scope`, soft-deleted pages excluded), inserts a `page_versions`
+   * row capturing the current `compiled_truth` + `frontmatter`, stores their ids in the manifest
+   * JSON, and inserts the snapshot row + audit in ONE `db.batch`. Returns the new snapshot id.
+   *
+   * The page_version ids are pre-generated (crypto.randomUUID()) so the manifest can reference
+   * them before the batch commits — no second query needed. Cross-tenant isolation: `tenant_id`
+   * is FORCED on every inserted row, never caller-supplied.
+   */
+  async createSnapshot(label: string, scope?: string | null): Promise<string> {
+    if (this.p.readOnly) throw new Error("create_snapshot denied: read-only principal")
+    if (scope) this.assertScopeAllowed(scope)
+    const now = new Date().toISOString()
+    const snapshotId = crypto.randomUUID()
+
+    // 1. Read all live (non-deleted) pages for this tenant, optionally scoped.
+    const pageWhere =
+      scope != null
+        ? and(eq(pages.tenantId, this.p.tenantId), eq(pages.scope, scope), isNull(pages.deletedAt))
+        : and(eq(pages.tenantId, this.p.tenantId), isNull(pages.deletedAt))
+
+    const livePages = await this.db
+      .select({ id: pages.id, compiledTruth: pages.compiledTruth, frontmatter: pages.frontmatter })
+      .from(pages)
+      .where(pageWhere)
+
+    // 2. Pre-generate page_versions ids so the manifest can reference them before the batch.
+    const pvRows = livePages.map((pg) => ({
+      id: crypto.randomUUID(),
+      tenantId: this.p.tenantId, // forced
+      pageId: pg.id,
+      compiledTruth: pg.compiledTruth,
+      frontmatter: pg.frontmatter,
+      snapshotAt: now,
+    }))
+
+    const manifest: SnapshotManifest = { pageVersionIds: pvRows.map((pv) => pv.id) }
+
+    // 3. One batch: [page_versions inserts..., brain_snapshots insert, audit].
+    const statements: BatchStatement[] = pvRows.map((pv) => this.db.insert(pageVersions).values(pv))
+    statements.push(
+      this.db.insert(brainSnapshots).values({
+        id: snapshotId,
+        tenantId: this.p.tenantId, // forced
+        scope: scope ?? null,
+        label,
+        createdBy: this.p.userId, // authorship forced
+        createdAt: now,
+        manifest: JSON.stringify(manifest),
+      }),
+    )
+    statements.push(
+      this.auditStatement(
+        "snapshot.create",
+        snapshotId,
+        JSON.stringify({ pageCount: pvRows.length }),
+      ),
+    )
+    await this.commitBatch(statements)
+    return snapshotId
+  }
+
+  /**
+   * Resolve a snapshot's pinned `page_versions` (§8.5). The `brain_snapshots` lookup is
+   * tenant-scoped: a cross-tenant `snapshotId` returns `null` (drop-don't-error — no existence
+   * leak). The `page_versions` hydration re-checks `tenant_id` as defense-in-depth. Returns `null`
+   * when the snapshot is not found; returns `[]` when the manifest is empty or malformed.
+   */
+  async resolveSnapshot(snapshotId: string): Promise<PinnedPage[] | null> {
+    const rows = await this.db
+      .select({ manifest: brainSnapshots.manifest })
+      .from(brainSnapshots)
+      .where(and(eq(brainSnapshots.id, snapshotId), eq(brainSnapshots.tenantId, this.p.tenantId)))
+      .limit(1)
+
+    const snap = rows[0]
+    if (snap === undefined) return null // cross-tenant or not found
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(snap.manifest)
+    } catch {
+      return [] // malformed manifest → empty, not fatal
+    }
+
+    const m = parsed as SnapshotManifest
+    const ids = Array.isArray(m?.pageVersionIds) ? m.pageVersionIds : []
+    if (ids.length === 0) return []
+
+    const pinned = await this.db
+      .select({
+        id: pageVersions.id,
+        pageId: pageVersions.pageId,
+        compiledTruth: pageVersions.compiledTruth,
+        frontmatter: pageVersions.frontmatter,
+        snapshotAt: pageVersions.snapshotAt,
+      })
+      .from(pageVersions)
+      .where(
+        and(
+          eq(pageVersions.tenantId, this.p.tenantId), // re-check tenant (defense-in-depth)
+          inArray(pageVersions.id, ids),
+        ),
+      )
+
+    return pinned.map((pv) => ({
+      pageVersionId: pv.id,
+      pageId: pv.pageId,
+      compiledTruth: pv.compiledTruth,
+      frontmatter: pv.frontmatter,
+      snapshotAt: pv.snapshotAt,
+    }))
+  }
+
+  /** List snapshots for the tenant, newest-first (read op, §8.5). */
+  async listSnapshots(limit = 50): Promise<SnapshotRow[]> {
+    return this.db
+      .select({
+        id: brainSnapshots.id,
+        scope: brainSnapshots.scope,
+        label: brainSnapshots.label,
+        createdBy: brainSnapshots.createdBy,
+        createdAt: brainSnapshots.createdAt,
+      })
+      .from(brainSnapshots)
+      .where(eq(brainSnapshots.tenantId, this.p.tenantId))
+      .orderBy(desc(brainSnapshots.createdAt))
+      .limit(limit)
   }
 }
