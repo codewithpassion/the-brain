@@ -28,31 +28,48 @@ import {
   createScopedServices,
   createSessionServices,
   createSnapshot,
+  exportOkfBundle,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
   forgetFact,
+  forgetMemory,
   GET_SESSION_CONTEXT_OP,
   GRAPH_OPS,
   type GraphOpDeps,
+  getMemory,
   getSessionContext,
   INGEST_DOCUMENT_OP,
+  importOkfBundle,
   LIST_SNAPSHOTS_OP,
+  listMemory,
   listSnapshots,
+  MEMORY_FORGET_OP,
+  MEMORY_GET_OP,
+  MEMORY_HISTORY_OP,
+  MEMORY_LIST_OP,
   MEMORY_REVIEW_OP,
+  MEMORY_ROLLBACK_OP,
+  MEMORY_SET_OP,
+  type MemorySetRequest,
   makeBudgetPort,
   makeRecallSink,
+  memoryHistory,
   normalizePath,
+  OKF_EXPORT_OP,
+  OKF_IMPORT_OP,
   queryOp,
   RECALL_OP,
   type RecallRequest,
   type RetrievalInput,
   recall,
   recordThinkSpend,
+  rollbackMemory,
   runBatchIngestCore,
   runSessionPromote,
   type ScopedServices,
   type SearchDeps,
   searchOp,
+  setMemory,
   submitMemoryReview,
   type ThinkResult,
   thinkOp,
@@ -239,6 +256,85 @@ const finalizeSessionSurfaceOp: SurfaceOp = {
   },
 }
 
+// ── Memory family (memory_set / get / list / history / rollback / forget) ─────
+// OKF-compatible agent memory on the pages layer; the store enforces tenant/scope/visibility
+// isolation + audits every mutation in-batch (docs/okf-memory-plan.md).
+const memoryStore = (ctx: SurfaceContext) => sessionServices(ctx).memory
+
+const memorySetSurfaceOp: SurfaceOp = {
+  def: MEMORY_SET_OP,
+  invoke: (ctx, input) =>
+    setMemory(
+      memoryStore(ctx),
+      MEMORY_SET_OP.input.parse(input) as MemorySetRequest,
+      new Date().toISOString(),
+    ),
+}
+
+const memoryGetSurfaceOp: SurfaceOp = {
+  def: MEMORY_GET_OP,
+  invoke: async (ctx, input) => {
+    const { slug } = MEMORY_GET_OP.input.parse(input)
+    return { memory: await getMemory(memoryStore(ctx), slug) }
+  },
+}
+
+const memoryListSurfaceOp: SurfaceOp = {
+  def: MEMORY_LIST_OP,
+  invoke: async (ctx, input) => {
+    const parsed = MEMORY_LIST_OP.input.parse(input)
+    const memories = await listMemory(memoryStore(ctx), {
+      prefix: parsed.prefix,
+      limit: parsed.limit,
+      ...(parsed.path !== undefined ? { path: parsed.path } : {}),
+    })
+    return { memories }
+  },
+}
+
+const memoryHistorySurfaceOp: SurfaceOp = {
+  def: MEMORY_HISTORY_OP,
+  invoke: async (ctx, input) => {
+    const { slug } = MEMORY_HISTORY_OP.input.parse(input)
+    return { versions: await memoryHistory(memoryStore(ctx), slug) }
+  },
+}
+
+const memoryRollbackSurfaceOp: SurfaceOp = {
+  def: MEMORY_ROLLBACK_OP,
+  invoke: (ctx, input) => {
+    const { slug, toRevisionId } = MEMORY_ROLLBACK_OP.input.parse(input)
+    return rollbackMemory(memoryStore(ctx), slug, toRevisionId)
+  },
+}
+
+const memoryForgetSurfaceOp: SurfaceOp = {
+  def: MEMORY_FORGET_OP,
+  invoke: (ctx, input) => {
+    const { slug } = MEMORY_FORGET_OP.input.parse(input)
+    return forgetMemory(memoryStore(ctx), slug)
+  },
+}
+
+const okfExportSurfaceOp: SurfaceOp = {
+  def: OKF_EXPORT_OP,
+  invoke: (ctx, input) => {
+    const parsed = OKF_EXPORT_OP.input.parse(input)
+    return exportOkfBundle(memoryStore(ctx), {
+      prefix: parsed.prefix,
+      ...(parsed.path !== undefined ? { path: parsed.path } : {}),
+    })
+  },
+}
+
+const okfImportSurfaceOp: SurfaceOp = {
+  def: OKF_IMPORT_OP,
+  invoke: (ctx, input) => {
+    const { files } = OKF_IMPORT_OP.input.parse(input)
+    return importOkfBundle(memoryStore(ctx), files)
+  },
+}
+
 // ── Governance family (memory_review / break_glass_read / audit_export) ───────
 // Governance ops need the break-glass audit sink (a PRESENT sink is the gate — break-glass fails
 // closed when it is absent); build the session services WITH it for this family.
@@ -384,6 +480,14 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   forgetFactSurfaceOp,
   createSnapshotSurfaceOp,
   listSnapshotsSurfaceOp,
+  memorySetSurfaceOp,
+  memoryGetSurfaceOp,
+  memoryListSurfaceOp,
+  memoryHistorySurfaceOp,
+  memoryRollbackSurfaceOp,
+  memoryForgetSurfaceOp,
+  okfExportSurfaceOp,
+  okfImportSurfaceOp,
   memoryReviewSurfaceOp,
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,

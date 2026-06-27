@@ -16,6 +16,7 @@ import { gen } from "../ai/gen"
 import { type RerankCandidate, type RerankHit, rerank } from "../ai/rerank"
 import type { BrainBindings } from "../env"
 import { GovernanceStore } from "../governance/store"
+import { MemoryStore } from "../memory/store"
 import { type BreakGlassAudit, ScopedDB } from "../scoped/db"
 import { ScopedR2 } from "../scoped/r2"
 import { ScopedVectorize } from "../scoped/vectorize"
@@ -26,6 +27,8 @@ export interface SessionServices {
   db: ScopedDB
   sessions: SessionStore
   governance: GovernanceStore
+  /** OKF-compatible agent memory on the pages layer (memory_* ops). */
+  memory: MemoryStore
   vectors: ScopedVectorize
   blobs: ScopedR2
   ai: {
@@ -56,6 +59,7 @@ export const createSessionServices = (
     db: new ScopedDB(raw, principal, options?.breakGlassAudit),
     sessions: new SessionStore(raw, principal),
     governance: new GovernanceStore(raw, principal, options?.breakGlassAudit),
+    memory: new MemoryStore(raw, principal),
     vectors: new ScopedVectorize(env.CHUNK_INDEX, principal),
     blobs: new ScopedR2(env.BODIES, principal),
     ai: {

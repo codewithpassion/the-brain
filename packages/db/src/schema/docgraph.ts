@@ -1,6 +1,14 @@
 import { VISIBILITIES } from "@brain/shared"
 import { desc } from "drizzle-orm"
-import { check, index, sqliteTable, text, unique, uniqueIndex } from "drizzle-orm/sqlite-core"
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core"
 import { enumCheck, isoNow } from "./helpers"
 
 /**
@@ -106,4 +114,27 @@ export const pageVersions = sqliteTable(
     snapshotAt: text("snapshot_at").notNull(),
   },
   (t) => [index("idx_page_versions_page").on(t.tenantId, t.pageId, desc(t.snapshotAt))],
+)
+
+// page_revisions: per-concept edit history for OKF agent memory (docs/okf-memory-plan.md §5).
+// One row per committed state of a page; the live `pages` row mirrors the latest revision.
+// Backs memory_history + forward-only memory_rollback. Integer `id` = monotonic version handle.
+export const pageRevisions = sqliteTable(
+  "page_revisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull(),
+    pageId: text("page_id").notNull(),
+    version: integer("version").notNull(), // per-page 1..N (prior max + 1 at write)
+    slug: text("slug").notNull(), // denormalized so history survives soft-delete of the live row
+    type: text("type").notNull(),
+    title: text("title").notNull().default(""),
+    compiledTruth: text("compiled_truth").notNull(), // full body snapshot (inline for memory pages)
+    frontmatter: text("frontmatter").notNull().default("{}"),
+    visibility: text("visibility").notNull(),
+    authorUserId: text("author_user_id"),
+    reason: text("reason"), // 'set' | 'revert:<fromVersion>' | 'import'
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (t) => [index("idx_page_revisions_page").on(t.tenantId, t.pageId, desc(t.id))],
 )

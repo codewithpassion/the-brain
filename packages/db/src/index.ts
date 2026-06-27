@@ -23,6 +23,8 @@ export * from "./governance"
 export * from "./graph"
 // ── Ingest pipeline core (shared between API and MCP surface) ─────────────────
 export * from "./ingest"
+// ── OKF-compatible agent memory (path-keyed, versioned; on the pages layer) ───
+export * from "./memory"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"

@@ -8,6 +8,7 @@ import {
   registerAdminOps,
   registerGovernanceOps,
   registerGraphOps,
+  registerMemoryOps,
   registerSearchOps,
   registerSessionOps,
 } from "@brain/db"
@@ -18,6 +19,7 @@ export const buildRegistry = (): OpRegistry => {
   registerSearchOps(registry)
   registerGraphOps(registry)
   registerSessionOps(registry)
+  registerMemoryOps(registry)
   registerGovernanceOps(registry)
   registerAdminOps(registry)
   return registry
