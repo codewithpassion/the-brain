@@ -226,12 +226,10 @@ export const membershipsOp: AdminBoundOp<{ userId?: string }, { memberships: Mem
 
 // ── Shared limit schema for list ops ──────────────────────────────────────
 const listLimitInput = z.object({
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .default(50)
-    .transform((v) => Math.min(v, 200)),
+  // `.max(200)` clamps the range declaratively (1–200) — NOT `.transform()`, which strips the
+  // numeric `type` from the generated JSON Schema and breaks CLI flag coercion (limit would derive
+  // as a string and a `--limit 5` would fail `.parse()`). Default 50 when omitted.
+  limit: z.number().int().min(1).max(200).default(50),
 })
 
 // ── LIST_DOCUMENTS_OP ─────────────────────────────────────────────────────

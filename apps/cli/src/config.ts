@@ -15,7 +15,7 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
 /** The default API base URL — overridable per profile (`--api`) or via `$BRAIN_API`. */
-export const DEFAULT_API_URL = "https://api.brain.dev"
+export const DEFAULT_API_URL = "https://brain-api.dominik-fretz.workers.dev"
 
 /** The default profile name when `--profile` / `$BRAIN_PROFILE` is unset. */
 export const DEFAULT_PROFILE = "default"
