@@ -271,6 +271,19 @@ describe("OKF round-trip", () => {
     expect(orders?.frontmatter.custom_key).toBe("kept") // unknown key preserved (OKF rule)
   })
 
+  test("import parses block-style YAML frontmatter from external bundles", async () => {
+    const { store } = build({ tenantId: "t1", userId: "u1" })
+    const files = [
+      {
+        path: "kb/orders.md",
+        content: 'type: "note"\ntitle: "Orders"\ntags:\n  - sales\n  - revenue\n',
+      },
+    ].map((f) => ({ path: f.path, content: `---\n${f.content}---\n\nbody` }))
+    const res = await importOkfBundle(store, files)
+    expect(res.imported).toBe(1)
+    expect((await store.getMemory("kb/orders"))?.frontmatter.tags).toEqual(["sales", "revenue"])
+  })
+
   test("import is resilient: one bad file never aborts the bundle; every file gets an outcome", async () => {
     const { sqlite, store } = build({ tenantId: "t1", userId: "u1" })
     // A non-memory page squats a slug → importing onto it must FAIL (not abort the whole bundle).

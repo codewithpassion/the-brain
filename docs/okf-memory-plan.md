@@ -183,3 +183,20 @@ CLI shape: `brain memory_set --slug agent/planner/prefs --type note --body ...`,
 - Keep links/tags **derived** inside set/import for v1 (narrower surface; OKF body is the source of
   truth) rather than surfacing raw `add_link`/`add_tag` ops.
 - `okf_version` pinned to `0.1`; consumer accepts unknown frontmatter (forward-compat rule).
+
+## 13. Deviations from this plan (as built)
+The implementation follows §1–§11 except:
+- **Write chokepoint:** a dedicated `packages/db/src/memory/store.ts` (`MemoryStore`) rather than
+  extending `ScopedGraph` (§6) — matches the `SessionStore` precedent; pages still gain the audited
+  in-batch write they lacked.
+- **Migration:** instead of a hand-written `000N_pages_memory.sql` (§9), `page_revisions` + the prior
+  hand-written ALTERs (0002–0006) were consolidated into ONE drizzle-generated, journaled migration
+  `0002_path_columns_and_page_revisions` (+ updated `meta/0002_snapshot.json`). `db:generate` is now a
+  clean no-op; only the FTS5/expression SQL drizzle cannot model stays hand-written (0001).
+- **Session-start load (new):** `get_session_context` gained `memoryPath`/`memoryPrefix` to load
+  memory items IN FULL at boot, across MCP/REST/CLI — the "load in full based on a path" payoff.
+- **`memory_list` semantics:** `prefix=false` = direct children of the path; `prefix=true` = whole
+  subtree. `okf_export` defaults to the whole subtree.
+- **`okf_import` robustness:** per-file outcomes (imported / skipped-reason / failed-error) so one bad
+  file never aborts the bundle; parses both flow AND block-style YAML frontmatter from external tools;
+  reads `okf_version` from `index.md`. Skip-unchanged ignores the volatile `timestamp`.

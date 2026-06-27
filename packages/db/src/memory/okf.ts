@@ -85,20 +85,49 @@ const parseScalar = (raw: string): unknown => {
   }
 }
 
-/** Split a concept file into `{ frontmatter, body }`. No leading frontmatter ⇒ empty frontmatter. */
+const BLOCK_ITEM_RE = /^\s*-\s+(.*)$/
+
+/**
+ * Split a concept file into `{ frontmatter, body }`. No leading frontmatter ⇒ empty frontmatter.
+ *
+ * Handles the flat OKF frontmatter shape from any tool: `key: scalar`, inline flow arrays
+ * (`tags: [a, b]`), AND block sequences —
+ *   tags:
+ *     - sales
+ *     - revenue
+ * — which our own export does not emit but externally-authored bundles commonly do. Anything
+ * more exotic (nested maps, multiline scalars) degrades to a string rather than crashing.
+ */
 export const parseDocument = (content: string): ParsedDocument => {
   const m = FRONTMATTER_RE.exec(content)
   if (m === null) return { frontmatter: {}, body: content }
   const body = content.slice(m[0].length)
   const frontmatter: Record<string, unknown> = {}
-  for (const line of (m[1] ?? "").split("\n")) {
+  const lines = (m[1] ?? "").split("\n")
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i] ?? ""
+    i++
     const trimmed = line.trim()
     if (trimmed.length === 0 || trimmed.startsWith("#")) continue
     const idx = line.indexOf(":")
     if (idx === -1) continue
     const key = line.slice(0, idx).trim()
     if (key.length === 0) continue
-    frontmatter[key] = parseScalar(line.slice(idx + 1))
+    const rest = line.slice(idx + 1).trim()
+    if (rest.length > 0) {
+      frontmatter[key] = parseScalar(rest)
+      continue
+    }
+    // Empty value: collect any following `  - item` lines as a block sequence.
+    const items: unknown[] = []
+    while (i < lines.length) {
+      const itemMatch = BLOCK_ITEM_RE.exec(lines[i] ?? "")
+      if (itemMatch === null) break
+      items.push(parseScalar(itemMatch[1] ?? ""))
+      i++
+    }
+    frontmatter[key] = items.length > 0 ? items : ""
   }
   return { frontmatter, body }
 }
