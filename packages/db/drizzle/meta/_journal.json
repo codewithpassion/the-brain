@@ -15,6 +15,13 @@
       "when": 1782359900000,
       "tag": "0001_fts5_and_expression_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782603127998,
+      "tag": "0002_path_columns_and_page_revisions",
+      "breakpoints": true
     }
   ]
 }

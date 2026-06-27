@@ -55,7 +55,12 @@ export const GET_SESSION_CONTEXT_OP = defineOp({
     "When snapshotId is provided, also returns pinned page_versions content (immutable, §8.5).",
   capability: "read",
   readOnly: true,
-  input: z.object({ brainSessionId: z.string().min(1), snapshotId: z.string().optional() }),
+  input: z.object({
+    brainSessionId: z.string().min(1),
+    snapshotId: z.string().optional(),
+    memoryPath: z.string().optional(),
+    memoryPrefix: z.boolean().default(false),
+  }),
   output: z.object({
     turns: z.array(z.object({ idx: z.number(), role: z.string(), content: z.string().nullable() })),
     facts: z.array(z.object({ id: z.number(), fact: z.string(), kind: z.string() })),
@@ -68,6 +73,17 @@ export const GET_SESSION_CONTEXT_OP = defineOp({
           compiledTruth: z.string(),
           frontmatter: z.string(),
           snapshotAt: z.string(),
+        }),
+      )
+      .optional(),
+    memories: z
+      .array(
+        z.object({
+          slug: z.string(),
+          type: z.string(),
+          title: z.string(),
+          body: z.string(),
+          version: z.number(),
         }),
       )
       .optional(),
@@ -195,6 +211,15 @@ export const captureTurn = async (
   return result
 }
 
+/** One OKF memory item loaded in full into the session-start context. */
+export interface SessionContextMemory {
+  slug: string
+  type: string
+  title: string
+  body: string
+  version: number
+}
+
 /** The `get_session_context` projection (§8.5). */
 export interface SessionContext {
   turns: { idx: number; role: string; content: string | null }[]
@@ -202,31 +227,56 @@ export interface SessionContext {
   snapshotStubbed: boolean
   /** Pinned page_versions content when a snapshotId was resolved (§8.5); absent on live path. */
   pinnedPages?: PinnedPage[]
+  /** OKF memory items under `memoryPath`, loaded in full (absent when no path was requested). */
+  memories?: SessionContextMemory[]
+}
+
+/** Where to load agent memory from at session start (the "load in full based on a path" payoff). */
+export interface SessionContextMemoryOpts {
+  /** Namespace to load memory items from; absent ⇒ no memories loaded. */
+  path?: string
+  /** false ⇒ direct children of the path; true ⇒ the whole subtree. */
+  prefix?: boolean
 }
 
 /**
  * Return the brain context for a session (§8.5). When `snapshotId` is provided, resolves the
  * `brain_snapshots.manifest` and returns the PINNED `page_versions` content — immutable, never
- * live pages — in `pinnedPages`. A cross-tenant or not-found snapshotId yields `pinnedPages: []`
- * (drop-don't-error). The live-path behavior (no snapshotId) is unchanged: recent turns + visible
- * hot-memory facts. `snapshotStubbed` is always false — the snapshot path is fully implemented.
+ * live pages — in `pinnedPages`. When `memory.path` is provided, also loads the visible OKF
+ * memory items under that path IN FULL (the agent's durable memory at boot). Both extras are
+ * additive: the base live-path projection (recent turns + visible hot-memory facts) is unchanged.
+ * Cross-tenant / not-found / out-of-visibility ids drop to empty (drop-don't-error).
  */
 export const getSessionContext = async (
   services: SessionServices,
   brainSessionId: string,
   snapshotId?: string,
+  memory?: SessionContextMemoryOpts,
 ): Promise<SessionContext> => {
   const turns = await services.sessions.recentTurns(brainSessionId)
   const facts = await services.sessions.recall({ sessionId: brainSessionId, limit: 50 })
-  const base = {
+  const result: SessionContext = {
     turns: turns.map((t) => ({ idx: t.idx, role: t.role, content: t.content })),
     facts: facts.map((f) => ({ id: f.id, fact: f.fact, kind: f.kind })),
     snapshotStubbed: false,
   }
-  if (snapshotId === undefined) return base
+  if (memory?.path !== undefined) {
+    const items = await services.memory.listMemory({
+      path: memory.path,
+      prefix: memory.prefix ?? false,
+    })
+    result.memories = items.map((m) => ({
+      slug: m.slug,
+      type: m.type,
+      title: m.title,
+      body: m.body,
+      version: m.version,
+    }))
+  }
+  if (snapshotId === undefined) return result
   // Snapshot path: resolve pinned page_versions; null → cross-tenant/not-found → empty (drop-don't-error).
   const pinned = await services.sessions.resolveSnapshot(snapshotId)
-  return { ...base, pinnedPages: pinned ?? [] }
+  return { ...result, pinnedPages: pinned ?? [] }
 }
 
 // ── Snapshot coordination fns (§8.5) ───────────────────────────────────────────────

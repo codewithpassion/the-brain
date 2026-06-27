@@ -29,9 +29,23 @@ export interface OkfExportResult {
   files: OkfFile[]
 }
 
+/** The outcome of a single file in an import. */
+export interface OkfImportItem {
+  path: string
+  status: "imported" | "skipped" | "failed"
+  /** Why it was skipped/failed: 'reserved' | 'not-markdown' | 'empty' | 'no-type' | an error message. */
+  reason?: string
+  /** The concept slug, when imported. */
+  slug?: string
+}
+
 export interface OkfImportResult {
   imported: number
-  skipped: string[]
+  skipped: number
+  failed: number
+  /** `okf_version` declared in the bundle's `index.md`, when present. */
+  okfVersion: string | null
+  items: OkfImportItem[]
 }
 
 /** A parsed concept document. */
@@ -103,8 +117,16 @@ export const serializeFrontmatter = (fm: Record<string, unknown>): string => {
 export const serializeConcept = (fm: Record<string, unknown>, body: string): string =>
   `${serializeFrontmatter(fm)}\n${body}`
 
+/** Normalize a bundle file path to a forward-slash relative path (no `./` or leading `/`). */
+const normalizePath = (path: string): string =>
+  path
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .trim()
+
 const basename = (path: string): string => path.split("/").pop() ?? path
 const RESERVED = new Set(["index.md", "log.md"])
+const MD_EXT_RE = /\.(md|markdown)$/i
 
 /**
  * Export memory items under `path` (or all) as an OKF bundle: one `<slug>.md` per live concept,
@@ -147,37 +169,72 @@ export const exportOkfBundle = async (
   return { okfVersion: OKF_VERSION, count: items.length, files }
 }
 
+/** Read `okf_version` from a bundle's `index.md` frontmatter, if present. */
+const bundleOkfVersion = (files: OkfFile[]): string | null => {
+  const index = files.find((f) => basename(normalizePath(f.path)).toLowerCase() === "index.md")
+  if (index === undefined) return null
+  const v = parseDocument(index.content).frontmatter.okf_version
+  return typeof v === "string" ? v : null
+}
+
 /**
- * Import an OKF bundle: each non-reserved concept file is upserted (so every import is itself
- * versioned + audited). Concept id = file path minus `.md`. Reserved files (`index.md`/`log.md`)
- * and files without a valid non-empty `type` are skipped (the skip list names them).
+ * Import an OKF bundle: each concept file is upserted (so every import is itself versioned +
+ * audited). Concept id = the path minus its `.md`/`.markdown` extension. Resilient — one bad
+ * file never aborts the bundle; every file gets a recorded outcome:
+ *   - skipped 'reserved'  → `index.md`/`log.md` (bundle structure, not concepts)
+ *   - skipped 'not-markdown' / 'empty' / 'no-type' → not a valid OKF concept
+ *   - failed '<error>'    → the upsert threw (e.g. scope/auth), captured, not propagated
+ *   - imported            → with its resolved slug
  */
 export const importOkfBundle = async (
   store: MemoryStore,
   files: OkfFile[],
 ): Promise<OkfImportResult> => {
-  let imported = 0
-  const skipped: string[] = []
+  const items: OkfImportItem[] = []
   for (const file of files) {
-    if (RESERVED.has(basename(file.path))) {
-      skipped.push(file.path)
+    const path = normalizePath(file.path)
+    const base = basename(path).toLowerCase()
+    if (RESERVED.has(base)) {
+      items.push({ path: file.path, status: "skipped", reason: "reserved" })
       continue
     }
-    const slug = file.path.replace(/\.md$/i, "")
+    if (!MD_EXT_RE.test(path)) {
+      items.push({ path: file.path, status: "skipped", reason: "not-markdown" })
+      continue
+    }
+    if (file.content.trim().length === 0) {
+      items.push({ path: file.path, status: "skipped", reason: "empty" })
+      continue
+    }
+    const slug = path.replace(MD_EXT_RE, "")
     const { frontmatter, body } = parseDocument(file.content)
     if (typeof frontmatter.type !== "string" || frontmatter.type.trim().length === 0) {
-      skipped.push(file.path) // not a valid OKF concept (no `type`)
+      items.push({ path: file.path, status: "skipped", reason: "no-type" })
       continue
     }
     const visibility =
       typeof frontmatter.visibility === "string" ? frontmatter.visibility : undefined
-    await store.upsertMemory({
-      slug,
-      frontmatter,
-      body,
-      ...(visibility !== undefined ? { visibility } : {}),
-    })
-    imported++
+    try {
+      await store.upsertMemory({
+        slug,
+        frontmatter,
+        body,
+        ...(visibility !== undefined ? { visibility } : {}),
+      })
+      items.push({ path: file.path, status: "imported", slug })
+    } catch (err) {
+      items.push({
+        path: file.path,
+        status: "failed",
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    }
   }
-  return { imported, skipped }
+  return {
+    imported: items.filter((i) => i.status === "imported").length,
+    skipped: items.filter((i) => i.status === "skipped").length,
+    failed: items.filter((i) => i.status === "failed").length,
+    okfVersion: bundleOkfVersion(files),
+    items,
+  }
 }

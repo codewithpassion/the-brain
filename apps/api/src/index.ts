@@ -563,9 +563,12 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   app.get("/sessions/:id/context", async (c) => {
     const principal = c.get("principal")
     const snapshotId = c.req.query("snapshot")
+    const memoryPath = c.req.query("memoryPath")
     const out = await handleGetSessionContext(sessionServices(c.env, principal), {
       brainSessionId: c.req.param("id"),
       ...(snapshotId !== undefined ? { snapshotId } : {}),
+      ...(memoryPath !== undefined ? { memoryPath } : {}),
+      memoryPrefix: c.req.query("memoryPrefix") === "true",
     })
     return c.json(out)
   })

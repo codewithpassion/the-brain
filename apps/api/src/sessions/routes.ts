@@ -72,11 +72,20 @@ export const handleFinalizeSession = async (
   return { brainSessionId, status: "finalizing" }
 }
 
-/** `get_session_context` — recent turns + visible hot-memory facts (snapshot DEFERRED). */
+/** `get_session_context` — recent turns + visible hot-memory facts + (optional) OKF memory by path. */
 export const handleGetSessionContext = (
   services: SessionServices,
-  input: { brainSessionId: string; snapshotId?: string },
-): Promise<SessionContext> => getSessionContext(services, input.brainSessionId, input.snapshotId)
+  input: {
+    brainSessionId: string
+    snapshotId?: string
+    memoryPath?: string
+    memoryPrefix?: boolean
+  },
+): Promise<SessionContext> =>
+  getSessionContext(services, input.brainSessionId, input.snapshotId, {
+    prefix: input.memoryPrefix ?? false,
+    ...(input.memoryPath !== undefined ? { path: input.memoryPath } : {}),
+  })
 
 /**
  * `recall` — hot-memory recall (visibility-gated). Writes one `memory_recall_trace` per kept hit

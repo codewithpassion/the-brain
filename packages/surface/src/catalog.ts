@@ -167,7 +167,10 @@ const getSessionContextSurfaceOp: SurfaceOp = {
   def: GET_SESSION_CONTEXT_OP,
   invoke: (ctx, input) => {
     const parsed = GET_SESSION_CONTEXT_OP.input.parse(input)
-    return getSessionContext(sessionServices(ctx), parsed.brainSessionId, parsed.snapshotId)
+    return getSessionContext(sessionServices(ctx), parsed.brainSessionId, parsed.snapshotId, {
+      prefix: parsed.memoryPrefix,
+      ...(parsed.memoryPath !== undefined ? { path: parsed.memoryPath } : {}),
+    })
   },
 }
 

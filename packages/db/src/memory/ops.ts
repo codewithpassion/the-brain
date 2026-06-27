@@ -160,7 +160,20 @@ export const OKF_IMPORT_OP = defineOp({
   capability: "write",
   readOnly: false,
   input: z.object({ files: z.array(OkfFileSchema) }),
-  output: z.object({ imported: z.number(), skipped: z.array(z.string()) }),
+  output: z.object({
+    imported: z.number(),
+    skipped: z.number(),
+    failed: z.number(),
+    okfVersion: z.string().nullable(),
+    items: z.array(
+      z.object({
+        path: z.string(),
+        status: z.enum(["imported", "skipped", "failed"]),
+        reason: z.string().optional(),
+        slug: z.string().optional(),
+      }),
+    ),
+  }),
 })
 
 /** Every memory op CONTRACT (registered handler-free, mirroring `SESSION_OPS`). */

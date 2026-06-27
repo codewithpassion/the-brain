@@ -57,6 +57,7 @@ const BASE_TABLES = [
   "tags",
   "timeline_entries",
   "page_versions",
+  "page_revisions",
   "entities",
   "entity_relations",
   "entity_mentions",
@@ -77,8 +78,15 @@ const BASE_TABLES = [
 ]
 
 describe("migrations apply cleanly", () => {
-  test("there are at least seven migration files (base + FTS/expression + orgs.created_by + api_keys.created_at + memberships.created_by + documents.path + chunks.path)", () => {
-    expect(migrationFiles().length).toBeGreaterThanOrEqual(7)
+  test("the migration set is the drizzle-managed base + hand-written FTS + the base catch-up", () => {
+    // Base-table DDL is drizzle-generated (0000 + the 0002 catch-up that folded the former
+    // hand-written ALTERs + page_revisions); only the FTS5/expression SQL drizzle cannot model
+    // stays hand-written (0001). `db:generate` is a clean no-op against meta/0002_snapshot.json.
+    expect(migrationFiles()).toEqual([
+      "0000_init.sql",
+      "0001_fts5_and_expression_indexes.sql",
+      "0002_path_columns_and_page_revisions.sql",
+    ])
   })
 
   test("loading every migration in order does not throw", () => {
@@ -212,25 +220,25 @@ describe("PRD §3 faithfulness invariants survived generation", () => {
     expect(cols(freshDb())).not.toContain("visibility")
   })
 
-  test("orgs has created_by column (added in migration 0002)", () => {
+  test("orgs has created_by column", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(orgs)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("created_by")
   })
 
-  test("memberships has created_by column (added in migration 0004)", () => {
+  test("memberships has created_by column", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(memberships)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("created_by")
   })
 
-  test("documents has path column (added in migration 0005)", () => {
+  test("documents has path column", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(documents)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("path")
   })
 
-  test("chunks has path column (added in migration 0006)", () => {
+  test("chunks has path column", () => {
     const cols = (db: Database) =>
       (db.query(`PRAGMA table_info(chunks)`).all() as { name: string }[]).map((c) => c.name)
     expect(cols(freshDb())).toContain("path")

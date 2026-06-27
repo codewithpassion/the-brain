@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { exportOkfBundle, importOkfBundle, parseDocument } from "../src/memory/okf"
 import { setMemory } from "../src/memory/ops"
 import { MemoryStore } from "../src/memory/store"
+import { getSessionContext } from "../src/sessions/ops"
+import type { SessionServices } from "../src/sessions/services"
 import { makeDb, principal, withBatch } from "./helpers"
 
 /**
@@ -206,6 +208,30 @@ describe("isolation + audit (invariants 1, 8, 10)", () => {
   })
 })
 
+describe("session-start context loads memory by path", () => {
+  test("get_session_context includes memories under memoryPath, in full; absent without a path", async () => {
+    const { store } = build()
+    await store.upsertMemory({
+      slug: "agent/prefs",
+      frontmatter: fm({ title: "P" }),
+      body: "be nice",
+    })
+    await store.upsertMemory({ slug: "agent/goals", frontmatter: fm(), body: "ship it" })
+    // Minimal SessionServices: a real MemoryStore + stubbed session reads.
+    const services = {
+      memory: store,
+      sessions: { recentTurns: async () => [], recall: async () => [] },
+    } as unknown as SessionServices
+
+    const ctx = await getSessionContext(services, "sess", undefined, { path: "agent" })
+    expect(ctx.memories?.map((m) => m.slug)).toEqual(["agent/goals", "agent/prefs"])
+    expect(ctx.memories?.find((m) => m.slug === "agent/prefs")?.body).toBe("be nice")
+
+    const ctxNoPath = await getSessionContext(services, "sess")
+    expect(ctxNoPath.memories).toBeUndefined()
+  })
+})
+
 describe("OKF round-trip", () => {
   test("export a subtree then import into a clean tenant yields identical concepts", async () => {
     const author = build({ tenantId: "t1", userId: "u1" }).store
@@ -234,12 +260,40 @@ describe("OKF round-trip", () => {
     const importer = build({ tenantId: "t2", userId: "u2" }).store
     const result = await importOkfBundle(importer, bundle.files)
     expect(result.imported).toBe(2)
-    expect(result.skipped).toContain("index.md")
-    expect(result.skipped).toContain("log.md")
+    expect(result.okfVersion).toBe("0.1")
+    const reserved = result.items.filter((i) => i.reason === "reserved").map((i) => i.path)
+    expect(reserved).toContain("index.md")
+    expect(reserved).toContain("log.md")
 
     const orders = await importer.getMemory("kb/orders")
     expect(orders?.title).toBe("Orders")
     expect(orders?.body).toBe("One row per order.\n\nSee [[kb/customers]].")
     expect(orders?.frontmatter.custom_key).toBe("kept") // unknown key preserved (OKF rule)
+  })
+
+  test("import is resilient: one bad file never aborts the bundle; every file gets an outcome", async () => {
+    const { sqlite, store } = build({ tenantId: "t1", userId: "u1" })
+    // A non-memory page squats a slug → importing onto it must FAIL (not abort the whole bundle).
+    sqlite.run(
+      "INSERT INTO pages (id, tenant_id, slug, ingested_via) VALUES ('p0','t1','kb/taken','ingest')",
+    )
+    const files = [
+      { path: "index.md", content: '---\nokf_version: "0.1"\n---\n' },
+      { path: "notes.txt", content: "plain text, not markdown" },
+      { path: "blank.md", content: "   " },
+      { path: "no-type.md", content: '---\ntitle: "x"\n---\nbody' },
+      { path: "kb/taken.md", content: '---\ntype: "note"\n---\nclash' },
+      { path: "kb/good.md", content: '---\ntype: "note"\ntitle: "Good"\n---\nhello' },
+    ]
+    const res = await importOkfBundle(store, files)
+    expect(res).toMatchObject({ imported: 1, skipped: 4, failed: 1, okfVersion: "0.1" })
+    const byPath = Object.fromEntries(res.items.map((i) => [i.path, i]))
+    expect(byPath["index.md"]?.reason).toBe("reserved")
+    expect(byPath["notes.txt"]?.reason).toBe("not-markdown")
+    expect(byPath["blank.md"]?.reason).toBe("empty")
+    expect(byPath["no-type.md"]?.reason).toBe("no-type")
+    expect(byPath["kb/taken.md"]?.status).toBe("failed")
+    expect(byPath["kb/good.md"]).toMatchObject({ status: "imported", slug: "kb/good" })
+    expect((await store.getMemory("kb/good"))?.body).toBe("hello") // the good one still landed
   })
 })
