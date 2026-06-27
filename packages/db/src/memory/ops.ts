@@ -142,7 +142,8 @@ export const OKF_EXPORT_OP = defineOp({
     "+ log.md). Vendor-neutral markdown; portable to any OKF tool.",
   capability: "read",
   readOnly: true,
-  input: z.object({ path: z.string().optional(), prefix: z.boolean().default(false) }),
+  // A bundle export under a path means the WHOLE subtree by default (not just direct children).
+  input: z.object({ path: z.string().optional(), prefix: z.boolean().default(true) }),
   output: z.object({
     okfVersion: z.string(),
     count: z.number(),

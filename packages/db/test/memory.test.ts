@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { exportOkfBundle, importOkfBundle, parseDocument } from "../src/memory/okf"
+import { setMemory } from "../src/memory/ops"
 import { MemoryStore } from "../src/memory/store"
 import { makeDb, principal, withBatch } from "./helpers"
 
@@ -67,6 +68,16 @@ describe("memory_set — create, update, versioning", () => {
 
     const history = await store.getMemoryHistory("s")
     expect(history.map((r) => r.version)).toEqual([2, 1]) // newest-first; the no-op wrote nothing
+  })
+
+  test("the real op path is a no-op for identical content despite a fresh timestamp", async () => {
+    // setMemory injects a fresh OKF `timestamp` every call; skip-unchanged must still fire.
+    const { store } = build()
+    const req = { slug: "s", type: "note", body: "same", title: "T" }
+    await setMemory(store, req, "2026-01-01T00:00:00.000Z")
+    const second = await setMemory(store, req, "2026-06-28T00:00:00.000Z")
+    expect(second.changed).toBe(false)
+    expect((await store.getMemoryHistory("s")).length).toBe(1) // no no-op revision
   })
 })
 
