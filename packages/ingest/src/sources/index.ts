@@ -8,7 +8,7 @@
 export { createChatGptImporter } from "./chatgpt"
 export { createClaudeCodeImporter } from "./claude-code"
 export { runImporterContract } from "./contract"
-export { createObsidianImporter, type VaultR2 } from "./obsidian"
+export { createObsidianImporter, extractTags, pathParts, type VaultR2 } from "./obsidian"
 export type {
   ImportBatch,
   ImportedSession,

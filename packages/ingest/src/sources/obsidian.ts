@@ -72,7 +72,7 @@ const BATCH_SIZE = 25
  *   scalar:       `tags: sales`
  * Cannot import `parseDocument` from `@brain/db/memory/okf` (circular dep); this covers Phase 1.
  */
-const extractTags = (content: string): string[] => {
+export const extractTags = (content: string): string[] => {
   // No `m` flag: frontmatter must be at file start; the `m` flag would let mid-body `---` pairs
   // be mis-parsed as frontmatter (okf's parseDocument uses the same anchored approach).
   const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
@@ -117,7 +117,7 @@ const extractTags = (content: string): string[] => {
  *   vaultPath "Projects/Acme/notes.md" → slug "Projects/Acme/notes", path "/Projects/Acme"
  *   vaultPath "inbox.md"               → slug "inbox",                path "/"
  */
-const pathParts = (vaultPath: string): { slug: string; path: string } => {
+export const pathParts = (vaultPath: string): { slug: string; path: string } => {
   const slug = vaultPath.replace(/\.(md|markdown)$/i, "")
   const lastSlash = slug.lastIndexOf("/")
   const path = lastSlash === -1 ? "/" : `/${slug.slice(0, lastSlash)}`

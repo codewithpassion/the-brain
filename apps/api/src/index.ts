@@ -74,6 +74,7 @@ import {
   type SessionBindings,
   sessionServicesFor,
 } from "./sessions"
+import { handleVaultEventQueue, type R2EventMessage } from "./vault-events/consume"
 
 /**
  * Parse a comma-separated tags string (or undefined) into a trimmed, non-empty string array.
@@ -660,18 +661,22 @@ const scheduled = async (
 }
 
 /**
- * `queue()`: dispatch by queue name — `brain-backfill` → `handleBackfillQueue` (enumerate→consume
- * →capture), `brain-reembed` → `handleReembedQueue` (re-embed one chunk in place). Each handler
- * acks/retries per message and routes exhausted messages to its DLQ.
+ * `queue()`: dispatch by queue name:
+ *   - `brain-backfill`     → `handleBackfillQueue` (enumerate→consume→capture)
+ *   - `brain-reembed`      → `handleReembedQueue` (re-embed one chunk in place)
+ *   - `brain-vault-events` → `handleVaultEventQueue` (R2 event notification → incremental ingest)
+ * Each handler acks/retries per message and routes exhausted messages to its DLQ.
  */
 const queue = async (
-  batch: MessageBatch<BackfillMessage | ReembedMessage>,
+  batch: MessageBatch<BackfillMessage | ReembedMessage | R2EventMessage>,
   env: WorkerBindings,
 ): Promise<void> => {
   if (batch.queue === "brain-backfill") {
     await handleBackfillQueue(batch as MessageBatch<BackfillMessage>, env)
   } else if (batch.queue === "brain-reembed") {
     await handleReembedQueue(batch as MessageBatch<ReembedMessage>, env)
+  } else if (batch.queue === "brain-vault-events") {
+    await handleVaultEventQueue(batch as MessageBatch<R2EventMessage>, env)
   }
 }
 

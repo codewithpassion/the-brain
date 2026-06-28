@@ -126,6 +126,21 @@
         "max_concurrency": 10,
         "retry_delay": 30,
         "dead_letter_queue": "brain-reembed-dlq"
+      },
+      {
+        // brain-vault-events: R2 event notifications → near-real-time vault ingest (Phase 4).
+        // R2 produces to this queue via:
+        //   wrangler r2 bucket notification create the-brain-bodies \
+        //     --event-type object-create --event-type object-delete \
+        //     --queue brain-vault-events --prefix <tenantId>/vault/
+        // No producer binding is needed — R2 writes to the queue directly.
+        "queue": "brain-vault-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "max_concurrency": 10,
+        "retry_delay": 30,
+        "dead_letter_queue": "brain-vault-events-dlq"
       }
     ]
   },

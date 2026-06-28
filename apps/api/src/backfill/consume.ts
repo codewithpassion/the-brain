@@ -5,28 +5,15 @@
  *   1. Reconstructs the `Principal` from the message's explicit `tenant_id`, FAIL-CLOSED.
  *   2. Drives the item idempotently (invariant 15):
  *
- *   `doc` items (Phase 2 — supersede-by-slug):
- *   - If `message.stableSlug` is present (Obsidian Phase-2 doc), the slug is the stable vault path
- *     (e.g. "Projects/Acme/notes"), NOT the Phase-1 `bf-${fingerprint}`. Idempotency rests on
- *     `(tenant_id, slug)` + fingerprint comparison:
- *       • No existing row → INSERT + ingest (fresh note).
- *       • Existing row, same fingerprint, live → no-op (unchanged note) or resume (non-terminal).
- *       • Existing row, different fingerprint OR soft-deleted → SUPERSEDE: hard-delete old chunks
- *         (freeing PK space so re-ingest can write new chunks with the same `docId:idx` ids — see
- *         note below), delete old Vectorize vectors, update doc row (new fingerprint, clear deleted_at,
- *         status=pending), then re-ingest. The same doc UUID is reused so Vectorize ids stay ≤41 chars.
- *       Note on hard-delete-for-supersede: the task specifies "soft-delete the old version's chunks"
- *       but chunk ids are deterministic (`${docId}:${chunkIndex}`). Soft-deleted rows still hold
- *       the PK, so `insertChunks` (which uses `onConflictDoNothing`) would silently skip writing new
- *       content. Hard-delete is the minimal correct solution; it is noted in the Phase-2 report.
- *   - If `message.stableSlug` is absent (Phase-1 or non-obsidian doc), the Phase-1 `bf-${fingerprint}`
- *     slug path is used unchanged (no regression).
+ *   `doc` items (Phase 2 — supersede-by-slug): delegates to `runDocIngestCore` which handles the
+ *   three-way branch (fresh insert / no-op resume / supersede) and then calls `runBatchIngest`.
+ *   Shared with the Phase-4 `brain-vault-events` consumer so the supersede logic cannot diverge.
  *
  *   `session` items: reads staged `ImportedSession` from R2 + persists via `captureSession`.
  *
  * `handleBackfillQueue` is the deploy-time consumer: per-message `ack`/`retry`.
  */
-import { createBackfillServices, principalFromMessage } from "@brain/db"
+import { type BackfillServices, createBackfillServices, principalFromMessage } from "@brain/db"
 import type { ImportedSession } from "@brain/ingest"
 import { runBatchIngest } from "../ingest"
 import type { BackfillBindings } from "./bindings"
@@ -46,6 +33,113 @@ export class BackfillRejectError extends Error {
 
 /** Phase-1 slug: content-addressed, used when `stableSlug` is absent (non-obsidian or Phase-1). */
 const legacyDocSlug = (fingerprint: string): string => `bf-${fingerprint}`
+
+/**
+ * Parameters for the supersede-by-slug doc ingest core — shared by the `brain-backfill` consumer
+ * (via `runBackfillMessage`) and the `brain-vault-events` consumer (direct call).
+ */
+export interface DocIngestParams {
+  slug: string
+  fingerprint: string
+  /** Tenant-relative R2 key where the doc body lives (read by `runBatchIngest`). */
+  payloadRef: string
+  contentType: string
+  sourceId?: string
+  /** When true, stamps `sourceKind:"obsidian"` on a fresh insert (Phase-2 stable-slug docs). */
+  isPhase2?: boolean
+  path?: string
+  tags?: string[]
+  /** Discriminates which consumer created the doc (default `"backfill-queue"`). */
+  ingestedVia?: string
+}
+
+/**
+ * The supersede-by-slug doc ingest core — shared between consumers.
+ *
+ * Three-way branch (idempotent, invariant 15):
+ *   • No existing row → INSERT + ingest (fresh note).
+ *   • Existing row, same fingerprint, live → no-op (unchanged note) or resume (non-terminal).
+ *   • Existing row, different fingerprint OR soft-deleted → SUPERSEDE: hard-delete old chunks
+ *     (freeing PK space so re-ingest can write fresh chunks with the same `docId:idx` ids),
+ *     delete old Vectorize vectors, update doc row (new fingerprint, clear deleted_at, status=pending),
+ *     then re-ingest. The same doc UUID is reused so Vectorize ids stay ≤41 chars (cap-safe).
+ *
+ * Note on hard-delete-for-supersede: chunk ids are deterministic (`${docId}:${chunkIndex}`).
+ * Soft-deleted rows still hold the PK, so `insertChunks` (`onConflictDoNothing`) would silently
+ * skip new content. Hard-delete is the minimal correct solution.
+ */
+export const runDocIngestCore = async (
+  services: BackfillServices,
+  params: DocIngestParams,
+): Promise<void> => {
+  const {
+    slug,
+    fingerprint,
+    payloadRef,
+    contentType,
+    sourceId,
+    isPhase2,
+    path,
+    tags,
+    ingestedVia,
+  } = params
+
+  // Look up the existing row by slug FIRST (avoids a spurious INSERT in the common no-op / supersede
+  // cases; also avoids hitting the fingerprint unique index for Phase-2 stable slugs).
+  const existing = await services.db.getDocumentBySlug(slug)
+  let docId: string
+
+  if (existing !== null) {
+    const isDeleted = existing.deletedAt !== null
+    const sameFingerprint = existing.fingerprint === fingerprint
+
+    if (!isDeleted && sameFingerprint) {
+      // Unchanged note, live doc: no-op (terminal status) or resume (non-terminal).
+      if (existing.status === "indexed" || existing.status === "failed") return
+      docId = existing.id
+    } else {
+      // Changed content (different fingerprint) OR previously deleted (resurrection): supersede.
+      const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(existing.id)
+      if (oldChunkIds.length > 0) {
+        // Orphan vectors in Vectorize are tolerable (D1 re-check drops them), but explicit
+        // deletion keeps the index tidy.
+        await services.vectors.deleteVectors(oldChunkIds)
+      }
+      // Reuse the same UUID so chunkIds stay cap-safe; clear deleted_at for resurrection.
+      await services.db.updateDocumentForSupersede(existing.id, {
+        fingerprint,
+        bodyR2Key: payloadRef,
+        deletedAt: null,
+      })
+      docId = existing.id
+    }
+  } else {
+    // No existing row: insert fresh. May throw on UNIQUE conflict (race or Phase-1 fingerprint
+    // collision — see note in doc-string above). Resolve by DB state; never fail-open.
+    try {
+      docId = await services.db.insertDocument({
+        slug,
+        fingerprint,
+        contentType,
+        bodyR2Key: payloadRef,
+        status: "pending",
+        ...(sourceId !== undefined ? { sourceId } : {}),
+        // Phase 2 obsidian docs get sourceKind="obsidian" so the cron reconcile can find them.
+        ...(isPhase2 ? { sourceKind: "obsidian" } : {}),
+        ingestedVia: ingestedVia ?? "backfill-queue",
+        ...(path !== undefined ? { path } : {}),
+        ...(tags !== undefined ? { tags } : {}),
+      })
+    } catch (err) {
+      const retry = await services.db.getDocumentBySlug(slug)
+      if (retry === null) throw err
+      if (retry.status === "indexed" || retry.status === "failed") return
+      docId = retry.id
+    }
+  }
+
+  await runBatchIngest(services, { documentId: docId, r2Key: payloadRef, contentType })
+}
 
 /**
  * Process ONE backfill message. Resolves on success OR an idempotent dedup skip; THROWS on a
@@ -71,79 +165,24 @@ export const runBackfillMessage = async (
     return
   }
 
-  // kind === "doc": UUID document id (cap-safe: 36 chars → chunkId ≤ 41 chars, under CF's 64-byte cap).
+  // kind === "doc" — delegate to the shared supersede-by-slug core (Phase 2+).
+  // UUID document ids are cap-safe: 36 chars → chunkId ≤ 41 chars, under CF's 64-byte cap.
   const contentType = message.contentType ?? "text/markdown"
-
-  // Phase 2: if a stableSlug is present, use it as the document slug (stable across edits).
-  // Otherwise fall back to the Phase-1 `bf-${fingerprint}` derivation (no regression).
   const slug =
     message.stableSlug !== undefined ? message.stableSlug : legacyDocSlug(message.fingerprint)
   const isPhase2 = message.stableSlug !== undefined
 
-  // Look up the existing row by slug FIRST (avoids a spurious INSERT attempt in the common
-  // supersede / no-op cases; also avoids INSERT on the fingerprint unique index for Phase-2).
-  const existing = await services.db.getDocumentBySlug(slug)
-
-  let docId: string
-
-  if (existing !== null) {
-    const isDeleted = existing.deletedAt !== null
-    const sameFingerprint = existing.fingerprint === message.fingerprint
-
-    if (!isDeleted && sameFingerprint) {
-      // Unchanged note, live doc: no-op or resume.
-      if (existing.status === "indexed" || existing.status === "failed") return // terminal
-      // Non-terminal (pending/processing): prior delivery crashed after insert → resume.
-      docId = existing.id
-    } else {
-      // Changed content (different fingerprint) OR previously deleted (resurrection): supersede.
-      // Hard-delete old chunks first so re-ingest can write fresh chunks with the same PK ids.
-      const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(existing.id)
-      if (oldChunkIds.length > 0) {
-        // Delete old Vectorize vectors off-batch; orphan vectors in Vectorize are tolerable
-        // (D1 re-check drops them), but explicit deletion keeps the index tidy.
-        await services.vectors.deleteVectors(oldChunkIds)
-      }
-      // Update the doc row: new fingerprint, new body key, status=pending (re-triggers ingest),
-      // clear deleted_at (resurrection). The same UUID is reused so chunkIds stay cap-safe.
-      await services.db.updateDocumentForSupersede(existing.id, {
-        fingerprint: message.fingerprint,
-        bodyR2Key: message.payloadRef,
-        deletedAt: null,
-      })
-      docId = existing.id
-    }
-  } else {
-    // No existing row: insert fresh. May throw on UNIQUE conflict (race or Phase-1 fingerprint
-    // collision — see note in doc-string above).
-    try {
-      docId = await services.db.insertDocument({
-        // No explicit id — insertDocument generates a UUID; slug uniqueness handles re-delivery.
-        slug,
-        fingerprint: message.fingerprint,
-        contentType,
-        bodyR2Key: message.payloadRef,
-        status: "pending",
-        sourceId: message.sourceId,
-        // Phase 2 obsidian docs get sourceKind="obsidian" so the reconcile can find them.
-        ...(isPhase2 ? { sourceKind: "obsidian" } : {}),
-        ingestedVia: "backfill-queue",
-        ...(message.path !== undefined ? { path: message.path } : {}),
-        ...(message.tags !== undefined ? { tags: message.tags } : {}),
-      })
-    } catch (err) {
-      // Resolve by DB STATE (invariant: never fail-open on UNIQUE conflicts).
-      // If getDocumentBySlug still returns null here, this is either a genuine transient error
-      // OR a Phase-1/Phase-2 fingerprint index collision (documented in Phase-2 report).
-      // In both cases rethrow → retry → DLQ.
-      const retry = await services.db.getDocumentBySlug(slug)
-      if (retry === null) throw err
-      if (retry.status === "indexed" || retry.status === "failed") return
-      docId = retry.id
-    }
-  }
-
-  await runBatchIngest(services, { documentId: docId, r2Key: message.payloadRef, contentType })
+  await runDocIngestCore(services, {
+    slug,
+    fingerprint: message.fingerprint,
+    payloadRef: message.payloadRef,
+    contentType,
+    sourceId: message.sourceId,
+    isPhase2,
+    ...(message.path !== undefined ? { path: message.path } : {}),
+    ...(message.tags !== undefined ? { tags: message.tags } : {}),
+    // ingestedVia defaults to "backfill-queue" in runDocIngestCore
+  })
 }
 
 /**

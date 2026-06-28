@@ -7,11 +7,13 @@
 export type { BackfillBindings } from "./bindings"
 export type { CaptureSessionResult, ImportCaptureResult } from "./capture"
 export { captureSession, runImportCapture } from "./capture"
+export type { DocIngestParams } from "./consume"
 export {
   BACKFILL_RETRY_DELAY,
   BackfillRejectError,
   handleBackfillQueue,
   runBackfillMessage,
+  runDocIngestCore,
 } from "./consume"
 export type {
   EnumerateDeps,

@@ -156,8 +156,69 @@ A community plugin, **`isDesktopOnly:false`**, mobile-compatible. Respect the mo
 - **Commands:** "Ask the Brain" (insert a cited answer over your whole vault), "Search Brain", "Related / backlinks (graph)", "Capture this note → memory", "Pull Brain notes".
 - **Distribute:** **BRAT** (install from the GitHub repo, auto-updates) during beta → community store for GA.
 
-### Phase 4 — Real-time + sync polish (optional) · as needed
-- Wire **R2 event notifications → a Queue consumer** (GA): `wrangler r2 bucket notification create the-brain-bodies --event-type object-create --event-type object-delete --queue <q>` with a `vault/` prefix filter → incremental, near-real-time ingest (replaces cron polling; at-least-once, no strict latency SLA).
+### Phase 4 — Real-time + sync polish · **BUILT** (see `apps/api/src/vault-events/consume.ts`)
+
+R2 event notifications → `brain-vault-events` queue → per-note ingest/delete, near-real-time. Cron stays as a backstop/reconcile.
+
+**Deployed files:**
+- `apps/api/src/vault-events/consume.ts` — `runVaultEventMessage` (testable core) + `handleVaultEventQueue` consumer
+- `apps/api/src/backfill/consume.ts` — extracted `runDocIngestCore` (shared supersede logic)
+- `apps/api/wrangler.jsonc` — `brain-vault-events` consumer + DLQ `brain-vault-events-dlq`
+- `apps/api/test/vault-events.canary.test.ts` — create/update/delete/skip/idempotent/fail-closed tests
+
+**One-time setup (run once per bucket, per environment):**
+
+```sh
+# Create the queues (if not already created)
+wrangler queues create brain-vault-events
+wrangler queues create brain-vault-events-dlq
+
+# Wire R2 → queue. A per-tenant prefix filter scopes events to only vault objects for that
+# tenant. Repeat for each tenant, replacing <tenantId> with the actual org id (e.g. org_abc123).
+# If you want ALL tenants in one notification, omit --prefix (consumer skips non-vault keys).
+wrangler r2 bucket notification create the-brain-bodies \
+  --event-type object-create \
+  --event-type object-delete \
+  --queue brain-vault-events \
+  --prefix <tenantId>/vault/
+
+# Re-deploy the Worker to pick up the new consumer binding:
+wrangler deploy
+```
+
+> ⚠️ **Multi-tenant isolation caveat (load-bearing).** The vault-event consumer derives the tenant
+> from the object key's first segment and reconstructs that tenant's principal **fail-closed** (an
+> unknown tenant → DLQ; every read/write is tenant-forced via `Scoped*`). So the consumer *code* is
+> isolation-safe by construction and cannot move data between tenants. **However**, the security of
+> the `${tenantId}/vault/` boundary then rests on the **R2 write credential**, not the consumer.
+> Remotely Save writes to R2 with a **bucket-scoped** S3 token (R2 tokens scope to a *bucket*, not a
+> *key-prefix*). On a **shared** `the-brain-bodies` bucket, any device holding a vault token could
+> `PUT victimTenant/vault/x.md` → the event fires → the consumer faithfully ingests it into the
+> victim's Brain. **This is fine for the current single-tenant deployment.** For multi-tenant, the
+> `${tenantId}/vault/` prefix MUST be credential-enforced: give each tenant a **separate vault R2
+> bucket** (§9 alternative), or front vault writes with a Worker/`ScopedR2` facade — do NOT rely on
+> the shared-bucket + bucket-scoped-token model. (Same constraint already noted for direct R2 body
+> access; the event path inherits it.)
+>
+> **Also:** event-ingested docs adopt the `sourceId` of the first configured `obsidian` source so
+> cron-reconcile can find them; with **zero** obsidian sources configured they ingest with a null
+> `sourceId` (still `sourceKind:"obsidian"`) and won't be reconciled — configure the source first.
+> `LifecycleDeletion` is treated as a delete; markdown PUTs are single-part so event/cron ETags match.
+
+**Event format (Cloudflare R2, verified 2026-06-28):**
+```json
+{
+  "account": "...",
+  "action": "PutObject",
+  "bucket": "the-brain-bodies",
+  "object": { "key": "<tenantId>/vault/<path>.md", "size": 1234, "eTag": "<md5>" },
+  "eventTime": "2026-06-28T10:00:00.000Z"
+}
+```
+Delete events omit `size` and `eTag`. The consumer handles `PutObject`, `CopyObject`, `CompleteMultipartUpload` (create/update) and `DeleteObject` (delete). Unknown actions are skipped silently.
+
+**ETag consistency note (for adversarial review):** The fingerprint computed by the vault-event consumer (`obsidian:<vaultPath>:<eTag>`) uses the `eTag` from the R2 event notification. The cron importer computes the same fingerprint using `obj.etag` from `R2.list()`. For single-part PUTs (which all markdown vault notes are), both APIs return the content MD5 — so fingerprints match, and a cron run after an event ingest is a no-op. Multipart uploads (not triggered by Remotely Save for markdown) could produce different ETags; this is documented but not a concern in practice.
+
 - Optional **Worker-based WebDAV/S3 facade** over R2 if you ever want the Brain itself to *be* the sync endpoint (vs Remotely Save → R2 directly). Mind the Worker single-PUT size limit (~100–128 MB) for large attachments.
 
 ---
