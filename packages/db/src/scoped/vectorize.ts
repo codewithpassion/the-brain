@@ -101,6 +101,20 @@ export class ScopedVectorize {
   }
 
   /**
+   * Delete vectors by id (Phase 2 — document deletion + supersede). Batches calls to avoid
+   * exceeding any per-call cap; each batch of VECTORIZE_DELETE_BATCH_SIZE ids is one
+   * `deleteByIds` call. Vector ids are globally unique (UUID docId + ":"+chunkIdx), so no
+   * namespace filter is required — only this tenant's vectors carry this tenant's doc UUID.
+   */
+  async deleteVectors(ids: string[]): Promise<void> {
+    if (ids.length === 0) return
+    const BATCH = 500 // conservative cap; Vectorize deleteByIds limit is not published
+    for (let i = 0; i < ids.length; i += BATCH) {
+      await this.index.deleteByIds(ids.slice(i, i + BATCH))
+    }
+  }
+
+  /**
    * Upsert a vector. `namespace = tenantId` is hard-wired; `tenant_id` is also stamped
    * into metadata (belt-and-suspenders) alongside the scope/team/visibility/embedding_model
    * fields the metadata indexes and the re-embed migration read.

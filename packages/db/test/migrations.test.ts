@@ -79,13 +79,13 @@ const BASE_TABLES = [
 
 describe("migrations apply cleanly", () => {
   test("the migration set is the drizzle-managed base + hand-written FTS + the base catch-up", () => {
-    // Base-table DDL is drizzle-generated (0000 + the 0002 catch-up that folded the former
-    // hand-written ALTERs + page_revisions); only the FTS5/expression SQL drizzle cannot model
-    // stays hand-written (0001). `db:generate` is a clean no-op against meta/0002_snapshot.json.
+    // Base-table DDL is drizzle-generated (0000, 0002, 0003); only the FTS5/expression SQL drizzle
+    // cannot model stays hand-written (0001). `db:generate` is a clean no-op after each migration.
     expect(migrationFiles()).toEqual([
       "0000_init.sql",
       "0001_fts5_and_expression_indexes.sql",
       "0002_path_columns_and_page_revisions.sql",
+      "0003_smooth_leper_queen.sql",
     ])
   })
 

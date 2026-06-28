@@ -7,7 +7,9 @@ import type { BackfillBindings } from "../src/backfill"
 import {
   type BackfillMessage,
   BackfillRejectError,
+  listVaultSlugs,
   type ReembedMessage,
+  reconcileObsidianDeletions,
   runBackfillMessage,
   runEnumerate,
   runReembedMessage,
@@ -222,5 +224,82 @@ describe("backfill spine canary (real local D1 + R2 in workerd)", () => {
     // RE-DELIVERY: the chunk is no longer stale → getCandidate null → no second upsert (idempotent).
     await runReembedMessage(aiEnv, message)
     expect(upserts).toHaveLength(1)
+  })
+})
+
+// ── FIX 2 — reconcile safety: partial listing + circuit breaker ──────────────
+
+describe("reconcileObsidianDeletions — FIX 2 safety guards", () => {
+  test("circuit-breaker: aborts without deleting when candidates exceed 50% threshold", async () => {
+    // Minimal mock BackfillServices: getDocumentsBySource returns 10 docs;
+    // the vault slug set contains only 1 → would delete 9 (90%) → circuit breaker fires.
+    const deleted: string[] = []
+    const mockServices = {
+      db: {
+        getDocumentsBySource: async () =>
+          Array.from({ length: 10 }, (_, i) => ({ id: `d${i}`, slug: `note-${i}` })),
+        softDeleteDocument: async (id: string) => {
+          deleted.push(id)
+          return { chunkIds: [] }
+        },
+      },
+      vectors: { deleteVectors: async () => {} },
+      graph: { clearPriorExtraction: async () => {} },
+    }
+
+    const result = await reconcileObsidianDeletions(
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock for circuit-breaker test
+      mockServices as any,
+      "src-cb",
+      new Set(["note-0"]), // only 1 of 10 in vault
+    )
+
+    // Circuit breaker must abort: 0 actual deletes and result.deleted = 0.
+    expect(result.deleted).toBe(0)
+    expect(deleted).toHaveLength(0)
+  })
+
+  test("circuit-breaker: proceeds when delete count is within threshold", async () => {
+    // 10 docs, vault has 8 → delete 2 (20%) — below 50% threshold.
+    const deleted: string[] = []
+    const mockServices = {
+      db: {
+        getDocumentsBySource: async () =>
+          Array.from({ length: 10 }, (_, i) => ({ id: `d${i}`, slug: `note-${i}` })),
+        softDeleteDocument: async (id: string) => {
+          deleted.push(id)
+          return { chunkIds: [] }
+        },
+      },
+      vectors: { deleteVectors: async () => {} },
+      graph: { clearPriorExtraction: async () => {} },
+    }
+
+    const vaultSlugs = new Set(Array.from({ length: 8 }, (_, i) => `note-${i}`))
+    const result = await reconcileObsidianDeletions(
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock for circuit-breaker test
+      mockServices as any,
+      "src-cb2",
+      vaultSlugs,
+    )
+
+    expect(result.deleted).toBe(2)
+    expect(deleted).toHaveLength(2)
+  })
+
+  test("listVaultSlugs: throws when R2 returns truncated=true with no cursor", async () => {
+    // A mock ScopedR2 that simulates the truncated-but-no-cursor R2 bug.
+    const mockBlobs = {
+      list: async () => ({
+        objects: [{ key: "tenant1/vault/note.md", etag: "e1" }],
+        truncated: true,
+        cursor: undefined, // missing cursor on a truncated response
+      }),
+    }
+
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock for partial-listing test
+      listVaultSlugs(mockBlobs as any, "tenant1", "vault/"),
+    ).rejects.toThrow("truncated=true with no cursor")
   })
 })

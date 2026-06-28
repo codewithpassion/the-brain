@@ -19,7 +19,14 @@ export type {
   EnumeratorWorkflowParams,
   ImporterClient,
 } from "./enumerate"
-export { EnumeratorWorkflow, importerForClient, runEnumerate, stageKey } from "./enumerate"
+export {
+  EnumeratorWorkflow,
+  importerForClient,
+  listVaultSlugs,
+  reconcileObsidianDeletions,
+  runEnumerate,
+  stageKey,
+} from "./enumerate"
 export type { BackfillMessage, ReembedMessage } from "./messages"
 export {
   estimateReembedNeurons,

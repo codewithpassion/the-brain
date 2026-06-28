@@ -42,6 +42,7 @@ export const documents = sqliteTable(
     metadata: text("metadata"),
     createdAt: text("created_at"),
     updatedAt: text("updated_at"),
+    deletedAt: text("deleted_at"), // soft-delete; search and listDocuments filter deleted_at IS NULL
   },
   (t) => [
     uniqueIndex("ux_documents_tenant_fp").on(t.tenantId, t.scope, t.fingerprint), // dedup backstop

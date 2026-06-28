@@ -28,6 +28,7 @@ import {
   createScopedServices,
   createSessionServices,
   createSnapshot,
+  DELETE_DOCUMENT_OP,
   exportOkfBundle,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
@@ -73,6 +74,7 @@ import {
   submitMemoryReview,
   type ThinkResult,
   thinkOp,
+  VAULT_WRITEBACK_OP,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
@@ -466,6 +468,108 @@ const ingestDocumentSurfaceOp: SurfaceOp = {
   },
 }
 
+// ── Vault-writeback helper — stamps `source: brain` frontmatter ──────────────
+
+/**
+ * Prepend `source: brain` into YAML frontmatter (or add a new frontmatter block) so the
+ * Obsidian importer recognises these as Brain-authored and skips them on re-ingest.
+ * No dependency on `parseDocument` (circular) — a targeted regex is sufficient here.
+ *
+ * CRLF safety: capture the opening fence (`---\n` or `---\r\n`) and use its actual length
+ * as the injection offset so CRLF files are not malformed.
+ * source: detection uses `/^source:/m` (line-anchored) to avoid false-positives on keys
+ * like `data-source:`.
+ */
+const stampBrainFrontmatter = (content: string): string => {
+  const FM_RE = /^(---\r?\n)([\s\S]*?)\r?\n---/
+  const match = FM_RE.exec(content)
+  if (match !== null) {
+    // Frontmatter exists: inject `source: brain` if absent.
+    // Line-anchored test so `data-source:` etc. don't false-positive.
+    if (!/^source:/m.test(match[2] ?? "")) {
+      const fenceLen = (match[1] ?? "---\n").length
+      return `${content.slice(0, match.index + fenceLen)}source: brain\n${content.slice(match.index + fenceLen)}`
+    }
+    return content // already has source:
+  }
+  // No frontmatter: prepend a minimal block.
+  return `---\nsource: brain\n---\n\n${content}`
+}
+
+// ── Delete document ───────────────────────────────────────────────────────────
+
+/**
+ * `delete_document` — soft-delete a document by id or slug. Removes all its chunks from D1
+ * (soft-delete), then deletes the corresponding Vectorize vectors off-batch.
+ */
+const deleteDocumentSurfaceOp: SurfaceOp = {
+  def: DELETE_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const { documentId, slug } = DELETE_DOCUMENT_OP.input.parse(input)
+    if (documentId === undefined && slug === undefined) {
+      throw new Error("delete_document: provide exactly one of documentId or slug")
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+
+    // Resolve to a document id — by explicit id, or by slug lookup.
+    let docId: string | null = null
+    if (documentId !== undefined) {
+      docId = documentId
+    } else if (slug !== undefined) {
+      const row = await services.db.getDocumentBySlug(slug)
+      docId = row?.id ?? null
+    }
+
+    if (docId === null) {
+      return { documentId: null, deleted: false }
+    }
+
+    const { chunkIds } = await services.db.softDeleteDocument(docId)
+    if (chunkIds.length > 0) {
+      await services.vectors.deleteVectors(chunkIds)
+    }
+    // Clear the KG knowledge extracted from this document: clear mentions, prune relations,
+    // and GC any entity that has no remaining mentions across the tenant (so the entity arm
+    // entityFtsIds / recheckEntities no longer surfaces deleted-note entities).
+    await services.graph.clearPriorExtraction(
+      { sourceKind: "document", sourceId: docId },
+      { gcOrphanedEntities: true },
+    )
+    return { documentId: docId, deleted: true }
+  },
+}
+
+// ── Vault write-back ──────────────────────────────────────────────────────────
+
+/**
+ * `vault_writeback` — write Brain-authored files to the Obsidian vault's `Brain/` prefix in R2.
+ * Files are stamped with `source: brain` frontmatter so the importer skips them on re-ingest.
+ */
+const vaultWritebackSurfaceOp: SurfaceOp = {
+  def: VAULT_WRITEBACK_OP,
+  invoke: async (ctx, input) => {
+    const { files } = VAULT_WRITEBACK_OP.input.parse(input) as {
+      files: { path: string; content: string }[]
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    let written = 0
+    for (const file of files) {
+      // Strip leading slashes, remove `..` and `.` segments (defense-in-depth against a
+      // filesystem-sync client that normalises `..`), then place under the reserved Brain/ prefix.
+      const safePath = file.path
+        .replace(/^\/+/, "")
+        .split("/")
+        .filter((seg) => seg !== ".." && seg !== ".")
+        .join("/")
+      const vaultPath = `vault/Brain/${safePath}`
+      const stamped = stampBrainFrontmatter(file.content)
+      await services.blobs.put(vaultPath, stamped)
+      written++
+    }
+    return { written }
+  },
+}
+
 /**
  * The full surface catalog (search → graph → session → governance → ingest → admin). The order is
  * purely cosmetic; the generators key off `def.surfaces` / `def.name`, and the drift test asserts
@@ -495,5 +599,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,
   ingestDocumentSurfaceOp,
+  deleteDocumentSurfaceOp,
+  vaultWritebackSurfaceOp,
   ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
 ]

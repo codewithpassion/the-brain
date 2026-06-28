@@ -147,6 +147,9 @@ Goal: every note becomes a searchable, namespace-scoped Brain document.
 3. ~~**Frontmatter parsing**~~ → **✅ DONE** via `okf_import` (`parseDocument`). Same caveat as #2 for the document view.
 4. **Write-back:** brain-authored notes (synthesized summaries, captured agent memory, daily digests) written to a **`Brain/` folder** in the R2 vault → Remotely Save pulls them into Obsidian on all devices. **`okf_export` already emits a ready-to-write bundle** (`index.md` + concept `.md` + `log.md`); the writer just streams those files to R2 under `Brain/`. Keep brain-owned files in a reserved folder to avoid clobbering user notes.
 
+> ⚠️ **Phase-1 → Phase-2 slug/fingerprint collision (pre-deployment migration required for non-fresh envs).**
+> Phase-1 obsidian ingestion stored docs with legacy slugs (e.g. `bf-obsidian:path:etag`) and no `source_kind`. Phase-2 uses vault-path slugs (e.g. `Projects/notes`) and `source_kind='obsidian'`. If Phase 2 is deployed to an environment that already ran Phase-1 obsidian ingestion, unchanged notes will DLQ on the fingerprint `UNIQUE (tenant_id, scope, fingerprint)` index, and edited notes will duplicate (new slug, no supersede). **Before deploying Phase 2 to any such environment, run a one-time migration** to re-slug Phase-1 obsidian docs to vault paths and stamp `source_kind='obsidian'`, or wipe and re-ingest. This migration is not yet implemented — moot on fresh deployments (no Phase-1 obsidian docs exist on the live the-brain DB).
+
 ### Phase 3 — The Brain Obsidian plugin (in-editor intelligence) · ~2–3 weeks
 A community plugin, **`isDesktopOnly:false`**, mobile-compatible. Respect the mobile rules: **no Node `fs`/`crypto`/`path`/`child_process`**; use the **Vault API** for files and **`requestUrl`** for all network (also dodges CORS).
 - **Auth:** device-flow (RFC 8628) via an **`obsidian://` redirect handler + PKCE**, or paste a `bk_` API key. Tenant binds to `org_${userId}`. Store tokens encrypted.

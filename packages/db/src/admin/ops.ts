@@ -1398,6 +1398,55 @@ export const INGEST_DOCUMENT_OP = defineOp({
   }),
 })
 
+// ── DELETE_DOCUMENT_OP ────────────────────────────────────────────────────────
+
+/**
+ * `delete_document` — soft-delete a document (and its chunks + Vectorize vectors) by id or slug.
+ * Handler lives in the surface catalog (needs ScopedServices for DB + Vectorize access).
+ */
+export const DELETE_DOCUMENT_OP = defineOp({
+  name: "delete_document",
+  description:
+    "Soft-delete a document by id or slug. Marks the document and all its chunks as deleted " +
+    "(deleted_at), removes the chunk vectors from the search index, and excludes the document " +
+    "from all future search results. Provide exactly one of documentId or slug. " +
+    "Idempotent: deleting an already-deleted document is a no-op.",
+  capability: "write",
+  readOnly: false,
+  // Flat optional object (not a z.union) so the MCP inputSchema is a valid JSON Schema object
+  // and the CLI generator can derive --documentId / --slug flags. The handler enforces the xor.
+  input: z.object({
+    documentId: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    documentId: z.string().nullable(),
+    deleted: z.boolean(),
+  }),
+})
+
+// ── VAULT_WRITEBACK_OP ────────────────────────────────────────────────────────
+
+/**
+ * `vault_writeback` — write Brain-authored files to the Obsidian vault's `Brain/` prefix in R2.
+ * Stamps each file with `source: brain` frontmatter so the Obsidian importer skips them.
+ * Accepts an OKF export bundle shape (`{ files: [{path, content}] }`). Handler in catalog.ts.
+ */
+export const VAULT_WRITEBACK_OP = defineOp({
+  name: "vault_writeback",
+  description:
+    "Write Brain-authored markdown files back to the Obsidian vault's Brain/ prefix in R2. " +
+    "Each file is stamped with `source: brain` frontmatter to prevent re-ingestion by the " +
+    "Obsidian importer. Accepts an OKF bundle shape ({files:[{path,content}]}). " +
+    "Paths are written under vault/Brain/<path>.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    files: z.array(z.object({ path: z.string().min(1), content: z.string() })).min(1),
+  }),
+  output: z.object({ written: z.number().int() }),
+})
+
 /** Every bound admin op. */
 export const ADMIN_OPS = [
   mintApiKeyOp,
@@ -1422,7 +1471,10 @@ export const ADMIN_OPS = [
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */
 export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   for (const op of ADMIN_OPS) registry.register(op.def)
-  // ingest_document: registered separately; handler lives in the surface catalog (needs ScopedServices)
+  // ingest_document, delete_document, vault_writeback: registered separately;
+  // handlers live in the surface catalog (need ScopedServices for blobs/vectors/db).
   registry.register(INGEST_DOCUMENT_OP)
+  registry.register(DELETE_DOCUMENT_OP)
+  registry.register(VAULT_WRITEBACK_OP)
   return registry
 }

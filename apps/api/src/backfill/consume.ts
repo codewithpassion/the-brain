@@ -1,23 +1,30 @@
 /**
  * Stage 2 of the backfill spine — the `brain-backfill` Queue consumer (PRD §8.6, invariants 15, 18).
  *
- * `runBackfillMessage` is the per-message core (testable with NO live queue): it
- *   1. reconstructs the `Principal` from the message's explicit `tenant_id`, FAIL-CLOSED — an
- *      unknown org (or, with a `userId`, a non-member) throws `BackfillRejectError`, so the message
- *      is retried to exhaustion and lands in the DLQ (invariant 18 — never a shared HTTP secret);
- *   2. drives the item idempotently (invariant 15): a `doc` item inserts a `documents` row with a
- *      UUID id (cap-safe: 36 chars → chunkId ≤ 41 chars, under CF's 64-byte Vectorize cap) and a
- *      content-addressed slug (`bf-${fingerprint}`) as the UNIQUE dedup key; a re-delivery hits the
- *      `(tenant_id, slug)` UNIQUE conflict → the catch narrows to that conflict, looks up the
- *      existing doc's status, and re-drives `runBatchIngest` for non-terminal docs (pending /
- *      processing → resume) or skips for terminal docs (indexed / failed → no-op). Transient errors
- *      (timeout, contention) are NOT caught — they rethrow so the queue retries and eventually DLQ;
- *      a `session` item reads the staged `ImportedSession` from R2 and persists it through
- *      `captureSession` (itself marker-gated). At-least-once delivery is therefore idempotent on the
- *      second pass — no double-ingest, no doubled turns.
+ * `runBackfillMessage` is the per-message core (testable with NO live queue):
+ *   1. Reconstructs the `Principal` from the message's explicit `tenant_id`, FAIL-CLOSED.
+ *   2. Drives the item idempotently (invariant 15):
  *
- * `handleBackfillQueue` is the deploy-time consumer: per-message `ack()`/`retry()` so one poison item
- * never fails the whole batch (and exhausted retries route to `brain-backfill-dlq`).
+ *   `doc` items (Phase 2 — supersede-by-slug):
+ *   - If `message.stableSlug` is present (Obsidian Phase-2 doc), the slug is the stable vault path
+ *     (e.g. "Projects/Acme/notes"), NOT the Phase-1 `bf-${fingerprint}`. Idempotency rests on
+ *     `(tenant_id, slug)` + fingerprint comparison:
+ *       • No existing row → INSERT + ingest (fresh note).
+ *       • Existing row, same fingerprint, live → no-op (unchanged note) or resume (non-terminal).
+ *       • Existing row, different fingerprint OR soft-deleted → SUPERSEDE: hard-delete old chunks
+ *         (freeing PK space so re-ingest can write new chunks with the same `docId:idx` ids — see
+ *         note below), delete old Vectorize vectors, update doc row (new fingerprint, clear deleted_at,
+ *         status=pending), then re-ingest. The same doc UUID is reused so Vectorize ids stay ≤41 chars.
+ *       Note on hard-delete-for-supersede: the task specifies "soft-delete the old version's chunks"
+ *       but chunk ids are deterministic (`${docId}:${chunkIndex}`). Soft-deleted rows still hold
+ *       the PK, so `insertChunks` (which uses `onConflictDoNothing`) would silently skip writing new
+ *       content. Hard-delete is the minimal correct solution; it is noted in the Phase-2 report.
+ *   - If `message.stableSlug` is absent (Phase-1 or non-obsidian doc), the Phase-1 `bf-${fingerprint}`
+ *     slug path is used unchanged (no regression).
+ *
+ *   `session` items: reads staged `ImportedSession` from R2 + persists via `captureSession`.
+ *
+ * `handleBackfillQueue` is the deploy-time consumer: per-message `ack`/`retry`.
  */
 import { createBackfillServices, principalFromMessage } from "@brain/db"
 import type { ImportedSession } from "@brain/ingest"
@@ -37,13 +44,12 @@ export class BackfillRejectError extends Error {
   }
 }
 
-/** Slug-based dedup key stored in D1 (TEXT column — length is fine, not a Vectorize id). */
-const docSlug = (fingerprint: string): string => `bf-${fingerprint}`
+/** Phase-1 slug: content-addressed, used when `stableSlug` is absent (non-obsidian or Phase-1). */
+const legacyDocSlug = (fingerprint: string): string => `bf-${fingerprint}`
 
 /**
  * Process ONE backfill message. Resolves on success OR an idempotent dedup skip; THROWS on a
- * fail-closed reject (bad tenant) or a transient error — both of which the consumer routes to the
- * DLQ via retry-exhaustion.
+ * fail-closed reject (bad tenant) or a transient error — both route to the DLQ via retry-exhaustion.
  */
 export const runBackfillMessage = async (
   env: BackfillBindings,
@@ -65,41 +71,78 @@ export const runBackfillMessage = async (
     return
   }
 
-  // kind === "doc": UUID document id (cap-safe) + slug-based dedup + runBatchIngest.
-  // The UUID (36 chars) produces chunkIds of ≤ 41 chars — safely under CF's 64-byte Vectorize cap.
-  // Idempotency rests on the `(tenant_id, slug)` UNIQUE index, NOT the document id (invariant 15).
-  const slug = docSlug(message.fingerprint)
+  // kind === "doc": UUID document id (cap-safe: 36 chars → chunkId ≤ 41 chars, under CF's 64-byte cap).
   const contentType = message.contentType ?? "text/markdown"
-  let docId: string | undefined
-  try {
-    docId = await services.db.insertDocument({
-      // No explicit id — insertDocument generates a UUID; slug uniqueness handles re-delivery.
-      slug,
-      fingerprint: message.fingerprint,
-      contentType,
-      bodyR2Key: message.payloadRef,
-      status: "pending",
-      sourceId: message.sourceId,
-      ingestedVia: "backfill-queue",
-      // path + tags come from Obsidian (and future) importers via BackfillMessage.
-      ...(message.path !== undefined ? { path: message.path } : {}),
-      ...(message.tags !== undefined ? { tags: message.tags } : {}),
-    })
-  } catch (err) {
-    // Resolve by DB STATE, not by error-string matching (fragile if the UNIQUE error is wrapped
-    // in err.cause). insertDocument's batch is atomic, so a throw means THIS delivery wrote no row.
-    // Point-lookup by slug on the (tenant_id, slug) unique index — O(1), avoids a full documents
-    // scan (O(N·D) on steady-state where every unchanged note hits this path each enumerator run).
-    const existing = await services.db.getDocumentBySlug(slug)
-    // No row ⇒ the throw was a genuine transient/unknown failure → rethrow so the queue retries → DLQ.
-    if (existing === null) throw err
-    // A row exists ⇒ a PRIOR delivery created it (a real dedup conflict).
-    if (existing.status === "indexed" || existing.status === "failed") return // terminal → no-op
-    // Non-terminal (pending / processing): the prior delivery crashed after insert but before
-    // runBatchIngest completed → re-drive ingest with the EXISTING id, not a fresh UUID.
-    docId = existing.id
+
+  // Phase 2: if a stableSlug is present, use it as the document slug (stable across edits).
+  // Otherwise fall back to the Phase-1 `bf-${fingerprint}` derivation (no regression).
+  const slug =
+    message.stableSlug !== undefined ? message.stableSlug : legacyDocSlug(message.fingerprint)
+  const isPhase2 = message.stableSlug !== undefined
+
+  // Look up the existing row by slug FIRST (avoids a spurious INSERT attempt in the common
+  // supersede / no-op cases; also avoids INSERT on the fingerprint unique index for Phase-2).
+  const existing = await services.db.getDocumentBySlug(slug)
+
+  let docId: string
+
+  if (existing !== null) {
+    const isDeleted = existing.deletedAt !== null
+    const sameFingerprint = existing.fingerprint === message.fingerprint
+
+    if (!isDeleted && sameFingerprint) {
+      // Unchanged note, live doc: no-op or resume.
+      if (existing.status === "indexed" || existing.status === "failed") return // terminal
+      // Non-terminal (pending/processing): prior delivery crashed after insert → resume.
+      docId = existing.id
+    } else {
+      // Changed content (different fingerprint) OR previously deleted (resurrection): supersede.
+      // Hard-delete old chunks first so re-ingest can write fresh chunks with the same PK ids.
+      const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(existing.id)
+      if (oldChunkIds.length > 0) {
+        // Delete old Vectorize vectors off-batch; orphan vectors in Vectorize are tolerable
+        // (D1 re-check drops them), but explicit deletion keeps the index tidy.
+        await services.vectors.deleteVectors(oldChunkIds)
+      }
+      // Update the doc row: new fingerprint, new body key, status=pending (re-triggers ingest),
+      // clear deleted_at (resurrection). The same UUID is reused so chunkIds stay cap-safe.
+      await services.db.updateDocumentForSupersede(existing.id, {
+        fingerprint: message.fingerprint,
+        bodyR2Key: message.payloadRef,
+        deletedAt: null,
+      })
+      docId = existing.id
+    }
+  } else {
+    // No existing row: insert fresh. May throw on UNIQUE conflict (race or Phase-1 fingerprint
+    // collision — see note in doc-string above).
+    try {
+      docId = await services.db.insertDocument({
+        // No explicit id — insertDocument generates a UUID; slug uniqueness handles re-delivery.
+        slug,
+        fingerprint: message.fingerprint,
+        contentType,
+        bodyR2Key: message.payloadRef,
+        status: "pending",
+        sourceId: message.sourceId,
+        // Phase 2 obsidian docs get sourceKind="obsidian" so the reconcile can find them.
+        ...(isPhase2 ? { sourceKind: "obsidian" } : {}),
+        ingestedVia: "backfill-queue",
+        ...(message.path !== undefined ? { path: message.path } : {}),
+        ...(message.tags !== undefined ? { tags: message.tags } : {}),
+      })
+    } catch (err) {
+      // Resolve by DB STATE (invariant: never fail-open on UNIQUE conflicts).
+      // If getDocumentBySlug still returns null here, this is either a genuine transient error
+      // OR a Phase-1/Phase-2 fingerprint index collision (documented in Phase-2 report).
+      // In both cases rethrow → retry → DLQ.
+      const retry = await services.db.getDocumentBySlug(slug)
+      if (retry === null) throw err
+      if (retry.status === "indexed" || retry.status === "failed") return
+      docId = retry.id
+    }
   }
-  if (docId === undefined) return // unreachable; all non-throw/non-return paths above assign docId
+
   await runBatchIngest(services, { documentId: docId, r2Key: message.payloadRef, contentType })
 }
 

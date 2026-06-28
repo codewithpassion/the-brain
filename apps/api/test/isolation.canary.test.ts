@@ -450,14 +450,21 @@ describe("write-path tenant injection + audit-in-batch (invariants 1, 10) — re
   test("a batch failure rolls back BOTH the change and its audit row (D1 batch atomicity)", async () => {
     await seedOrg("wpAtom", "wp-atom")
     await seedDoc({ id: "wp-atom-doc", tenantId: "wpAtom", slug: "wp-atom-doc" })
-    // Pre-seed a chunk so a second insert with the SAME primary key fails at the DB layer.
-    await seedChunk({ id: "wp-dup", tenantId: "wpAtom", documentId: "wp-atom-doc" })
+    // insertChunks uses onConflictDoNothing() for idempotent resume (dup PK is a silent skip).
+    // To genuinely fail the batch we instead trigger a CHECK constraint violation via an invalid
+    // visibility value — ON CONFLICT DO NOTHING only silences uniqueness conflicts, not CHECK.
     const sdb = new ScopedDB(drizzle(env_.DB), principal({ tenantId: "wpAtom" }))
 
     await expect(
       sdb.insertChunks([
         { id: "wp-fresh", documentId: "wp-atom-doc", chunkIndex: 1, content: "fresh" },
-        { id: "wp-dup", documentId: "wp-atom-doc", chunkIndex: 2, content: "dup" }, // dup PK → throws
+        {
+          id: "wp-bad",
+          documentId: "wp-atom-doc",
+          chunkIndex: 2,
+          content: "bad",
+          visibility: "not-a-visibility",
+        }, // chunks_visibility_ck → throws
       ]),
     ).rejects.toThrow()
 

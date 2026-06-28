@@ -25,7 +25,7 @@ import {
   type GraphPath,
   type Principal,
 } from "@brain/shared"
-import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, like, or, type SQL, sql } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import {
   chunks,
@@ -623,8 +623,25 @@ export class ScopedGraph {
    * deletes this source's `entity_mentions`, then prunes its chunk ids out of every
    * `entity_relations.evidence_chunk_ids` — a relation with no remaining evidence is deleted
    * outright. tenant-scoped throughout; idempotent under retry.
+   *
+   * When `sourceKind === "document"`, also clears chunk-scoped mentions (sourceKind='chunk')
+   * for every chunk that belongs to the document — the extractor writes mentions via
+   * `mention(entityId, "chunk", chunkId)`, so document-level cleanup must sweep both.
+   *
+   * `opts.gcOrphanedEntities` (default false): after clearing mentions, delete any entity
+   * whose total mention count drops to zero across the entire tenant. This closes the entity-arm
+   * queryability leak (`entityFtsIds`/`recheckEntities` query the `entities` table directly, not
+   * `entity_mentions`). Also cleans up any dangling `entity_relations` rows (no FK CASCADE in
+   * the schema). Do NOT set this for re-extract cleanup (the extractor is about to re-populate);
+   * only set it on explicit document deletes.
+   *
+   * Note: `entities` rows are NOT deleted merely because their `source_chunk_ids` column is
+   * stale — only zero-mention rows are GC'd, so entities shared across documents survive correctly.
    */
-  async clearPriorExtraction(source: { sourceKind: string; sourceId: string }): Promise<void> {
+  async clearPriorExtraction(
+    source: { sourceKind: string; sourceId: string },
+    opts?: { gcOrphanedEntities?: boolean },
+  ): Promise<void> {
     await this.db
       .delete(entityMentions)
       .where(
@@ -641,6 +658,39 @@ export class ScopedGraph {
       .where(and(eq(chunks.tenantId, this.p.tenantId), eq(chunks.documentId, source.sourceId)))
     const sourceChunkIds = new Set(chunkRows.map((row) => row.id))
     if (sourceChunkIds.size === 0) return
+
+    // Collect entity IDs from chunk-scoped mentions BEFORE clearing them, so we can GC after.
+    // Use LIKE '${documentId}:%' instead of inArray(currentChunkIds): a supersede that shrinks
+    // the chunk count hard-deletes old chunk rows first, so their mention rows are orphaned and
+    // never in currentChunkIds — the prefix query catches them too. documentId is a UUID, so it
+    // contains no LIKE wildcard characters (% or _) and is safe to interpolate directly.
+    const potentialOrphans: string[] = []
+    if (opts?.gcOrphanedEntities) {
+      const rows = await this.db
+        .selectDistinct({ entityId: entityMentions.entityId })
+        .from(entityMentions)
+        .where(
+          and(
+            eq(entityMentions.tenantId, this.p.tenantId),
+            eq(entityMentions.sourceKind, "chunk"),
+            like(entityMentions.sourceId, `${source.sourceId}:%`),
+          ),
+        )
+      for (const row of rows) potentialOrphans.push(row.entityId)
+    }
+
+    // Clear ALL chunk-scoped mentions for this document by prefix — catches orphaned mention rows
+    // from chunks that were hard-deleted before clearPriorExtraction ran (supersede shrink path).
+    await this.db
+      .delete(entityMentions)
+      .where(
+        and(
+          eq(entityMentions.tenantId, this.p.tenantId),
+          eq(entityMentions.sourceKind, "chunk"),
+          like(entityMentions.sourceId, `${source.sourceId}:%`),
+        ),
+      )
+
     const rels = await this.db
       .select({ id: entityRelations.id, evidence: entityRelations.evidenceChunkIds })
       .from(entityRelations)
@@ -658,6 +708,45 @@ export class ScopedGraph {
           .update(entityRelations)
           .set({ evidenceChunkIds: JSON.stringify(pruned), updatedAt: now() })
           .where(and(eq(entityRelations.tenantId, this.p.tenantId), eq(entityRelations.id, rel.id)))
+      }
+    }
+
+    // GC: delete entities that now have zero remaining mentions tenant-wide, plus their dangling
+    // relations (no FK CASCADE). Entities shared across documents survive — only truly orphaned
+    // ones are removed.
+    if (opts?.gcOrphanedEntities && potentialOrphans.length > 0) {
+      const uniqueOrphans = [...new Set(potentialOrphans)]
+      for (let i = 0; i < uniqueOrphans.length; i += CHUNK_DB_BATCH_SIZE) {
+        const batch = uniqueOrphans.slice(i, i + CHUNK_DB_BATCH_SIZE)
+        // Find which entities in this batch still have ANY mention after the clear.
+        const stillMentioned = await this.db
+          .selectDistinct({ entityId: entityMentions.entityId })
+          .from(entityMentions)
+          .where(
+            and(
+              eq(entityMentions.tenantId, this.p.tenantId),
+              inArray(entityMentions.entityId, batch),
+            ),
+          )
+        const stillMentionedIds = new Set(stillMentioned.map((row) => row.entityId))
+        const orphanedIds = batch.filter((id) => !stillMentionedIds.has(id))
+        if (orphanedIds.length === 0) continue
+        // Delete dangling relations first (no FK CASCADE in schema).
+        await this.db
+          .delete(entityRelations)
+          .where(
+            and(
+              eq(entityRelations.tenantId, this.p.tenantId),
+              or(
+                inArray(entityRelations.fromEntityId, orphanedIds),
+                inArray(entityRelations.toEntityId, orphanedIds),
+              ),
+            ),
+          )
+        // Delete the orphaned entity rows (entity_fts update via trigger if present).
+        await this.db
+          .delete(entities)
+          .where(and(eq(entities.tenantId, this.p.tenantId), inArray(entities.id, orphanedIds)))
       }
     }
   }

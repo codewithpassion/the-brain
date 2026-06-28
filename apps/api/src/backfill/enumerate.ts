@@ -40,6 +40,112 @@ import type { Principal } from "@brain/shared"
 import type { ApiBindings } from "../bindings"
 import type { BackfillMessage } from "./messages"
 
+/** Default vault prefix — must match `createObsidianImporter`'s default. */
+const DEFAULT_VAULT_PREFIX = "vault/"
+
+/**
+ * Circuit-breaker thresholds for `reconcileObsidianDeletions`. A single reconcile pass
+ * may delete at most `RECONCILE_DELETE_RATIO_LIMIT` of the live docs, subject to a minimum
+ * floor of `RECONCILE_DELETE_FLOOR` — so small vaults don't get an unreasonably tight gate.
+ * If candidates exceed the threshold the pass is aborted (not an error): self-healing will
+ * occur gradually on subsequent passes or via explicit delete_document.
+ */
+const RECONCILE_DELETE_RATIO_LIMIT = 0.5
+const RECONCILE_DELETE_FLOOR = 3
+
+/**
+ * List vault markdown slugs (vault paths minus extension, excluding `Brain/` and non-markdown
+ * files). Returns a `Set<string>` for O(1) lookup. Empty-vault guard: if R2 returns zero
+ * objects the function returns an empty set and the reconcile caller skips deletions.
+ * Tenant prefix is stripped from keys: ScopedR2.list returns absolute R2 keys.
+ *
+ * Throws if R2 returns `truncated:true` with no cursor — a partial listing must never be
+ * treated as complete, as that would cause spurious mass-deletes.
+ *
+ * @internal Exported for unit testing.
+ */
+export const listVaultSlugs = async (
+  blobs: ScopedR2,
+  tenantId: string,
+  vaultPrefix: string,
+): Promise<Set<string>> => {
+  const slugs = new Set<string>()
+  let cursor: string | undefined
+  const tenantPrefixLen = tenantId.length + 1 // "${tenantId}/" length
+  do {
+    const result = await blobs.list({
+      prefix: vaultPrefix,
+      limit: 1000,
+      ...(cursor !== undefined ? { cursor } : {}),
+    })
+    if (result.truncated && !result.cursor) {
+      throw new Error(
+        "listVaultSlugs: R2 returned truncated=true with no cursor — aborting reconcile pass to avoid mass-delete on partial listing",
+      )
+    }
+    for (const obj of result.objects) {
+      if (!/\.(md|markdown)$/i.test(obj.key)) continue
+      // obj.key = "${tenantId}/vault/foo.md" (absolute; ScopedR2 adds tenant prefix)
+      const relKey = obj.key.slice(tenantPrefixLen)
+      const vaultPath = relKey.slice(vaultPrefix.length)
+      if (vaultPath.startsWith("Brain/")) continue // reserved Brain-authored prefix
+      const slug = vaultPath.replace(/\.(md|markdown)$/i, "")
+      if (slug.length > 0) slugs.add(slug)
+    }
+    cursor = result.truncated ? result.cursor : undefined
+  } while (cursor !== undefined)
+  return slugs
+}
+
+/**
+ * Compare vault slugs against the DB and soft-delete any live obsidian docs that are no
+ * longer in the vault (note deleted from Obsidian).
+ *
+ * Guards:
+ * - Empty listing (vaultSlugs.size === 0): no-op — possible R2 hiccup.
+ * - Circuit breaker: if this pass would delete more than `RECONCILE_DELETE_RATIO_LIMIT` of
+ *   DB docs (min floor `RECONCILE_DELETE_FLOOR`), abort and log — the delete is deferred to
+ *   later passes or explicit delete_document, avoiding transient mass-unsearchability.
+ *
+ * Each deleted doc's KG extraction is cleared and its Vectorize vectors are removed.
+ */
+export const reconcileObsidianDeletions = async (
+  services: BackfillServices,
+  sourceId: string,
+  vaultSlugs: Set<string>,
+): Promise<{ deleted: number }> => {
+  if (vaultSlugs.size === 0) return { deleted: 0 } // guard: empty listing → skip
+  const dbDocs = await services.db.getDocumentsBySource(sourceId)
+  const toDelete = dbDocs.filter((doc) => !vaultSlugs.has(doc.slug))
+  // Circuit breaker: abort if deleting too large a fraction of live docs in one pass.
+  const threshold = Math.max(
+    RECONCILE_DELETE_FLOOR,
+    Math.ceil(dbDocs.length * RECONCILE_DELETE_RATIO_LIMIT),
+  )
+  if (toDelete.length > threshold) {
+    console.warn(
+      `reconcileObsidianDeletions: would delete ${toDelete.length}/${dbDocs.length} docs ` +
+        `(threshold ${threshold}) — aborting pass to prevent mass-unsearchability`,
+    )
+    return { deleted: 0 }
+  }
+  let deleted = 0
+  for (const doc of toDelete) {
+    const { chunkIds } = await services.db.softDeleteDocument(doc.id)
+    if (chunkIds.length > 0) {
+      await services.vectors.deleteVectors(chunkIds)
+    }
+    // Clear KG extraction so the deleted note's entities are no longer queryable.
+    // gcOrphanedEntities: GC entities with zero remaining mentions across the tenant.
+    await services.graph.clearPriorExtraction(
+      { sourceKind: "document", sourceId: doc.id },
+      { gcOrphanedEntities: true },
+    )
+    deleted++
+  }
+  return { deleted }
+}
+
 /** The supported import clients. Session exporters + the Obsidian vault importer (Phase 1). */
 export type ImporterClient = "chatgpt" | "claude-code" | "obsidian"
 
@@ -138,6 +244,11 @@ export const runEnumerate = async (deps: EnumerateDeps): Promise<EnumerateResult
           ...(asDoc.contentType !== undefined ? { contentType: asDoc.contentType } : {}),
           ...(asDoc.path !== undefined ? { path: asDoc.path } : {}),
           ...(asDoc.tags !== undefined ? { tags: asDoc.tags } : {}),
+          // Phase 2 D2: stable slug for doc items derived from the source-native id (vault path).
+          // Absent for session items (deps.kind !== "doc") so non-obsidian paths are unaffected.
+          ...(deps.kind === "doc" && (item as ImportedSession).sourceSessionId !== undefined
+            ? { stableSlug: (item as ImportedSession).sourceSessionId }
+            : {}),
         })
         stats.processed++
         stats.created++
@@ -198,7 +309,7 @@ export class EnumeratorWorkflow extends WorkflowEntrypoint<ApiBindings, Enumerat
         const raw = await obj.text()
         importer = importerForClient(client, raw)
       }
-      return runEnumerate({
+      const result = await runEnumerate({
         runs: services.runs,
         blobs: services.blobs,
         enqueue,
@@ -209,6 +320,20 @@ export class EnumeratorWorkflow extends WorkflowEntrypoint<ApiBindings, Enumerat
         importer,
         ...(run?.cursor != null ? { resumeCursor: run.cursor } : {}),
       })
+
+      // Phase 2: after a clean obsidian enumeration, reconcile deletions (notes removed from vault).
+      // Re-lists the vault to get current slugs; guard inside reconcileObsidianDeletions handles
+      // empty-vault R2 hiccups (skips deletions rather than wiping everything).
+      if (client === "obsidian") {
+        const vaultSlugs = await listVaultSlugs(
+          services.blobs,
+          principal.tenantId,
+          DEFAULT_VAULT_PREFIX,
+        )
+        await reconcileObsidianDeletions(services, sourceId, vaultSlugs)
+      }
+
+      return result
     })
   }
 }

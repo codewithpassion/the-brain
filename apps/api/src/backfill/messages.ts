@@ -30,6 +30,14 @@ export interface BackfillMessage {
    * Frontmatter tags for `doc` items — stored on `documents.tags`. Absent ⇒ no tags stored.
    */
   tags?: string[]
+  /**
+   * Stable source-native slug for `doc` items (Phase 2). When present the consumer uses this
+   * as the document slug (stable across content edits) instead of the Phase-1 `bf-${fingerprint}`
+   * derivation; idempotency then rests on `(tenant_id, slug)` + fingerprint compare rather than
+   * the `(tenant_id, fingerprint)` unique index. Set by the Obsidian enumerator to the vault
+   * path minus extension (e.g. "Projects/Acme/notes"); absent for non-obsidian doc items.
+   */
+  stableSlug?: string
   /** Optional authorship; absent ⇒ the consumer builds a SYSTEM principal for the tenant. */
   userId?: string
 }

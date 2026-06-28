@@ -169,6 +169,11 @@ export const createObsidianImporter = (
           const relKey = obj.key.slice(obj.key.indexOf("/") + 1)
           const vaultPath = relKey.slice(vaultPrefix.length)
           if (vaultPath.length === 0) continue // root prefix key; not a file
+          // Phase 2 loop-avoidance: skip Brain-authored files so vault_writeback notes are never
+          // re-ingested as user edits. Primary filter: path prefix; files with `source: brain`
+          // frontmatter would also be caught here by the path check since vault_writeback writes
+          // exclusively under `Brain/`.
+          if (vaultPath.startsWith("Brain/")) continue
           files.push({ relKey, vaultPath, etag: obj.etag })
         }
         listCursor = result.truncated ? result.cursor : undefined

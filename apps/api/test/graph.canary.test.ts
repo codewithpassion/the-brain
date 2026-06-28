@@ -228,13 +228,13 @@ const count = async (sql: string, binds: unknown[]): Promise<number> => {
 describe("runEntityExtraction round-trip (real local D1 in workerd)", () => {
   beforeAll(async () => {
     await seedChunk({
-      id: "gX-c0",
+      id: "gX-doc:0",
       tenantId: "gX",
       documentId: "gX-doc",
       content: "Marie Curie discovered Radium.",
     })
     await seedChunk({
-      id: "gX-c1",
+      id: "gX-doc:1",
       tenantId: "gX",
       documentId: "gX-doc",
       content: "Radium is radioactive.",
@@ -290,7 +290,7 @@ describe("runEntityExtraction round-trip (real local D1 in workerd)", () => {
   })
 
   test("is NON-FATAL when extraction yields nothing (genExtract → null)", async () => {
-    await seedChunk({ id: "gY-c0", tenantId: "gY", documentId: "gY-doc", content: "text" })
+    await seedChunk({ id: "gY-doc:0", tenantId: "gY", documentId: "gY-doc", content: "text" })
     const p = principal({ tenantId: "gY" })
     const services = {
       graph: new ScopedGraph(raw(), p),

@@ -396,7 +396,8 @@ describe("ScopedGraph entity writes — upsert / relate / mention / clear-prior 
   })
 
   test("clearPriorExtraction deletes the source's mentions and prunes/deletes relation evidence", async () => {
-    insertChunk(sqlite, { id: "c1", tenantId: "t1", documentId: "doc1" })
+    // Chunk id follows the ${documentId}:${index} convention so the LIKE 'doc1:%' sweep matches.
+    insertChunk(sqlite, { id: "doc1:0", tenantId: "t1", documentId: "doc1" })
     const graph = new ScopedGraph(db, principal({ tenantId: "t1" }))
     const base = {
       kind: "concept",
@@ -406,25 +407,67 @@ describe("ScopedGraph entity writes — upsert / relate / mention / clear-prior 
       visibility: "world",
       teamId: null,
     }
-    const from = await graph.upsertEntity({ ...base, name: "Ada", chunkIds: ["c1"] })
-    const to = await graph.upsertEntity({ ...base, name: "Babbage", chunkIds: ["c1"] })
+    const from = await graph.upsertEntity({ ...base, name: "Ada", chunkIds: ["doc1:0"] })
+    const to = await graph.upsertEntity({ ...base, name: "Babbage", chunkIds: ["doc1:0"] })
     // mixed-evidence relation survives (pruned to cX); source-only relation is deleted outright.
-    await graph.relate({ kind: "mixed", confidence: 0.5, chunkIds: ["c1", "cX"] }, from, to)
-    await graph.relate({ kind: "sourceonly", confidence: 0.5, chunkIds: ["c1"] }, from, to)
+    await graph.relate({ kind: "mixed", confidence: 0.5, chunkIds: ["doc1:0", "cX"] }, from, to)
+    await graph.relate({ kind: "sourceonly", confidence: 0.5, chunkIds: ["doc1:0"] }, from, to)
     await graph.mention(from, "document", "doc1")
-    await graph.mention(from, "chunk", "c1") // different source_kind — survives
+    await graph.mention(from, "chunk", "doc1:0") // chunk belongs to doc1 → cleared by LIKE sweep
 
     await graph.clearPriorExtraction({ sourceKind: "document", sourceId: "doc1" })
 
     expect(count("SELECT count(*) AS n FROM entity_mentions WHERE source_kind = 'document'")).toBe(
       0,
     )
-    expect(count("SELECT count(*) AS n FROM entity_mentions WHERE source_kind = 'chunk'")).toBe(1)
+    // chunk-scoped mention for doc1:0 is swept by LIKE 'doc1:%'.
+    expect(count("SELECT count(*) AS n FROM entity_mentions WHERE source_kind = 'chunk'")).toBe(0)
     expect(count("SELECT count(*) AS n FROM entity_relations WHERE kind = 'sourceonly'")).toBe(0)
     const mixed = sqlite
       .query("SELECT evidence_chunk_ids AS ev FROM entity_relations WHERE kind = 'mixed'")
       .get() as { ev: string } | null
     expect(mixed === null ? [] : (JSON.parse(mixed.ev) as string[])).toEqual(["cX"])
+  })
+
+  test("clearPriorExtraction prefix-sweeps orphaned chunk mentions after chunk-count shrink", async () => {
+    // Simulate a supersede that reduced docS from 8 chunks to 1: only docS:0 survives in the
+    // DB; docS:7 was hard-deleted. The old clearPriorExtraction used inArray(currentChunkIds)
+    // and would have missed docS:7's orphaned mention rows; the LIKE-based fix catches them.
+    insertChunk(sqlite, { id: "docS:0", tenantId: "t1", documentId: "docS" })
+    const graph = new ScopedGraph(db, principal({ tenantId: "t1" }))
+    const base = {
+      kind: "concept",
+      aliases: [],
+      description: "",
+      scope: null,
+      visibility: "world",
+      teamId: null,
+    }
+
+    // Shared entity: mentioned from docS:0 (will be swept) AND from otherDoc:0 (survives).
+    const sharedId = await graph.upsertEntity({ ...base, name: "SharedEnt", chunkIds: ["docS:0"] })
+    await graph.mention(sharedId, "chunk", "docS:0")
+    await graph.mention(sharedId, "chunk", "otherDoc:0") // unaffected by docS clear
+
+    // Unique entity: only mentioned from the removed chunk docS:7 → must be GC'd.
+    const uniqueId = await graph.upsertEntity({ ...base, name: "RemovedEnt", chunkIds: ["docS:7"] })
+    await graph.mention(uniqueId, "chunk", "docS:7") // orphaned: docS:7 no longer in chunks table
+
+    await graph.clearPriorExtraction(
+      { sourceKind: "document", sourceId: "docS" },
+      { gcOrphanedEntities: true },
+    )
+
+    // All docS:* chunk-scoped mentions swept — including the orphaned docS:7 one.
+    expect(
+      count(
+        "SELECT count(*) AS n FROM entity_mentions WHERE source_kind = 'chunk' AND source_id LIKE 'docS:%'",
+      ),
+    ).toBe(0)
+    // SharedEnt survives: still has a mention from otherDoc:0.
+    expect(count("SELECT count(*) AS n FROM entities WHERE id = ?", [sharedId])).toBe(1)
+    // RemovedEnt is GC'd: its only mention (docS:7) was swept.
+    expect(count("SELECT count(*) AS n FROM entities WHERE id = ?", [uniqueId])).toBe(0)
   })
 
   test("a written entity round-trips through searchEntities (entity_fts trigger fired)", async () => {

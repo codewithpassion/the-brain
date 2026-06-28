@@ -35,6 +35,7 @@ export {
   createApiKeyOp,
   createOrgCore,
   createOrgOp,
+  DELETE_DOCUMENT_OP,
   GET_STATS_OP,
   GET_TOKEN_SPEND_OP,
   getStatsCore,
@@ -79,4 +80,5 @@ export {
   UPDATE_MEMBER_OP,
   updateMemberCore,
   updateMemberOp,
+  VAULT_WRITEBACK_OP,
 } from "./ops"

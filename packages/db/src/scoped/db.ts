@@ -312,6 +312,7 @@ export class ScopedDB {
             eq(chunks.tenantId, this.p.tenantId),
             inArray(chunks.id, batch),
             isNull(chunks.deletedAt),
+            isNull(documents.deletedAt), // exclude soft-deleted document's chunks (D1 — Deliverable 1)
             scopePredicate(this.p, chunks.scope),
             breakGlass ? undefined : visibilityPredicate(this.p, visibilityCols.chunk),
             // path filter on the INNER-JOINed documents table:
@@ -369,7 +370,7 @@ export class ScopedDB {
       )
   }
 
-  /** Scoped document read. `documents` has NO visibility column — tenant + scope only. */
+  /** Scoped document read — live docs only (`deleted_at IS NULL`). Tenant + scope gated. */
   async listDocuments(opts?: { status?: string }): Promise<ScopedDocument[]> {
     return this.db
       .select({
@@ -384,6 +385,7 @@ export class ScopedDB {
       .where(
         and(
           eq(documents.tenantId, this.p.tenantId),
+          isNull(documents.deletedAt), // live docs only
           scopePredicate(this.p, documents.scope),
           opts?.status ? eq(documents.status, opts.status) : undefined,
         ),
@@ -392,18 +394,44 @@ export class ScopedDB {
 
   /**
    * Point-lookup by slug on the `(tenant_id, slug)` unique index — O(1), not a full scan.
-   * Used by the backfill consumer's idempotent recovery path: after a `(tenant_id, slug)` UNIQUE
-   * conflict, look up the existing doc's id + status to decide whether to resume or no-op. No
-   * scope predicate — this is an internal recovery lookup (the system principal that calls this
-   * has `allowedScopes: '*'`); tenant isolation is still enforced by `this.p.tenantId`.
+   * Used by the backfill consumer's idempotent recovery path AND the Phase-2 supersede check.
+   * Returns BOTH live and soft-deleted rows (slug is still "occupied" when deleted, so callers
+   * can handle resurrection). No scope predicate — internal recovery lookup (the system principal
+   * has `allowedScopes: '*'`); tenant isolation is enforced by `this.p.tenantId`.
    */
-  async getDocumentBySlug(slug: string): Promise<{ id: string; status: string } | null> {
+  async getDocumentBySlug(
+    slug: string,
+  ): Promise<{ id: string; status: string; fingerprint: string; deletedAt: string | null } | null> {
     const rows = await this.db
-      .select({ id: documents.id, status: documents.status })
+      .select({
+        id: documents.id,
+        status: documents.status,
+        fingerprint: documents.fingerprint,
+        deletedAt: documents.deletedAt,
+      })
       .from(documents)
       .where(and(eq(documents.tenantId, this.p.tenantId), eq(documents.slug, slug)))
       .limit(1)
     return rows[0] ?? null
+  }
+
+  /**
+   * Return live Phase-2 obsidian docs (sourceKind='obsidian', deleted_at IS NULL) for a given
+   * sourceId — used by the deletion-reconcile step to diff vault vs DB and soft-delete vanished
+   * notes. Phase-1 docs (slug starts with 'bf-') are excluded by the sourceKind filter.
+   */
+  async getDocumentsBySource(sourceId: string): Promise<{ id: string; slug: string }[]> {
+    return this.db
+      .select({ id: documents.id, slug: documents.slug })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.tenantId, this.p.tenantId),
+          eq(documents.sourceId, sourceId),
+          eq(documents.sourceKind, "obsidian"),
+          isNull(documents.deletedAt),
+        ),
+      )
   }
 
   /**
@@ -682,6 +710,117 @@ export class ScopedDB {
       action: "document.status",
       targetId: documentId,
       diff: JSON.stringify({ status: patch.status }),
+    })
+  }
+
+  // ── DOCUMENT LIFECYCLE (Phase 2 — deletion + supersede) ───────────────────
+
+  /**
+   * Soft-delete a document and ALL its live chunks in ONE audited batch (Deliverable 1).
+   * The document row is marked `deleted_at = now`; all live (`deleted_at IS NULL`) chunks
+   * for that doc are likewise soft-deleted. Returns the chunk ids that were live at the time
+   * of deletion so the caller can drop the corresponding Vectorize vectors off-batch.
+   * Tenant isolation is FORCED on every WHERE; the operation is a no-op if the document is
+   * already deleted (the UPDATE with `WHERE deleted_at IS NULL` touches zero rows).
+   */
+  async softDeleteDocument(documentId: string): Promise<{ chunkIds: string[] }> {
+    // SELECT live chunk ids first (needed for Vectorize deletion off-batch).
+    const liveRows = await this.db
+      .select({ id: chunks.id })
+      .from(chunks)
+      .where(
+        and(
+          eq(chunks.tenantId, this.p.tenantId),
+          eq(chunks.documentId, documentId),
+          isNull(chunks.deletedAt),
+        ),
+      )
+    const chunkIds = liveRows.map((r) => r.id)
+
+    const now = new Date().toISOString()
+    const deleteDoc = this.db
+      .update(documents)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(documents.id, documentId),
+          eq(documents.tenantId, this.p.tenantId),
+          isNull(documents.deletedAt), // idempotent: already-deleted doc → no-op
+        ),
+      )
+    const deleteChunks = this.db
+      .update(chunks)
+      .set({ deletedAt: now })
+      .where(
+        and(
+          eq(chunks.documentId, documentId),
+          eq(chunks.tenantId, this.p.tenantId),
+          isNull(chunks.deletedAt), // idempotent: already-deleted chunks → no-op
+        ),
+      )
+    await this.batchWithAudit([deleteDoc, deleteChunks], {
+      action: "document.softDelete",
+      targetId: documentId,
+    })
+    return { chunkIds }
+  }
+
+  /**
+   * Hard-delete ALL chunk rows for a document (Phase 2 — supersede path). Used instead of
+   * soft-delete because chunk ids are deterministic (`${docId}:${chunkIndex}`): soft-deleted
+   * rows still occupy the PK, so `insertChunks` (which uses `onConflictDoNothing`) would
+   * silently skip re-inserting new content into the same ids. Hard-delete frees the PK space
+   * so the re-ingest can write fresh chunks with the same ids. FTS5 DELETE triggers fire for
+   * each removed row, keeping the FTS shadow in sync. Returns the deleted chunk ids for
+   * Vectorize cleanup (called BEFORE this method to avoid orphan-vector leaks).
+   */
+  async hardDeleteDocumentChunks(documentId: string): Promise<{ chunkIds: string[] }> {
+    // SELECT all chunk ids (live + soft-deleted) before deletion for Vectorize cleanup.
+    const allRows = await this.db
+      .select({ id: chunks.id })
+      .from(chunks)
+      .where(and(eq(chunks.tenantId, this.p.tenantId), eq(chunks.documentId, documentId)))
+    const chunkIds = allRows.map((r) => r.id)
+
+    if (chunkIds.length > 0) {
+      const hardDelete = this.db
+        .delete(chunks)
+        .where(and(eq(chunks.documentId, documentId), eq(chunks.tenantId, this.p.tenantId)))
+      await this.batchWithAudit([hardDelete], {
+        action: "chunk.supersede",
+        targetId: documentId,
+        diff: JSON.stringify({ count: chunkIds.length }),
+      })
+    }
+    return { chunkIds }
+  }
+
+  /**
+   * Update a document row in-place for the supersede path (Phase 2 — D2). Sets the new
+   * `fingerprint`, `body_r2_key`, clears `deleted_at` (for resurrection after deletion),
+   * and resets `status = 'pending'` so the re-ingest pipeline runs from the start.
+   * The `(tenant_id, scope, fingerprint)` UNIQUE index means if a different doc already holds
+   * the new fingerprint the UPDATE throws — treat that as a genuine data-integrity conflict.
+   * Audited in-batch.
+   */
+  async updateDocumentForSupersede(
+    documentId: string,
+    patch: { fingerprint: string; bodyR2Key: string; deletedAt: string | null },
+  ): Promise<void> {
+    const update = this.db
+      .update(documents)
+      .set({
+        fingerprint: patch.fingerprint,
+        bodyR2Key: patch.bodyR2Key,
+        deletedAt: patch.deletedAt,
+        status: "pending",
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
+    await this.batchWithAudit([update], {
+      action: "document.supersede",
+      targetId: documentId,
+      diff: JSON.stringify({ fingerprint: patch.fingerprint }),
     })
   }
 
