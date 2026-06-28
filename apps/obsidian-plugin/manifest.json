@@ -1,0 +1,10 @@
+{
+  "id": "brain-obsidian",
+  "name": "Brain",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Connect Obsidian to your Brain knowledge base (think, search, memory, backlinks).",
+  "author": "The Brain",
+  "authorUrl": "https://brain-api.dominik-fretz.workers.dev",
+  "isDesktopOnly": false
+}
