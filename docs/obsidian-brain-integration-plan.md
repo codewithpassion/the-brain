@@ -2,7 +2,9 @@
 
 > **Goal (from the brief):** "I'm using Obsidian, currently synced to R2. How could we achieve access for Obsidian to the Brain? I want to use it via computer **and native phone apps** without the **paid** Obsidian (Sync)."
 >
-> **Status:** Design doc. Grounded in a codebase audit (file:line citations below) + a 2026 research pass on the Obsidian/Cloudflare sync landscape. No code written yet — this is the plan.
+> **Status:** Design doc. Grounded in a codebase audit (file:line citations below) + a 2026 research pass on the Obsidian/Cloudflare sync landscape.
+>
+> **Update (2026-06-28):** the **OKF-compatible agent-memory feature shipped** (`docs/okf-memory-plan.md`, on `main` + deployed) and it built several of this plan's "must build" items as a side effect — **YAML-frontmatter parsing, `[[wiki-link]]`/markdown-link → `doc_links` extraction, and the `pages` write surface with versioning**. So Phase 2 shrinks substantially, and there's now a **fast Phase-1 path via `okf_import`** (see §3a). Deltas are marked **✅ NOW BUILT** inline below.
 
 ---
 
@@ -86,7 +88,9 @@ The Brain was **built for this** — there is a generic ingestion + sources/back
 - **Ingestion pipeline** — `runBatchIngestCore` (6 steps: status→read R2→chunk→insert chunks→embed→finalize) (`packages/db/src/ingest.ts:50`). Entry points: `POST /ingest` (markdown webhook, 256 KiB) (`apps/api/src/index.ts:303`), `POST /documents` (binary→AI-extract, 8 MiB) (`:394`), and the **`ingest_document` MCP write tool** (shipped this session).
 - **Fingerprint dedup** — `UNIQUE (tenant_id, scope, fingerprint)` + `UNIQUE (tenant_id, slug)`; re-ingesting an unchanged note returns `{status:"duplicate", deduped:true}` (not an error) (`packages/db/src/schema/content.ts:47`). This makes re-sync idempotent for free.
 - **`path` namespace + `tags`** on documents, mirrored onto chunks; `search`/`think` can be **scoped to a path or tag** (shipped this session). Obsidian **folders → `path`** maps perfectly (e.g. `Projects/Acme/notes.md` → `path:/Projects/Acme`).
-- **Doc-graph** — `pages` (graph nodes, with a `frontmatter` JSON column + `documentId` backref), `doc_links` (with an extensible `linkSource` field: "manual" | "extracted" | "obsidian"), `tags`; graph ops `/graph/links|backlinks|traverse` wired (`packages/db/src/schema/docgraph.ts:15`).
+- **Doc-graph** — `pages` (graph nodes, with a `frontmatter` JSON column + `documentId` backref), `doc_links` (with an extensible `linkSource` field: "manual" | "extracted" | "obsidian" | "okf"), `tags`; graph ops `/graph/links|backlinks|traverse` wired (`packages/db/src/schema/docgraph.ts:15`).
+- **✅ NOW BUILT — the `pages` WRITE surface (OKF memory).** The doc-graph was read-only when this plan was written; the OKF feature shipped the **audited write chokepoint** (`MemoryStore`, `packages/db/src/memory/store.ts`): create/update/get/list/history/forward-only-rollback/soft-delete over `pages`, with a new **`page_revisions`** history table (per-concept versioning). It reconciles **`tags` from frontmatter** and **`doc_links` from in-body `[[slug]]` + `[text](slug)` links** in one batch. Exposed as the `memory_*` + `okf_*` ops across MCP/REST/CLI.
+- **✅ NOW BUILT — frontmatter + link parsing.** `parseDocument` (`packages/db/src/memory/okf.ts`) parses YAML frontmatter (**flow AND block** sequences) + splits the body; `extractLinkSlugs`/`reconcileLinks` (`store.ts`) turn `[[note]]`/`[text](slug)` into `doc_links`. These cover this plan's §3-#3 and §3-#4 — they live in the OKF/memory module today (reuse directly via `okf_import`, or lift the helpers into the document-ingest path if notes should also be searchable chunks).
 - **R2 + tenant isolation** — `BODIES` bucket `the-brain-bodies` (`apps/api/wrangler.jsonc:28`); **ScopedR2 forces a `${tenantId}/` key prefix** — no caller can escape its tenant namespace (`packages/db/src/scoped/r2.ts:14`).
 - **External-client auth** — **device-flow (RFC 8628)** `/device_authorization` + `/activate` + `/token` (`apps/api/src/device-flow/routes.ts:29`) **and** a working **`/cli/activate`** approval page; **`bk_` API keys** (SHA-256 hashed, capability + data scopes) with **full CRUD + an API-Keys dashboard page** (shipped this session); the **OAuth 2.1 wrapper** (PKCE-S256, discovery, dynamic registration) bridging legacy bearers on `/mcp` (`apps/api/src/index.ts:700`).
 - **MCP surfaces** — stateful `/mcp/:slug` (DO-backed, slug selects tenant) + stateless `/mcp` (`apps/api/src/mcp/routes.ts:53`). Confirmed phone-reachable from the Claude mobile app.
@@ -96,11 +100,24 @@ The Brain was **built for this** — there is a generic ingestion + sources/back
 ### ❌ Missing — must build for Obsidian
 1. **No Obsidian importer** — only ChatGPT / Claude-Code importers exist. *(Phase 1)*
 2. **No `documents.deletedAt`** — chunks have a soft-delete column, **documents do not**, and there's no document-delete API. **This blocks deletion sync** (deleting a note in Obsidian can't remove it from the Brain). *(Phase 2 — required for two-way)*
-3. **No wiki-link / `[[link]]` extraction** — `packages/ingest/src/markdown.ts` does not parse `[[note]]` or `[text](slug)`; nothing populates `doc_links` from ingest. Obsidian's value is the link graph, so this matters. *(Phase 2)*
-4. **No YAML frontmatter parsing** — `---` blocks (tags, aliases, created/updated) aren't extracted. *(Phase 2)*
+3. ~~**No wiki-link / `[[link]]` extraction**~~ → **✅ NOW BUILT** (OKF). `[[note]]` + `[text](slug)` parsing → `doc_links` exists in the memory module (`extractLinkSlugs`/`reconcileLinks`). Remaining work: reuse via `okf_import`, OR lift the helper into `packages/ingest/src/markdown.ts` if you also want notes as searchable **document** chunks. *(Phase 2 → mostly done)*
+4. ~~**No YAML frontmatter parsing**~~ → **✅ NOW BUILT** (OKF). `parseDocument` extracts `---` frontmatter (flow + block YAML) → `pages.frontmatter` + `tags`. Same reuse note as #3. *(Phase 2 → done)*
 5. **No R2 event notifications** — R2 changes don't trigger ingestion; it's request/cron-driven only. A cron diff works for v1; R2 events (GA) are the near-real-time upgrade. *(Phase 1 uses cron; Phase 4 wires events)*
 6. **No vault-diff** — must detect *which* notes changed (hash compare vs `sources.lastCommit`) instead of re-enumerating the whole vault each run. *(Phase 1)*
 7. **No write-back convention** — a `Brain/` folder + a writer for brain-authored notes. *(Phase 2)*
+
+---
+
+## 3a. NEW: an Obsidian vault ≈ an OKF bundle (a faster Phase-1 path)
+
+An Obsidian vault is **markdown files with YAML frontmatter and `[[links]]`** — which is exactly an **OKF bundle** (Open Knowledge Format v0.1), and the Brain now speaks OKF natively. So there are **two ingestion targets**, and the choice shapes Phase 1:
+
+| Target | Path | You get | You don't get |
+|---|---|---|---|
+| **Memory pages (OKF)** — `okf_import` / `memory_set` | vault files → `okf_import` | versioned `pages` + history/rollback, frontmatter, tags, `doc_links` graph, OKF round-trip — **no new parsing code** | semantic search/`think` (pages aren't chunked/embedded) |
+| **Documents** — `runBatchIngestCore` (the original plan) | importer → `ingest` pipeline | chunked + embedded → `search`/`think` | versioning/graph unless the OKF helpers are lifted in |
+
+**Recommended: do both, cheaply.** The Obsidian importer enumerates the R2 vault once and (a) feeds files to **`okf_import`** for the graph/versioning/frontmatter layer (already shipped — zero parsing work), and (b) feeds the same markdown to the **document** pipeline for searchable chunks. The slug = the note's path (folders → `path`), so the two views align on identity. This collapses most of the old Phase-2 (#2 wiki-links, #3 frontmatter) into "call `okf_import`."
 
 ---
 
@@ -124,11 +141,11 @@ Goal: every note becomes a searchable, namespace-scoped Brain document.
 
 *Deliverable:* ask the Brain (CLI, MCP, dashboard, or Claude app) a question and get a cited answer drawn from your Obsidian notes.
 
-### Phase 2 — Two-way + richer ingestion · ~1–2 weeks
-1. **Deletion sync (required for two-way):** add `documents.deletedAt` (migration) + soft-delete propagation to chunks/pages + a `delete_document` op/endpoint. The importer marks notes deleted when they vanish from the vault.
-2. **Wiki-link extraction:** parse `[[note]]` and `[text](slug)` in `packages/ingest/src/markdown.ts` during ingest → upsert `pages` + `doc_links` with `linkSource:"obsidian"`. Now `/graph/backlinks` + traversal work over *your* vault, and the dashboard graph shows your note network.
-3. **Frontmatter parsing:** extract YAML `---` (tags, aliases, created/updated) → `pages.frontmatter` + `tags`.
-4. **Write-back:** brain-authored notes (synthesized summaries, captured agent memory, daily digests) written to a **`Brain/` folder** in the R2 vault → Remotely Save pulls them into Obsidian on all devices. Keep brain-owned files in a reserved folder to avoid clobbering user notes.
+### Phase 2 — Two-way + richer ingestion · **~3–5 days now** (was ~1–2 weeks)
+1. **Deletion sync (required for two-way):** add `documents.deletedAt` (migration) + soft-delete propagation to chunks/pages + a `delete_document` op/endpoint. The importer marks notes deleted when they vanish from the vault. *(`pages`/memory already soft-delete via `memory_forget`; the **document** side is the remaining gap.)*
+2. ~~**Wiki-link extraction**~~ → **✅ DONE** if Phase 1 uses `okf_import` (it reconciles `doc_links` from `[[..]]`/`[..](..)`). Only needed separately if you want links on the **document** view too — then lift `reconcileLinks` into the ingest path with `linkSource:"obsidian"`.
+3. ~~**Frontmatter parsing**~~ → **✅ DONE** via `okf_import` (`parseDocument`). Same caveat as #2 for the document view.
+4. **Write-back:** brain-authored notes (synthesized summaries, captured agent memory, daily digests) written to a **`Brain/` folder** in the R2 vault → Remotely Save pulls them into Obsidian on all devices. **`okf_export` already emits a ready-to-write bundle** (`index.md` + concept `.md` + `log.md`); the writer just streams those files to R2 under `Brain/`. Keep brain-owned files in a reserved folder to avoid clobbering user notes.
 
 ### Phase 3 — The Brain Obsidian plugin (in-editor intelligence) · ~2–3 weeks
 A community plugin, **`isDesktopOnly:false`**, mobile-compatible. Respect the mobile rules: **no Node `fs`/`crypto`/`path`/`child_process`**; use the **Vault API** for files and **`requestUrl`** for all network (also dodges CORS).
@@ -190,10 +207,10 @@ A community plugin, **`isDesktopOnly:false`**, mobile-compatible. Respect the mo
 2. Vault key layout — Remotely Save writes under `${tenantId}/vault/` in `the-brain-bodies`, or a separate vault bucket. *(Recommend a `vault/` prefix under the tenant.)*
 
 **Build order (smallest shippable increments):**
-1. **Phase 1 POC** — Obsidian importer + factory registration + a `sources` row + cron trigger + vault-diff. *(~3–5 days; delivers searchable vault.)*
-2. **`documents.deletedAt` + delete path** — unblocks deletion sync. *(small migration + op.)*
-3. **Wiki-link + frontmatter extraction** — unlocks the graph + tags over your vault.
-4. **Write-back** (`Brain/` folder) — brain → Obsidian.
+1. **Phase 1 POC** — Obsidian importer + factory registration + a `sources` row + cron trigger + vault-diff. Feed enumerated vault files to **`okf_import`** (graph + frontmatter + versioning, **no new parsing**) and/or the document pipeline (search). *(~3–5 days; delivers a searchable + graphed vault.)*
+2. **`documents.deletedAt` + delete path** — unblocks deletion sync on the **document** view (`pages`/memory already soft-delete). *(small migration + op.)*
+3. ~~**Wiki-link + frontmatter extraction**~~ — **✅ already shipped** with OKF; reuse via `okf_import` (or lift the helpers into ingest for the document view).
+4. **Write-back** (`Brain/` folder) — brain → Obsidian. **`okf_export` already produces the bundle**; just write its files to R2.
 5. **The Brain plugin** (BRAT beta) — in-editor think/search/graph on phone + desktop.
 6. **R2 events** — swap cron for near-real-time.
 
