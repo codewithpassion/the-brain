@@ -21,6 +21,15 @@ export interface BackfillMessage {
   fingerprint: string
   /** Content type for the `doc` path (decides extraction/chunking); ignored for `session`. */
   contentType?: string
+  /**
+   * Vault/import path for `doc` items (e.g. "/Projects/Acme") — stored on `documents.path` so
+   * `search`/`think` can be scoped by folder. Absent ⇒ no path stored (unscoped doc).
+   */
+  path?: string
+  /**
+   * Frontmatter tags for `doc` items — stored on `documents.tags`. Absent ⇒ no tags stored.
+   */
+  tags?: string[]
   /** Optional authorship; absent ⇒ the consumer builds a SYSTEM principal for the tenant. */
   userId?: string
 }

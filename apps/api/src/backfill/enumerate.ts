@@ -31,19 +31,35 @@ import {
 import {
   createChatGptImporter,
   createClaudeCodeImporter,
+  createObsidianImporter,
   type ImportedSession,
   type Importer,
+  type VaultR2,
 } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { ApiBindings } from "../bindings"
 import type { BackfillMessage } from "./messages"
 
-/** The supported session-export clients (the net-new importers this phase wires into capture). */
-export type ImporterClient = "chatgpt" | "claude-code"
+/** The supported import clients. Session exporters + the Obsidian vault importer (Phase 1). */
+export type ImporterClient = "chatgpt" | "claude-code" | "obsidian"
 
-/** Build the importer for a client over its raw export text. */
-export const importerForClient = (client: ImporterClient, raw: string): Importer =>
-  client === "chatgpt" ? createChatGptImporter(raw) : createClaudeCodeImporter(raw)
+/**
+ * Build the importer for a client.
+ * Session importers (chatgpt, claude-code) consume a raw export string.
+ * The Obsidian importer instead enumerates a live R2 vault — pass `blobs` (ScopedR2 satisfies
+ * VaultR2 structurally); `raw` is unused and can be the empty string.
+ */
+export const importerForClient = (
+  client: ImporterClient,
+  raw: string,
+  blobs?: VaultR2,
+): Importer => {
+  if (client === "chatgpt") return createChatGptImporter(raw)
+  if (client === "claude-code") return createClaudeCodeImporter(raw)
+  // client === "obsidian"
+  if (blobs === undefined) throw new Error("obsidian importer requires blobs (VaultR2)")
+  return createObsidianImporter(blobs)
+}
 
 /** The tenant-relative R2 key an enumerated item is staged at (the message `payloadRef`). */
 export const stageKey = (runId: string, fingerprint: string): string =>
@@ -97,8 +113,21 @@ export const runEnumerate = async (deps: EnumerateDeps): Promise<EnumerateResult
       for (const item of batch.items) {
         const fingerprint = (item as ImportedSession).fingerprint
         const ref = stageKey(deps.runId, fingerprint)
+        // For doc items the Obsidian importer attaches a `content` string (raw markdown).
+        // Stage the markdown directly so the consumer's `runBatchIngest` gets the right body.
+        // For session items (no `content` field) stage the full JSON as before.
+        const asDoc = item as Partial<{
+          content: string
+          contentType: string
+          path: string
+          tags: string[]
+        }>
         // Stage the body to R2 FIRST, then enqueue ONLY the reference (no payload inline).
-        await deps.blobs.put(ref, JSON.stringify(item))
+        // Switch on deps.kind (not content presence) so a future producer cannot mis-stage.
+        await deps.blobs.put(
+          ref,
+          deps.kind === "doc" && asDoc.content !== undefined ? asDoc.content : JSON.stringify(item),
+        )
         await deps.enqueue({
           tenantId: deps.tenantId,
           sourceId: deps.sourceId,
@@ -106,6 +135,9 @@ export const runEnumerate = async (deps: EnumerateDeps): Promise<EnumerateResult
           kind: deps.kind,
           payloadRef: ref,
           fingerprint,
+          ...(asDoc.contentType !== undefined ? { contentType: asDoc.contentType } : {}),
+          ...(asDoc.path !== undefined ? { path: asDoc.path } : {}),
+          ...(asDoc.tags !== undefined ? { tags: asDoc.tags } : {}),
         })
         stats.processed++
         stats.created++
@@ -131,8 +163,11 @@ export interface EnumeratorWorkflowParams {
   runId: string
   kind: BackfillMessage["kind"]
   client: ImporterClient
-  /** Tenant-relative R2 key of the raw source export the importer parses. */
-  exportR2Key: string
+  /**
+   * Tenant-relative R2 key of the raw source export the importer parses.
+   * Required for `chatgpt`/`claude-code`; omitted for `obsidian` (vault is enumerated live).
+   */
+  exportR2Key?: string
 }
 
 export class EnumeratorWorkflow extends WorkflowEntrypoint<ApiBindings, EnumeratorWorkflowParams> {
@@ -143,15 +178,25 @@ export class EnumeratorWorkflow extends WorkflowEntrypoint<ApiBindings, Enumerat
     const { principal, sourceId, runId, kind, client, exportR2Key } = event.payload
     const services: BackfillServices = createBackfillServices(this.env, principal)
     return step.do("enumerate", async () => {
-      const obj = await services.blobs.get(exportR2Key)
-      if (obj === null) throw new Error(`enumerate: source export not found at "${exportR2Key}"`)
-      const raw = await obj.text()
       const run = await services.runs.get(runId)
       await services.runs.claim(runId) // optimistic queued→running
       const enqueue = async (message: BackfillMessage): Promise<void> => {
         // The producer binding is present at deploy; the workflow only runs there.
         const queue = (this.env as { BACKFILL_QUEUE?: Queue<BackfillMessage> }).BACKFILL_QUEUE
         if (queue !== undefined) await queue.send(message)
+      }
+      // Obsidian vaults enumerate live R2; no export file to read.
+      // All other clients require an exportR2Key pointing to the staged export.
+      let importer: Importer
+      if (client === "obsidian") {
+        importer = importerForClient("obsidian", "", services.blobs)
+      } else {
+        if (exportR2Key === undefined)
+          throw new Error(`enumerate: exportR2Key required for client "${client}"`)
+        const obj = await services.blobs.get(exportR2Key)
+        if (obj === null) throw new Error(`enumerate: source export not found at "${exportR2Key}"`)
+        const raw = await obj.text()
+        importer = importerForClient(client, raw)
       }
       return runEnumerate({
         runs: services.runs,
@@ -161,7 +206,7 @@ export class EnumeratorWorkflow extends WorkflowEntrypoint<ApiBindings, Enumerat
         sourceId,
         runId,
         kind,
-        importer: importerForClient(client, raw),
+        importer,
         ...(run?.cursor != null ? { resumeCursor: run.cursor } : {}),
       })
     })

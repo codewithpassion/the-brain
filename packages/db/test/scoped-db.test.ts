@@ -380,3 +380,31 @@ describe("ScopedDB re-check path/tag filter (search filter in D1 re-check)", () 
     expect(rows.map((r) => r.id)).toEqual(["c-t1"])
   })
 })
+
+// ── getDocumentBySlug — O(1) indexed point-lookup (backfill recovery path) ───────────────────
+
+describe("getDocumentBySlug (indexed point-lookup on ux_documents_tenant_slug)", () => {
+  test("returns the row for the tenant's slug; null for missing or cross-tenant slug", async () => {
+    const { sqlite, db } = makeDb()
+    insertDoc(sqlite, { id: "d1", tenantId: "t1", slug: "my-slug" })
+    insertDoc(sqlite, { id: "d2", tenantId: "t2", slug: "my-slug" }) // same slug, different tenant
+    insertDoc(sqlite, { id: "d3", tenantId: "t2", slug: "other-slug" }) // only in t2
+
+    const t1 = new ScopedDB(db, principal({ tenantId: "t1" }))
+
+    // Happy-path: own tenant's slug returns the correct id + a valid status string.
+    const found = await t1.getDocumentBySlug("my-slug")
+    expect(found?.id).toBe("d1")
+    expect(typeof found?.status).toBe("string")
+
+    // Missing slug returns null (never throws).
+    expect(await t1.getDocumentBySlug("nonexistent")).toBeNull()
+
+    // A slug that exists ONLY under t2 returns null for t1's principal (cross-tenant isolation).
+    expect(await t1.getDocumentBySlug("other-slug")).toBeNull()
+
+    // Sanity: t2's principal sees its own slug.
+    const t2 = new ScopedDB(db, principal({ tenantId: "t2" }))
+    expect((await t2.getDocumentBySlug("my-slug"))?.id).toBe("d2")
+  })
+})

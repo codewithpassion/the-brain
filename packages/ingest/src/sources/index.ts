@@ -2,10 +2,13 @@
  * Session-export importers (PRD §4.7/§4.7.1) — net-new ChatGPT + Claude-Code adapters on the
  * platform-neutral `Importer` contract. Parse untrusted exports defensively (per-field guards,
  * skip-record on drift) and drop all foreign embeddings (`embeddingModel:'pending'`).
+ *
+ * Also exports the Obsidian vault importer (Phase 1) and its `VaultR2` structural interface.
  */
 export { createChatGptImporter } from "./chatgpt"
 export { createClaudeCodeImporter } from "./claude-code"
 export { runImporterContract } from "./contract"
+export { createObsidianImporter, type VaultR2 } from "./obsidian"
 export type {
   ImportBatch,
   ImportedSession,

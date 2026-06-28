@@ -391,6 +391,22 @@ export class ScopedDB {
   }
 
   /**
+   * Point-lookup by slug on the `(tenant_id, slug)` unique index — O(1), not a full scan.
+   * Used by the backfill consumer's idempotent recovery path: after a `(tenant_id, slug)` UNIQUE
+   * conflict, look up the existing doc's id + status to decide whether to resume or no-op. No
+   * scope predicate — this is an internal recovery lookup (the system principal that calls this
+   * has `allowedScopes: '*'`); tenant isolation is still enforced by `this.p.tenantId`.
+   */
+  async getDocumentBySlug(slug: string): Promise<{ id: string; status: string } | null> {
+    const rows = await this.db
+      .select({ id: documents.id, status: documents.status })
+      .from(documents)
+      .where(and(eq(documents.tenantId, this.p.tenantId), eq(documents.slug, slug)))
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /**
    * Audited break-glass read of chunks across the visibility tier (invariant 8). Fails
    * CLOSED: non-owner/admin → throws; missing audit sink → throws (no unaudited path).
    * NEVER bypasses `tenant_id` or `scopePredicate` — it only drops the visibility arm.
@@ -596,23 +612,29 @@ export class ScopedDB {
     for (let i = 0; i < rows.length; i += CHUNK_DB_BATCH_SIZE) {
       const slice = rows.slice(i, i + CHUNK_DB_BATCH_SIZE)
       const statements = slice.map((row) =>
-        this.db.insert(chunks).values({
-          id: row.id,
-          tenantId: this.p.tenantId, // forced
-          documentId: row.documentId,
-          scope: row.scope ?? null,
-          teamId: row.teamId ?? null,
-          userId: row.userId ?? null,
-          visibility: row.visibility ?? "world",
-          chunkIndex: row.chunkIndex,
-          content: row.content,
-          headingPath: row.headingPath ?? null,
-          tokenCount: row.tokenCount ?? null,
-          chunkSource: row.chunkSource ?? null,
-          embeddingModel: EMBEDDING_MODEL,
-          embeddingDims: EMBEDDING_DIMS,
-          updatedAt: now,
-        }),
+        this.db
+          .insert(chunks)
+          .values({
+            id: row.id,
+            tenantId: this.p.tenantId, // forced
+            documentId: row.documentId,
+            scope: row.scope ?? null,
+            teamId: row.teamId ?? null,
+            userId: row.userId ?? null,
+            visibility: row.visibility ?? "world",
+            chunkIndex: row.chunkIndex,
+            content: row.content,
+            headingPath: row.headingPath ?? null,
+            tokenCount: row.tokenCount ?? null,
+            chunkSource: row.chunkSource ?? null,
+            embeddingModel: EMBEDDING_MODEL,
+            embeddingDims: EMBEDDING_DIMS,
+            updatedAt: now,
+          })
+          // Idempotent on PK conflict: a resume of a partially-processed doc re-inserts the
+          // same chunk ids (chunkId = documentId:index, deterministic). The pre-existing rows
+          // are already correct — skipping is safe; the embed step runs regardless (upsert).
+          .onConflictDoNothing(),
       )
       await this.batchWithAudit(statements, {
         action: "chunk.insert",

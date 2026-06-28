@@ -24,7 +24,7 @@ export interface ImportedTurn {
 export interface ImportedSession {
   /** The source platform's own session id — the idempotent-upsert key `source_session_id`. */
   sourceSessionId: string
-  client: "chatgpt" | "claude-code"
+  client: "chatgpt" | "claude-code" | "obsidian"
   title?: string
   startedAt?: string
   turns: ImportedTurn[]

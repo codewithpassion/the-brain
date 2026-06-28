@@ -64,26 +64,67 @@ describe("audit-in-same-batch (invariant 10)", () => {
     expect(audit.user_id).toBe("userA") // audit actor forced
   })
 
-  test("on FAILURE inside the batch, NEITHER the change NOR the audit row lands", async () => {
+  test("duplicate-PK chunk in the same batch is silently skipped (idempotent)", async () => {
     const { sqlite, db } = makeDb()
     insertDoc(sqlite, { id: "d1", tenantId: "t1", slug: "doc-1" })
-    // Pre-seed a chunk so a second insert with the SAME primary key fails at the DB layer.
+    // Pre-seed chunk `dup` with a non-null embedded_at so we can verify it is NOT clobbered.
     insertChunk(sqlite, { id: "dup", tenantId: "t1", documentId: "d1" })
+    sqlite.run("UPDATE chunks SET embedded_at = '2026-06-25T00:00:00.000Z' WHERE id = 'dup'")
     const sdb = new ScopedDB(withBatch(db), principal({ tenantId: "t1" }))
 
-    // One fresh chunk + one duplicate-PK chunk in the SAME insertChunks call (one batch).
-    await expect(
-      sdb.insertChunks([
-        { id: "fresh", documentId: "d1", chunkIndex: 1, content: "x" },
-        { id: "dup", documentId: "d1", chunkIndex: 2, content: "y" }, // duplicate PK → throws
-      ]),
-    ).rejects.toThrow()
+    // onConflictDoNothing: the dup is skipped, the fresh chunk lands, no throw, audit written.
+    await sdb.insertChunks([
+      { id: "fresh", documentId: "d1", chunkIndex: 1, content: "x" },
+      { id: "dup", documentId: "d1", chunkIndex: 2, content: "y" }, // pre-exists → skip
+    ])
 
-    // All-or-nothing: the fresh chunk rolled back AND no audit row was written.
-    expect(rowCount(sqlite, "SELECT count(*) AS n FROM chunks WHERE id = 'fresh'")).toBe(0)
+    expect(rowCount(sqlite, "SELECT count(*) AS n FROM chunks WHERE id = 'fresh'")).toBe(1)
+    // The pre-existing `dup` row's embedded_at is NOT clobbered — no-clobber is the safety
+    // property that makes resume idempotent: already-embedded chunks keep their state.
+    const dupRow = sqlite.query("SELECT embedded_at FROM chunks WHERE id = 'dup'").get() as {
+      embedded_at: string | null
+    }
+    expect(dupRow.embedded_at).toBe("2026-06-25T00:00:00.000Z")
     expect(
       rowCount(sqlite, "SELECT count(*) AS n FROM memory_audit WHERE action = 'chunk.insert'"),
-    ).toBe(0)
+    ).toBe(1)
+  })
+})
+
+describe("insertChunks idempotent resume — partial crash re-drive completes cleanly", () => {
+  test("re-inserting chunks 0-2 (already written) alongside 3-5 (new) is a no-op + no-clobber", async () => {
+    const { sqlite, db } = makeDb()
+    insertDoc(sqlite, { id: "d1", tenantId: "t1", slug: "doc-1" })
+    const sdb = new ScopedDB(withBatch(db), principal({ tenantId: "t1" }))
+
+    // Simulate a crash after chunks 0-2 were written and embedded (embedded_at set).
+    const crashedRows = [
+      { id: "doc-1:0", documentId: "d1", chunkIndex: 0, content: "chunk 0" },
+      { id: "doc-1:1", documentId: "d1", chunkIndex: 1, content: "chunk 1" },
+      { id: "doc-1:2", documentId: "d1", chunkIndex: 2, content: "chunk 2" },
+    ]
+    await sdb.insertChunks(crashedRows)
+    sqlite.run(
+      "UPDATE chunks SET embedded_at = '2026-06-25T00:00:00.000Z' WHERE id IN ('doc-1:0','doc-1:1','doc-1:2')",
+    )
+
+    // Resume re-drives the full chunk list (0-5); chunks 0-2 are pre-existing.
+    const fullRows = [
+      ...crashedRows,
+      { id: "doc-1:3", documentId: "d1", chunkIndex: 3, content: "chunk 3" },
+      { id: "doc-1:4", documentId: "d1", chunkIndex: 4, content: "chunk 4" },
+      { id: "doc-1:5", documentId: "d1", chunkIndex: 5, content: "chunk 5" },
+    ]
+    await sdb.insertChunks(fullRows)
+
+    // All 6 chunks are present after the resume.
+    expect(rowCount(sqlite, "SELECT count(*) AS n FROM chunks WHERE document_id = 'd1'")).toBe(6)
+    // Pre-existing chunks 0-2 keep their embedded_at — embedding progress is not lost.
+    const embeddedCount = rowCount(
+      sqlite,
+      "SELECT count(*) AS n FROM chunks WHERE document_id = 'd1' AND embedded_at IS NOT NULL",
+    )
+    expect(embeddedCount).toBe(3)
   })
 })
 

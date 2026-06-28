@@ -6,10 +6,15 @@
  *      unknown org (or, with a `userId`, a non-member) throws `BackfillRejectError`, so the message
  *      is retried to exhaustion and lands in the DLQ (invariant 18 — never a shared HTTP secret);
  *   2. drives the item idempotently (invariant 15): a `doc` item inserts a `documents` row with a
- *      DETERMINISTIC id + content-addressed slug (re-delivery → PK/`(tenant,slug)` conflict → caught
- *      → no-op) then runs `runBatchIngest`; a `session` item reads the staged `ImportedSession` from
- *      R2 and persists it through `captureSession` (itself marker-gated). At-least-once delivery is
- *      therefore a no-op on the second pass — no double-ingest, no doubled turns.
+ *      UUID id (cap-safe: 36 chars → chunkId ≤ 41 chars, under CF's 64-byte Vectorize cap) and a
+ *      content-addressed slug (`bf-${fingerprint}`) as the UNIQUE dedup key; a re-delivery hits the
+ *      `(tenant_id, slug)` UNIQUE conflict → the catch narrows to that conflict, looks up the
+ *      existing doc's status, and re-drives `runBatchIngest` for non-terminal docs (pending /
+ *      processing → resume) or skips for terminal docs (indexed / failed → no-op). Transient errors
+ *      (timeout, contention) are NOT caught — they rethrow so the queue retries and eventually DLQ;
+ *      a `session` item reads the staged `ImportedSession` from R2 and persists it through
+ *      `captureSession` (itself marker-gated). At-least-once delivery is therefore idempotent on the
+ *      second pass — no double-ingest, no doubled turns.
  *
  * `handleBackfillQueue` is the deploy-time consumer: per-message `ack()`/`retry()` so one poison item
  * never fails the whole batch (and exhausted retries route to `brain-backfill-dlq`).
@@ -32,8 +37,7 @@ export class BackfillRejectError extends Error {
   }
 }
 
-/** Deterministic ingest ids (invariant 15): a re-delivery hits the PK / `(tenant, slug)` conflict. */
-const docId = (tenantId: string, fingerprint: string): string => `ingest-${tenantId}-${fingerprint}`
+/** Slug-based dedup key stored in D1 (TEXT column — length is fine, not a Vectorize id). */
 const docSlug = (fingerprint: string): string => `bf-${fingerprint}`
 
 /**
@@ -61,24 +65,42 @@ export const runBackfillMessage = async (
     return
   }
 
-  // kind === "doc": deterministic-id documents row + runBatchIngest (mirrors /ingest, index.ts).
-  const id = docId(message.tenantId, message.fingerprint)
+  // kind === "doc": UUID document id (cap-safe) + slug-based dedup + runBatchIngest.
+  // The UUID (36 chars) produces chunkIds of ≤ 41 chars — safely under CF's 64-byte Vectorize cap.
+  // Idempotency rests on the `(tenant_id, slug)` UNIQUE index, NOT the document id (invariant 15).
+  const slug = docSlug(message.fingerprint)
   const contentType = message.contentType ?? "text/markdown"
+  let docId: string | undefined
   try {
-    await services.db.insertDocument({
-      id,
-      slug: docSlug(message.fingerprint),
+    docId = await services.db.insertDocument({
+      // No explicit id — insertDocument generates a UUID; slug uniqueness handles re-delivery.
+      slug,
       fingerprint: message.fingerprint,
       contentType,
       bodyR2Key: message.payloadRef,
       status: "pending",
       sourceId: message.sourceId,
       ingestedVia: "backfill-queue",
+      // path + tags come from Obsidian (and future) importers via BackfillMessage.
+      ...(message.path !== undefined ? { path: message.path } : {}),
+      ...(message.tags !== undefined ? { tags: message.tags } : {}),
     })
-  } catch {
-    return // already ingested (the deterministic-id conflict) — idempotent no-op.
+  } catch (err) {
+    // Resolve by DB STATE, not by error-string matching (fragile if the UNIQUE error is wrapped
+    // in err.cause). insertDocument's batch is atomic, so a throw means THIS delivery wrote no row.
+    // Point-lookup by slug on the (tenant_id, slug) unique index — O(1), avoids a full documents
+    // scan (O(N·D) on steady-state where every unchanged note hits this path each enumerator run).
+    const existing = await services.db.getDocumentBySlug(slug)
+    // No row ⇒ the throw was a genuine transient/unknown failure → rethrow so the queue retries → DLQ.
+    if (existing === null) throw err
+    // A row exists ⇒ a PRIOR delivery created it (a real dedup conflict).
+    if (existing.status === "indexed" || existing.status === "failed") return // terminal → no-op
+    // Non-terminal (pending / processing): the prior delivery crashed after insert but before
+    // runBatchIngest completed → re-drive ingest with the EXISTING id, not a fresh UUID.
+    docId = existing.id
   }
-  await runBatchIngest(services, { documentId: id, r2Key: message.payloadRef, contentType })
+  if (docId === undefined) return // unreachable; all non-throw/non-return paths above assign docId
+  await runBatchIngest(services, { documentId: docId, r2Key: message.payloadRef, contentType })
 }
 
 /**
