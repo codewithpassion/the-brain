@@ -435,6 +435,56 @@ export class ScopedDB {
   }
 
   /**
+   * Point-lookup by id — returns the full live document row for a single tenant-scoped doc,
+   * or `null` when the id is missing, cross-tenant, or soft-deleted. Used by the dashboard
+   * get/reprocess/update ops (which need bodyR2Key, contentType, chunkCount, tags, etc.).
+   * No scope predicate — the caller holds a tenant-scoped principal; scope is returned as a
+   * field so the surface op can mirror it into re-ingest params (same pattern as getDocumentBySlug).
+   */
+  async getDocumentById(documentId: string): Promise<{
+    id: string
+    slug: string
+    title: string | null
+    status: string
+    contentType: string | null
+    bodyR2Key: string | null
+    fingerprint: string
+    scope: string | null
+    path: string | null
+    tags: string | null
+    chunkCount: number | null
+    createdAt: string | null
+    updatedAt: string | null
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: documents.id,
+        slug: documents.slug,
+        title: documents.title,
+        status: documents.status,
+        contentType: documents.contentType,
+        bodyR2Key: documents.bodyR2Key,
+        fingerprint: documents.fingerprint,
+        scope: documents.scope,
+        path: documents.path,
+        tags: documents.tags,
+        chunkCount: documents.chunkCount,
+        createdAt: documents.createdAt,
+        updatedAt: documents.updatedAt,
+      })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.tenantId, this.p.tenantId),
+          eq(documents.id, documentId),
+          isNull(documents.deletedAt),
+        ),
+      )
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /**
    * Audited break-glass read of chunks across the visibility tier (invariant 8). Fails
    * CLOSED: non-owner/admin → throws; missing audit sink → throws (no unaudited path).
    * NEVER bypasses `tenant_id` or `scopePredicate` — it only drops the visibility arm.

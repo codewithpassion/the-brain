@@ -15,7 +15,9 @@ import type {
   BrainStats,
   CreateApiKeyResult,
   CreateOrgResult,
+  DeleteDocumentResult,
   DerivedDocument,
+  DocumentDetail,
   FindOrphansResult,
   ListApiKeysResult,
   ListAuditResult,
@@ -27,12 +29,14 @@ import type {
   MembershipsResult,
   RecallResult,
   RemoveMemberResult,
+  ReprocessDocumentResult,
   RevokeApiKeyResult,
   SearchResult,
   SearchUserByEmailResult,
   ThinkResult,
   TokenSpend,
   TraversalResult,
+  UpdateDocumentResult,
   UpdateMemberResult,
 } from "./types"
 
@@ -158,7 +162,12 @@ export const traverseGraph = createServerFn({ method: "POST" })
   .validator((d: { seedId: string }) => d)
   .handler(async ({ data }): Promise<Result<TraversalResult>> => {
     try {
-      const out = await brainCall<TraversalResult>("traverse_graph", true, { seedId: data.seedId })
+      const out = await brainCall<TraversalResult>("traverse_graph", true, {
+        target: data.seedId,
+        graph: "entity",
+        depth: 2,
+        direction: "both",
+      })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)
@@ -438,6 +447,66 @@ export const revokeApiKey = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<Result<RevokeApiKeyResult>> => {
     try {
       const out = await brainCall<RevokeApiKeyResult>("revoke_api_key", false, data)
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Document ops ---
+
+/** `get_document` — fetch a single document by id with full body. */
+export const getDocument = createServerFn({ method: "POST" })
+  .validator((d: { documentId: string }) => d)
+  .handler(async ({ data }): Promise<Result<DocumentDetail>> => {
+    try {
+      const out = await brainCall<DocumentDetail>("get_document", true, {
+        documentId: data.documentId,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `reprocess_document` — re-queue a document for ingestion. */
+export const reprocessDocument = createServerFn({ method: "POST" })
+  .validator((d: { documentId: string }) => d)
+  .handler(async ({ data }): Promise<Result<ReprocessDocumentResult>> => {
+    try {
+      const out = await brainCall<ReprocessDocumentResult>("reprocess_document", false, {
+        documentId: data.documentId,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `update_document` — replace a document's content and optionally its content type. */
+export const updateDocument = createServerFn({ method: "POST" })
+  .validator((d: { documentId: string; content: string; contentType?: string }) => d)
+  .handler(async ({ data }): Promise<Result<UpdateDocumentResult>> => {
+    try {
+      const out = await brainCall<UpdateDocumentResult>("update_document", false, {
+        documentId: data.documentId,
+        content: data.content,
+        ...(data.contentType ? { contentType: data.contentType } : {}),
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `delete_document` — permanently delete a document and its chunks/embeddings. */
+export const deleteDocument = createServerFn({ method: "POST" })
+  .validator((d: { documentId: string }) => d)
+  .handler(async ({ data }): Promise<Result<DeleteDocumentResult>> => {
+    try {
+      const out = await brainCall<DeleteDocumentResult>("delete_document", false, {
+        documentId: data.documentId,
+      })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

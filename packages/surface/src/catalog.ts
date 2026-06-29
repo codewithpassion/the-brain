@@ -34,6 +34,7 @@ import {
   FORGET_FACT_OP,
   forgetFact,
   forgetMemory,
+  GET_DOCUMENT_OP,
   GET_SESSION_CONTEXT_OP,
   GRAPH_OPS,
   type GraphOpDeps,
@@ -60,6 +61,7 @@ import {
   OKF_IMPORT_OP,
   queryOp,
   RECALL_OP,
+  REPROCESS_DOCUMENT_OP,
   type RecallRequest,
   type RetrievalInput,
   recall,
@@ -74,6 +76,7 @@ import {
   submitMemoryReview,
   type ThinkResult,
   thinkOp,
+  UPDATE_DOCUMENT_OP,
   VAULT_WRITEBACK_OP,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
@@ -539,6 +542,163 @@ const deleteDocumentSurfaceOp: SurfaceOp = {
   },
 }
 
+// ── Get document ─────────────────────────────────────────────────────────────
+
+/**
+ * `get_document` — point-lookup by id; fetches the markdown body from R2 via the scoped blob
+ * store. Returns an empty body string when the R2 object is absent (e.g. a pending doc whose
+ * body was never written).
+ */
+const getDocumentSurfaceOp: SurfaceOp = {
+  def: GET_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const { documentId } = GET_DOCUMENT_OP.input.parse(input) as { documentId: string }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const doc = await services.db.getDocumentById(documentId)
+    if (doc === null) {
+      throw new Error(`get_document: document ${documentId} not found`)
+    }
+    let body = ""
+    if (doc.bodyR2Key !== null) {
+      const obj = await services.blobs.get(doc.bodyR2Key)
+      if (obj !== null) {
+        body = await obj.text()
+      }
+    }
+    return {
+      id: doc.id,
+      slug: doc.slug,
+      title: doc.title ?? null,
+      status: doc.status,
+      contentType: doc.contentType ?? null,
+      body,
+      chunkCount: doc.chunkCount ?? 0,
+      tags: JSON.parse(doc.tags ?? "[]") as string[],
+      path: doc.path ?? null,
+      scope: doc.scope ?? null,
+      createdAt: doc.createdAt ?? null,
+      updatedAt: doc.updatedAt ?? null,
+    }
+  },
+}
+
+// ── Reprocess document ────────────────────────────────────────────────────────
+
+/**
+ * `reprocess_document` — resets a document to `pending` and re-dispatches the full
+ * BATCH_INGEST workflow with a fresh `crypto.randomUUID()` nonce in the instance id
+ * so rapid re-dispatch is never deduplicated. Falls back to inline `runBatchIngestCore`
+ * when the workflow binding is absent (local/test), mirroring `ingest_document`.
+ */
+const reprocessDocumentSurfaceOp: SurfaceOp = {
+  def: REPROCESS_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const { documentId } = REPROCESS_DOCUMENT_OP.input.parse(input) as { documentId: string }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const doc = await services.db.getDocumentById(documentId)
+    if (doc === null) {
+      throw new Error(`reprocess_document: document ${documentId} not found`)
+    }
+
+    await services.db.updateDocumentStatus(documentId, { status: "pending" })
+
+    const ingestParams = {
+      documentId,
+      r2Key: doc.bodyR2Key ?? `documents/${documentId}`,
+      contentType: doc.contentType ?? "text/markdown",
+      scope: doc.scope ?? null,
+      ...(doc.path !== null ? { path: doc.path } : {}),
+    }
+
+    const workflow = ctx.env.BATCH_INGEST
+    if (workflow) {
+      const nonce = crypto.randomUUID()
+      const instanceId = await workflowInstanceId(
+        `reprocess-${ctx.principal.tenantId}-${documentId}-${nonce}`,
+      )
+      await workflow.create({
+        id: instanceId,
+        params: { principal: ctx.principal, ingest: ingestParams },
+      })
+      return { documentId, status: "pending" }
+    }
+
+    const result = await runBatchIngestCore(services, ingestParams)
+    return { documentId, status: result.status }
+  },
+}
+
+// ── Update document ───────────────────────────────────────────────────────────
+
+/**
+ * `update_document` — replaces the document body in R2, hard-deletes old chunks (freeing
+ * deterministic PKs for re-use), removes their Vectorize vectors, then supersedes the
+ * document row (new fingerprint + status `pending`) via `updateDocumentForSupersede` and
+ * re-dispatches the full BATCH_INGEST workflow.  Slug and id are preserved.
+ */
+const updateDocumentSurfaceOp: SurfaceOp = {
+  def: UPDATE_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const parsed = UPDATE_DOCUMENT_OP.input.parse(input) as {
+      documentId: string
+      content: string
+      contentType: "text/markdown" | "text/plain"
+    }
+    const { documentId } = parsed
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const doc = await services.db.getDocumentById(documentId)
+    if (doc === null) {
+      throw new Error(`update_document: document ${documentId} not found`)
+    }
+
+    const markdown = toMarkdown(parsed.content, parsed.contentType)
+    const r2Key = doc.bodyR2Key ?? `documents/${documentId}`
+
+    // Write new body to R2 first (cheap rollback: old content is still in R2 until overwrite).
+    await services.blobs.put(r2Key, markdown)
+
+    // Compute new fingerprint from the new content.
+    const fp = await fingerprint(markdown)
+
+    // Hard-delete old chunks (frees deterministic PKs for the re-ingest) + drop their vectors.
+    const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(documentId)
+    if (oldChunkIds.length > 0) {
+      await services.vectors.deleteVectors(oldChunkIds)
+    }
+
+    // Supersede the document row: new fingerprint + status → pending + clear deletedAt.
+    await services.db.updateDocumentForSupersede(documentId, {
+      fingerprint: fp,
+      bodyR2Key: r2Key,
+      deletedAt: null,
+    })
+
+    const ingestParams = {
+      documentId,
+      r2Key,
+      contentType: "text/markdown",
+      scope: doc.scope ?? null,
+      ...(doc.path !== null ? { path: doc.path } : {}),
+    }
+
+    const workflow = ctx.env.BATCH_INGEST
+    if (workflow) {
+      const nonce = crypto.randomUUID()
+      const instanceId = await workflowInstanceId(
+        `update-${ctx.principal.tenantId}-${documentId}-${nonce}`,
+      )
+      await workflow.create({
+        id: instanceId,
+        params: { principal: ctx.principal, ingest: ingestParams },
+      })
+      return { documentId, status: "pending" }
+    }
+
+    const result = await runBatchIngestCore(services, ingestParams)
+    return { documentId, status: result.status }
+  },
+}
+
 // ── Vault write-back ──────────────────────────────────────────────────────────
 
 /**
@@ -600,6 +760,9 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   auditExportSurfaceOp,
   ingestDocumentSurfaceOp,
   deleteDocumentSurfaceOp,
+  getDocumentSurfaceOp,
+  reprocessDocumentSurfaceOp,
+  updateDocumentSurfaceOp,
   vaultWritebackSurfaceOp,
   ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
 ]

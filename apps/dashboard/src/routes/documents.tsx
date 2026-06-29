@@ -2,7 +2,7 @@
  * Documents — real document catalog via list_documents, with filter controls (tag, path, date
  * range) and an optional content search box.
  */
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
@@ -228,9 +228,23 @@ function DocumentsPage() {
                   <tbody>
                     {docList.map((doc) => (
                       <tr key={doc.id} className="border-neutral-100 border-t">
-                        <td className="py-1.5 font-mono text-xs">{doc.slug}</td>
+                        <td className="py-1.5 font-mono text-xs">
+                          <Link
+                            to="/documents/$id"
+                            params={{ id: doc.id }}
+                            className="hover:underline"
+                          >
+                            {doc.slug}
+                          </Link>
+                        </td>
                         <td className="py-1.5 text-neutral-700">
-                          {doc.title !== "" ? doc.title : "—"}
+                          <Link
+                            to="/documents/$id"
+                            params={{ id: doc.id }}
+                            className="hover:underline"
+                          >
+                            {doc.title !== "" ? doc.title : "—"}
+                          </Link>
                         </td>
                         <td className="py-1.5">
                           <Badge variant={docStatusVariant(doc.status)}>{doc.status}</Badge>

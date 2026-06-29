@@ -1425,6 +1425,86 @@ export const DELETE_DOCUMENT_OP = defineOp({
   }),
 })
 
+// ── GET_DOCUMENT_OP ───────────────────────────────────────────────────────────
+
+/**
+ * `get_document` — retrieve a document by id with its full markdown body from R2.
+ * Handler lives in the surface catalog (needs ScopedServices for blobs + db).
+ */
+export const GET_DOCUMENT_OP = defineOp({
+  name: "get_document",
+  description:
+    "Retrieve a document by id, including its full markdown body. Returns metadata and the " +
+    "markdown body fetched from R2 (empty string when the R2 object is absent).",
+  capability: "read",
+  readOnly: true,
+  input: z.object({ documentId: z.string().min(1) }),
+  output: z.object({
+    id: z.string(),
+    slug: z.string(),
+    title: z.string().nullable(),
+    status: z.string(),
+    contentType: z.string().nullable(),
+    body: z.string(),
+    chunkCount: z.number().int(),
+    tags: z.array(z.string()),
+    path: z.string().nullable(),
+    scope: z.string().nullable(),
+    createdAt: z.string().nullable(),
+    updatedAt: z.string().nullable(),
+  }),
+})
+
+// ── REPROCESS_DOCUMENT_OP ─────────────────────────────────────────────────────
+
+/**
+ * `reprocess_document` — re-drive the full ingest pipeline for a document that is stuck
+ * in `processing` (0 chunks) or needs re-extraction after an entity-extraction failure.
+ * Handler lives in the surface catalog (needs ScopedServices + BATCH_INGEST workflow).
+ */
+export const REPROCESS_DOCUMENT_OP = defineOp({
+  name: "reprocess_document",
+  description:
+    "Re-run the full ingest pipeline (chunk + embed + entity extraction) for an existing " +
+    "document. Resets status to `pending` and dispatches a fresh BATCH_INGEST workflow " +
+    "with a unique instance id so re-dispatch is never deduped. Idempotent: re-inserting " +
+    "the same chunk ids is safe (onConflictDoNothing).",
+  capability: "write",
+  readOnly: false,
+  input: z.object({ documentId: z.string().min(1) }),
+  output: z.object({
+    documentId: z.string(),
+    status: z.string(),
+  }),
+})
+
+// ── UPDATE_DOCUMENT_OP ────────────────────────────────────────────────────────
+
+/**
+ * `update_document` — replace a document's body in-place, preserving its id and slug,
+ * and re-run the full ingest pipeline on the new content.
+ * Handler lives in the surface catalog (needs ScopedServices + BATCH_INGEST workflow).
+ */
+export const UPDATE_DOCUMENT_OP = defineOp({
+  name: "update_document",
+  description:
+    "Replace a document's content and re-run the ingest pipeline. Writes the new content " +
+    "to the document's existing R2 key, hard-deletes old chunks (freeing deterministic PKs), " +
+    "removes their Vectorize vectors, updates the document row with a new fingerprint and " +
+    "status `pending`, then dispatches BATCH_INGEST. The document id and slug are preserved.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    documentId: z.string().min(1),
+    content: z.string().min(1),
+    contentType: z.enum(["text/markdown", "text/plain"]).default("text/markdown"),
+  }),
+  output: z.object({
+    documentId: z.string(),
+    status: z.string(),
+  }),
+})
+
 // ── VAULT_WRITEBACK_OP ────────────────────────────────────────────────────────
 
 /**
@@ -1471,10 +1551,14 @@ export const ADMIN_OPS = [
 /** Register the admin op CONTRACTS into a shared `OpRegistry` (handlers bind in the surface layer). */
 export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   for (const op of ADMIN_OPS) registry.register(op.def)
-  // ingest_document, delete_document, vault_writeback: registered separately;
-  // handlers live in the surface catalog (need ScopedServices for blobs/vectors/db).
+  // ingest_document, delete_document, vault_writeback, get_document, reprocess_document,
+  // update_document: registered separately; handlers live in the surface catalog (need
+  // ScopedServices for blobs/vectors/db/workflow).
   registry.register(INGEST_DOCUMENT_OP)
   registry.register(DELETE_DOCUMENT_OP)
   registry.register(VAULT_WRITEBACK_OP)
+  registry.register(GET_DOCUMENT_OP)
+  registry.register(REPROCESS_DOCUMENT_OP)
+  registry.register(UPDATE_DOCUMENT_OP)
   return registry
 }

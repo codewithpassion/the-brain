@@ -241,6 +241,37 @@ export interface RevokeApiKeyResult {
   revoked: boolean
 }
 
+// --- Document detail ---
+
+export interface DocumentDetail {
+  id: string
+  slug: string
+  title: string
+  status: string
+  contentType: string
+  body: string
+  chunkCount: number
+  tags: string[]
+  path: string | null
+  scope: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ReprocessDocumentResult {
+  documentId: string
+  status: string
+}
+
+export interface UpdateDocumentResult {
+  documentId: string
+  status: string
+}
+
+export interface DeleteDocumentResult {
+  deleted: boolean
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

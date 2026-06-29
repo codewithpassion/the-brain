@@ -66,7 +66,9 @@ export const runBatchIngest = async (
   // KG extraction (Phase 4). NON-FATAL: a failure never fails ingest — the doc is indexed
   // regardless. At deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
   if (result.status !== "failed") {
-    await runEntityExtraction(services, params.documentId).catch(() => undefined)
+    await runEntityExtraction(services, params.documentId).catch((err) => {
+      console.error("entity-extraction failed for", params.documentId, err)
+    })
   }
 
   return result

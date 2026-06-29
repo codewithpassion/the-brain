@@ -408,3 +408,54 @@ describe("getDocumentBySlug (indexed point-lookup on ux_documents_tenant_slug)",
     expect((await t2.getDocumentBySlug("my-slug"))?.id).toBe("d2")
   })
 })
+
+describe("ScopedDB.getDocumentById", () => {
+  test("returns the full row for a live doc in the caller's tenant", async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.run(
+      `INSERT INTO documents
+         (id, tenant_id, user_id, slug, status, fingerprint, content_type, body_r2_key, chunk_count, tags, path, scope, created_at, updated_at)
+       VALUES ('d1', 't1', 'userA', 'slug-d1', 'indexed', 'fp-d1', 'text/markdown', 'documents/d1', 3, '["a","b"]', '/proj', null, '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z')`,
+    )
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    const row = await sdb.getDocumentById("d1")
+    expect(row).not.toBeNull()
+    expect(row?.id).toBe("d1")
+    expect(row?.slug).toBe("slug-d1")
+    expect(row?.status).toBe("indexed")
+    expect(row?.contentType).toBe("text/markdown")
+    expect(row?.bodyR2Key).toBe("documents/d1")
+    expect(row?.chunkCount).toBe(3)
+    expect(row?.tags).toBe('["a","b"]')
+    expect(row?.path).toBe("/proj")
+    expect(row?.createdAt).toBe("2026-06-01T00:00:00.000Z")
+    expect(row?.updatedAt).toBe("2026-06-02T00:00:00.000Z")
+  })
+
+  test("returns null for a missing id", async () => {
+    const { db } = makeDb()
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    expect(await sdb.getDocumentById("nonexistent")).toBeNull()
+  })
+
+  test("returns null for a cross-tenant id (invariant 1)", async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint)
+       VALUES ('d2', 't2', 'userB', 'slug-d2', 'indexed', 'fp-d2')`,
+    )
+    // t1's ScopedDB must not see t2's document
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    expect(await sdb.getDocumentById("d2")).toBeNull()
+  })
+
+  test("returns null for a soft-deleted doc", async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.run(
+      `INSERT INTO documents (id, tenant_id, user_id, slug, status, fingerprint, deleted_at)
+       VALUES ('d3', 't1', 'userA', 'slug-d3', 'indexed', 'fp-d3', '2026-06-01T00:00:00.000Z')`,
+    )
+    const sdb = new ScopedDB(db, principal({ tenantId: "t1" }))
+    expect(await sdb.getDocumentById("d3")).toBeNull()
+  })
+})
