@@ -77,6 +77,7 @@ import {
   type ThinkResult,
   thinkOp,
   UPDATE_DOCUMENT_OP,
+  VAULT_OPS,
   VAULT_WRITEBACK_OP,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
@@ -765,4 +766,5 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   updateDocumentSurfaceOp,
   vaultWritebackSurfaceOp,
   ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
+  ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
 ]

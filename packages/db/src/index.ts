@@ -33,3 +33,5 @@ export * from "./search"
 export type { ScopedServices, ScopedServicesOptions } from "./services"
 export { createScopedServices } from "./services"
 export * from "./sessions"
+// ── Vault WebDAV credential store + ops (r2-facade-plan.md) ──────────────────
+export * from "./vault"

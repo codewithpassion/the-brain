@@ -15,6 +15,7 @@ import type {
   BrainStats,
   CreateApiKeyResult,
   CreateOrgResult,
+  CreateVaultCredentialResult,
   DeleteDocumentResult,
   DerivedDocument,
   DocumentDetail,
@@ -27,11 +28,13 @@ import type {
   ListEntityEdgesResult,
   ListOrgsResult,
   ListSessionsResult,
+  ListVaultCredentialsResult,
   MembershipsResult,
   RecallResult,
   RemoveMemberResult,
   ReprocessDocumentResult,
   RevokeApiKeyResult,
+  RevokeVaultCredentialResult,
   SearchResult,
   SearchUserByEmailResult,
   ThinkResult,
@@ -569,6 +572,52 @@ export const activateCliCode = createServerFn({ method: "POST" })
         throw new Error(String(body.error ?? `activation failed (${res.status})`))
       }
       return { ok: true, data: { ok: true } }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Vault credential management ---
+
+/** `list_vault_credentials` (admin) — list WebDAV credentials for Obsidian vault sync. */
+export const listVaultCredentials = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListVaultCredentialsResult>> => {
+    try {
+      const out = await brainCall<ListVaultCredentialsResult>("list_vault_credentials", true, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `create_vault_credential` (admin) — mint a WebDAV username+password for Obsidian sync. Returns password ONCE. */
+export const createVaultCredential = createServerFn({ method: "POST" })
+  .validator((d: { label?: string }) => d)
+  .handler(async ({ data }): Promise<Result<CreateVaultCredentialResult>> => {
+    try {
+      const out = await brainCall<CreateVaultCredentialResult>(
+        "create_vault_credential",
+        false,
+        data,
+      )
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `revoke_vault_credential` (admin) — revoke a WebDAV credential by username. */
+export const revokeVaultCredential = createServerFn({ method: "POST" })
+  .validator((d: { username: string }) => d)
+  .handler(async ({ data }): Promise<Result<RevokeVaultCredentialResult>> => {
+    try {
+      const out = await brainCall<RevokeVaultCredentialResult>(
+        "revoke_vault_credential",
+        false,
+        data,
+      )
+      return { ok: true, data: out }
     } catch (error) {
       return fail(error)
     }

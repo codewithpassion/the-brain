@@ -60,4 +60,11 @@ export type ApiBindings = BrainBindings & {
   OPENAI_EXTRACT_MODEL?: string
   /** Override rerank model (default: gateway RERANK_MODEL constant). */
   OPENAI_RERANK_MODEL?: string
+
+  /**
+   * Deploy-only `brain-vault-events` producer binding. Used by the vault WebDAV facade to
+   * enqueue ingest/delete events on PUT/DELETE. Absent locally/in the test harness
+   * (queue producers have no local emulation — the vault-dav handler guards with `if (env.VAULT_EVENTS_QUEUE)`).
+   */
+  VAULT_EVENTS_QUEUE?: Queue
 }

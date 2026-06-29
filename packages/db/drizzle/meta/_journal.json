@@ -29,6 +29,13 @@
       "when": 1782646065280,
       "tag": "0003_smooth_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782730812476,
+      "tag": "0004_huge_harpoon",
+      "breakpoints": true
     }
   ]
 }

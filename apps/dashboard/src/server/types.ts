@@ -286,6 +286,29 @@ export interface DeleteDocumentResult {
   deleted: boolean
 }
 
+// --- Vault credential management ---
+
+export interface VaultCredential {
+  username: string
+  label: string | null
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface ListVaultCredentialsResult {
+  credentials: VaultCredential[]
+}
+
+export interface CreateVaultCredentialResult {
+  username: string
+  password: string
+  endpoint: string
+}
+
+export interface RevokeVaultCredentialResult {
+  revoked: boolean
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

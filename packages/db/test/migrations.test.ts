@@ -75,6 +75,7 @@ const BASE_TABLES = [
   "ingest_log",
   "token_spend",
   "mcp_request_log",
+  "vault_credentials",
 ]
 
 describe("migrations apply cleanly", () => {
@@ -86,6 +87,7 @@ describe("migrations apply cleanly", () => {
       "0001_fts5_and_expression_indexes.sql",
       "0002_path_columns_and_page_revisions.sql",
       "0003_smooth_leper_queen.sql",
+      "0004_huge_harpoon.sql",
     ])
   })
 

@@ -74,6 +74,7 @@ import {
   type SessionBindings,
   sessionServicesFor,
 } from "./sessions"
+import { mountVaultDav } from "./vault-dav"
 import { handleVaultEventQueue, type R2EventMessage } from "./vault-events/consume"
 
 /**
@@ -252,7 +253,10 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       c.req.path === "/authorize/orgs" || // org picker endpoint — carries JWT in body, not header
       c.req.path === "/callback" ||
       isMcpPath(c.req.path) ||
-      isDeviceFlowPath(c.req.path)
+      isDeviceFlowPath(c.req.path) ||
+      // WebDAV facade does its own Basic auth — exempt from Clerk/bearer principal resolution.
+      c.req.path === "/dav" ||
+      c.req.path.startsWith("/dav/")
     )
       return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
@@ -279,6 +283,10 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
 
   // ── MCP transports (PRD §9.2): agent-facing op-registry catalog over the resolved Principal. ──
   mountMcp(app, { ...(options.clerkVerifier ? { clerkVerifier: options.clerkVerifier } : {}) })
+
+  // ── WebDAV sync facade (/dav, /dav/*) — exempted from the main auth middleware above,
+  //    performs its own HTTP Basic auth via per-tenant vault credentials.
+  mountVaultDav(app)
 
   // ── tRPC typed surface (dashboard + CLI) — the generated `appRouter` mounted under the SAME
   //    edge-resolved Principal (invariant 17). The router is built from the single op-registry

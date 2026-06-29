@@ -106,7 +106,10 @@
   "queues": {
     "producers": [
       { "binding": "BACKFILL_QUEUE", "queue": "brain-backfill" },
-      { "binding": "REEMBED_QUEUE", "queue": "brain-reembed" }
+      { "binding": "REEMBED_QUEUE", "queue": "brain-reembed" },
+      // Producer for the vault WebDAV facade: PUT/DELETE events → existing brain-vault-events
+      // consumer (apps/api/src/vault-events/consume.ts). Replaces the r2 bucket notification.
+      { "binding": "VAULT_EVENTS_QUEUE", "queue": "brain-vault-events" }
     ],
     "consumers": [
       {
