@@ -1,17 +1,16 @@
 /**
- * The active-tenant indicator. Reads the SERVER-pinned tenant via `getSessionInfo` (which derives it
- * from the verified Clerk subject — invariant 17). The browser only ever displays it; it is never a
- * value the client can set or send.
+ * Compact MCP-server copy chip. Reads the SERVER-pinned tenant via `getSessionInfo` (derived from
+ * the verified Clerk subject — invariant 17; the browser only displays it). Clicking the chip copies
+ * the tenant's MCP server URL and shows a toast — no separate "copy" button, no long inline tenant id.
  */
 import { useEffect, useState } from "react"
 import { getSessionInfo } from "../server/fns"
-import { Badge } from "./ui/badge"
+import { toast } from "./Toaster"
 
 const MCP_BASE = "https://brain-api.dominik-fretz.workers.dev/mcp"
 
 export function TenantIndicator() {
   const [tenant, setTenant] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -27,32 +26,34 @@ export function TenantIndicator() {
     }
   }, [])
 
-  function handleCopy() {
-    if (tenant === null) return
-    navigator.clipboard
-      .writeText(`${MCP_BASE}/${tenant}`)
-      .then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
-      })
-      .catch(() => {
-        /* clipboard write failed — ignore */
-      })
-  }
-
   if (tenant === null) return null
+  const url = `${MCP_BASE}/${tenant}`
+
   return (
-    <Badge variant="secondary" title="Server-pinned active tenant (invariant 17)">
-      tenant: <span className="ml-1 font-mono">{tenant}</span>
-      <button
-        type="button"
-        onClick={handleCopy}
-        title="Copy MCP server URL"
-        className="ml-2 cursor-pointer opacity-60 transition-opacity hover:opacity-100"
-        aria-label="Copy MCP server URL"
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard
+          .writeText(url)
+          .then(() => toast("MCP server URL copied"))
+          .catch(() => toast("Copy failed"))
+      }}
+      title={`Click to copy the MCP server URL\n${url}`}
+      className="flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-neutral-600 text-xs hover:bg-neutral-50"
+      aria-label="Copy MCP server URL"
+    >
+      <svg
+        className="h-3.5 w-3.5 text-neutral-400"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        aria-hidden="true"
       >
-        {copied ? "Copied!" : "Copy MCP"}
-      </button>
-    </Badge>
+        <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+        <path d="M2.5 10.5V3.5a1 1 0 011-1h7" />
+      </svg>
+      Copy MCP URL
+    </button>
   )
 }

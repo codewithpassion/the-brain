@@ -99,7 +99,9 @@ export function OrgSwitcher() {
         className="flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-sm text-neutral-700 hover:bg-neutral-50"
         title="Switch org"
       >
-        <span className="font-mono text-xs">{activeOrg?.name ?? activeTenant ?? "…"}</span>
+        <span className="max-w-[120px] truncate font-mono text-xs">
+          {activeOrg?.name ?? activeTenant ?? "…"}
+        </span>
         <svg
           className="h-3 w-3 text-neutral-400"
           viewBox="0 0 12 12"

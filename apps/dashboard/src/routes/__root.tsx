@@ -19,8 +19,10 @@ import {
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
+import { NavMenu } from "../components/NavMenu"
 import { OrgSwitcher } from "../components/OrgSwitcher"
 import { TenantIndicator } from "../components/TenantIndicator"
+import { Toaster } from "../components/Toaster"
 import { getClientEnv } from "../env"
 import appCss from "../styles/app.css?url"
 
@@ -36,18 +38,26 @@ export const Route = createRootRoute({
   component: RootComponent,
 })
 
-const NAV: readonly { to: string; label: string }[] = [
+/** Core, daily-use links — always visible inline. */
+const PRIMARY_NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Search" },
   { to: "/documents", label: "Documents" },
+  { to: "/graph", label: "Graph" },
+  { to: "/sessions", label: "Sessions" },
   { to: "/ingest", label: "Add" },
+]
+
+/** Admin / ops links — grouped under an "Admin" dropdown to keep the bar one clean row. */
+const ADMIN_NAV: readonly { to: string; label: string }[] = [
   { to: "/stats", label: "Admin / Stats" },
   { to: "/members", label: "Members" },
   { to: "/api-keys", label: "API Keys" },
-  { to: "/graph", label: "Graph" },
-  { to: "/sessions", label: "Sessions" },
   { to: "/audit", label: "Audit" },
   { to: "/jobs", label: "Jobs" },
 ]
+
+/** Flat list for the mobile menu. */
+const NAV: readonly { to: string; label: string }[] = [...PRIMARY_NAV, ...ADMIN_NAV]
 
 function AuthControl() {
   return (
@@ -100,9 +110,9 @@ function RootDocument({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-4 px-6 py-3">
             <span className="font-semibold text-lg tracking-tight">🧠 The Brain</span>
 
-            {/* Desktop nav — hidden below md */}
-            <nav className="hidden flex-wrap gap-1 text-sm md:flex">
-              {NAV.map((item) => (
+            {/* Desktop nav — hidden below md. Primary links inline + admin in a dropdown. */}
+            <nav className="hidden items-center gap-1 text-sm md:flex">
+              {PRIMARY_NAV.map((item) => (
                 <Link
                   key={item.to}
                   to={item.to}
@@ -113,6 +123,7 @@ function RootDocument({ children }: { children: ReactNode }) {
                   {item.label}
                 </Link>
               ))}
+              <NavMenu label="Admin" items={ADMIN_NAV} />
             </nav>
 
             {/* Right controls */}
@@ -182,6 +193,7 @@ function RootDocument({ children }: { children: ReactNode }) {
           )}
         </header>
         <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+        <Toaster />
         <Scripts />
       </body>
     </html>
