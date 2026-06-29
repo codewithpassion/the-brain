@@ -95,14 +95,19 @@ export const genExtract = async (
     }).catch(() => null)
   }
   try {
+    // NOTE: do NOT pass `response_format: { type: "json_object" }` here — Workers AI's
+    // `@cf/meta/llama-3.1-8b-instruct` rejects that param (the call throws → null → 0 entities,
+    // which is what silently broke KG extraction). The EXTRACT_SYSTEM prompt instructs JSON-only
+    // output and the caller's `parseKgJson` salvages it. (The openai-compat path above keeps it.)
     const res = (await deps.ai.run(
       EXTRACT_MODEL,
-      { messages, response_format: { type: "json_object" } },
+      { messages },
       aiGateway(deps.gatewayId, deps.tenantId),
     )) as LlamaGenOutput
     const out = res.response
     return typeof out === "string" && out.length > 0 ? out : null
-  } catch {
+  } catch (err) {
+    console.error("genExtract failed", err)
     return null
   }
 }
