@@ -38,6 +38,76 @@ export const sanitizeRelpath = (raw: string): string | null => {
   return stripped
 }
 
+// ── Multipart streaming (large attachments) ───────────────────────────────────
+
+/** R2 part size + the PUT body size above which we stream via multipart instead of a single put. */
+const PART_SIZE = 16 * 1024 * 1024 // 16 MiB (≥ R2's 5 MiB non-last-part minimum)
+const MULTIPART_THRESHOLD = PART_SIZE
+
+/**
+ * Stream a request body into an R2 multipart upload via `ScopedR2` (tenant-pinned key),
+ * coalescing inbound chunks into `PART_SIZE` parts so memory stays bounded (~one part in
+ * flight) regardless of file size. Aborts the upload on any failure. Returns the completed
+ * `R2Object`.
+ */
+async function streamToMultipart(
+  r2: ScopedR2,
+  key: string,
+  body: ReadableStream<Uint8Array>,
+): Promise<R2Object> {
+  const mpu = await r2.createMultipartUpload(key)
+  const parts: R2UploadedPart[] = []
+  try {
+    const reader = body.getReader()
+    const pending: Uint8Array[] = []
+    let pendingLen = 0
+    let partNumber = 1
+    // Assemble exactly `size` bytes from the head of `pending` into one part and upload it.
+    const flush = async (size: number): Promise<void> => {
+      const out = new Uint8Array(size)
+      let off = 0
+      while (off < size) {
+        const head = pending[0]
+        if (head === undefined) throw new Error("multipart buffer underflow")
+        const need = size - off
+        if (head.byteLength <= need) {
+          out.set(head, off)
+          off += head.byteLength
+          pending.shift()
+        } else {
+          out.set(head.subarray(0, need), off)
+          off += need
+          pending[0] = head.subarray(need)
+        }
+      }
+      pendingLen -= size
+      parts.push(await mpu.uploadPart(partNumber, out))
+      partNumber += 1
+    }
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (value !== undefined && value.byteLength > 0) {
+        pending.push(value)
+        pendingLen += value.byteLength
+      }
+      while (pendingLen >= PART_SIZE) await flush(PART_SIZE)
+      if (done) break
+    }
+    if (pendingLen > 0) await flush(pendingLen)
+    if (parts.length === 0) {
+      // Empty unknown-length body — avoid a zero-byte multipart part.
+      await mpu.abort().catch(() => {})
+      const empty = await r2.put(key, new Uint8Array())
+      if (empty === null) throw new Error("empty put failed")
+      return empty
+    }
+    return await mpu.complete(parts)
+  } catch (err) {
+    await mpu.abort().catch(() => {})
+    throw err
+  }
+}
+
 // ── RFC1123 date formatter ────────────────────────────────────────────────────
 
 const toRfc1123 = (d: Date): string => d.toUTCString()
@@ -315,7 +385,21 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
     if (method === "PUT") {
       if (relpath === "")
         return new Response("Method Not Allowed", { status: 405, headers: DAV_HEADERS })
-      const obj = await r2.put(vaultKey, c.req.raw.body)
+      // Small/known-length bodies go in a single put; large or unknown-length bodies
+      // (vault attachments — images, PDFs, video) stream into an R2 multipart upload so
+      // we never buffer the whole file in the 128 MB worker and aren't bounded by the
+      // single-put ceiling.
+      const lenHeader = c.req.header("content-length")
+      const len = lenHeader !== undefined ? Number.parseInt(lenHeader, 10) : undefined
+      const body = c.req.raw.body
+      let obj: R2Object | null
+      if (body === null) {
+        obj = await r2.put(vaultKey, new Uint8Array())
+      } else if (len !== undefined && Number.isFinite(len) && len <= MULTIPART_THRESHOLD) {
+        obj = await r2.put(vaultKey, body)
+      } else {
+        obj = await streamToMultipart(r2, vaultKey, body)
+      }
       const isCreate = obj !== null
       const status = isCreate ? 201 : 204
 

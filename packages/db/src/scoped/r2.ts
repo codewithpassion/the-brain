@@ -35,6 +35,15 @@ export class ScopedR2 {
     return this.bucket.put(this.key(key), value, options)
   }
 
+  /**
+   * Begin a multipart upload (large files). The key is tenant-prefixed HERE, so the
+   * returned `R2MultipartUpload` (and its `uploadPart`/`complete`/`abort`) is already
+   * pinned to `${tenantId}/<key>` — the same isolation guarantee as `put`.
+   */
+  createMultipartUpload(key: string, options?: R2MultipartOptions): Promise<R2MultipartUpload> {
+    return this.bucket.createMultipartUpload(this.key(key), options)
+  }
+
   get(key: string): Promise<R2ObjectBody | null> {
     return this.bucket.get(this.key(key))
   }
