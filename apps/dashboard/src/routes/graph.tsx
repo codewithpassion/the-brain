@@ -1,6 +1,7 @@
 /**
- * Graph — entity explorer backed by list_entities / search_entities / traverse_graph / find_orphans.
- * Initial load uses the loader; search and traversal are interactive state.
+ * Graph — entity explorer backed by list_entities / list_entity_edges / search_entities /
+ * traverse_graph / find_orphans. Initial load uses the loader; search and traversal are
+ * interactive state.
  */
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
@@ -10,12 +11,19 @@ import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input"
-import { findOrphans, getEntities, searchEntities, traverseGraph } from "../server/fns"
+import {
+  findOrphans,
+  getEntities,
+  getEntityEdges,
+  searchEntities,
+  traverseGraph,
+} from "../server/fns"
 import type { Entity, FindOrphansResult, TraversalResult } from "../server/types"
 
 export const Route = createFileRoute("/graph")({
   loader: async () => ({
     entities: await getEntities(),
+    edges: await getEntityEdges(),
   }),
   component: () => (
     <RequireAuth>
@@ -25,7 +33,7 @@ export const Route = createFileRoute("/graph")({
 })
 
 function GraphPage() {
-  const { entities } = Route.useLoaderData()
+  const { entities, edges } = Route.useLoaderData()
   const [query, setQuery] = useState("")
   const [searchList, setSearchList] = useState<Entity[] | null>(null)
   const [orphanResult, setOrphanResult] = useState<FindOrphansResult | null>(null)
@@ -37,6 +45,7 @@ function GraphPage() {
   const [error, setError] = useState<string | null>(null)
 
   const baseList = entities.ok ? entities.data.entities : []
+  const edgesData = edges.ok ? edges.data.edges : []
   const displayList = searchList ?? baseList
 
   const onSearch = async (event: FormEvent) => {
@@ -103,7 +112,7 @@ function GraphPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <EntityGraph entities={baseList} onNodeSelect={onSelect} />
+            <EntityGraph entities={baseList} edges={edgesData} onNodeSelect={onSelect} />
           </CardContent>
         </Card>
       )}
@@ -177,27 +186,34 @@ function GraphPage() {
               <p className="text-neutral-500 text-sm">Loading…</p>
             ) : traversal === null ? (
               <p className="text-neutral-500 text-sm">No traversal data.</p>
-            ) : traversal.neighbors.length === 0 ? (
+            ) : traversal.paths.length === 0 ? (
               <p className="text-neutral-500 text-sm">No neighbors found.</p>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-neutral-400">
-                    <th className="pb-1 font-medium">Name</th>
-                    <th className="pb-1 font-medium">Kind</th>
+                    <th className="pb-1 font-medium">ID</th>
                     <th className="pb-1 font-medium">Relation</th>
+                    <th className="pb-1 font-medium">Depth</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {traversal.neighbors.map((n) => (
-                    <tr key={n.id} className="border-neutral-100 border-t">
-                      <td className="py-1.5 font-mono text-xs">{n.name}</td>
-                      <td className="py-1.5">
-                        <Badge variant="outline">{n.kind}</Badge>
-                      </td>
-                      <td className="py-1.5 text-neutral-600">{n.relation}</td>
-                    </tr>
-                  ))}
+                  {traversal.paths.map((p, i) => {
+                    const otherId = p.from_id === selected.id ? p.to_id : p.from_id
+                    const other = baseList.find((e) => e.id === otherId)
+                    return (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: paths have no stable key
+                      <tr key={i} className="border-neutral-100 border-t">
+                        <td className="py-1.5 font-mono text-xs">
+                          {other?.name ?? otherId.slice(0, 8)}
+                        </td>
+                        <td className="py-1.5">
+                          <Badge variant="outline">{p.link_type}</Badge>
+                        </td>
+                        <td className="py-1.5 text-neutral-600">{p.depth}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}

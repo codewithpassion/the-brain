@@ -13,9 +13,9 @@
 import type { ComponentType } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { traverseGraph } from "../server/fns"
-import type { Entity } from "../server/types"
+import type { Entity, EntityEdge } from "../server/types"
 import type { GraphLink, GraphNode } from "./graph-model"
-import { colorForKind, entitiesToNodes, neighborsToLinks } from "./graph-model"
+import { colorForKind, edgesToLinks, entitiesToNodes, pathsToLinks } from "./graph-model"
 
 // Mutable variants — react-force-graph-2d adds x/y/vx/vy to each object in-place.
 interface MutableNode extends GraphNode {
@@ -27,11 +27,12 @@ interface MutableNode extends GraphNode {
 
 interface EntityGraphProps {
   entities: readonly Entity[]
+  edges: readonly EntityEdge[]
   /** Called when a graph node is clicked — keeps the table traversal panel in sync. */
   onNodeSelect?: (entity: Entity) => void
 }
 
-export function EntityGraph({ entities, onNodeSelect }: EntityGraphProps) {
+export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 800, height: 520 })
   /**
@@ -41,7 +42,8 @@ export function EntityGraph({ entities, onNodeSelect }: EntityGraphProps) {
    * placeholder branch).
    */
   const [Graph, setGraph] = useState<ComponentType<Record<string, unknown>> | null>(null)
-  const [accLinks, setAccLinks] = useState<readonly GraphLink[]>([])
+  // Initialise with all loaded edges so relationship lines appear immediately on mount.
+  const [accLinks, setAccLinks] = useState<readonly GraphLink[]>(() => edgesToLinks(edges))
   const [expanding, setExpanding] = useState(false)
   // Ref — mutation does not need to trigger a re-render.
   const expandedIds = useRef(new Set<string>())
@@ -95,7 +97,7 @@ export function EntityGraph({ entities, onNodeSelect }: EntityGraphProps) {
     [nodes, accLinks, nodeIdSet],
   )
 
-  // --- Node click: expand neighbors --------------------------------------------
+  // --- Node click: expand neighbors via traversal ------------------------------
   const onNodeClick = useCallback(
     async (rawNode: unknown) => {
       const node = rawNode as MutableNode
@@ -111,12 +113,35 @@ export function EntityGraph({ entities, onNodeSelect }: EntityGraphProps) {
       setExpanding(true)
       const res = await traverseGraph({ data: { seedId: node.id } })
       if (res.ok) {
-        const newLinks = neighborsToLinks(node.id, res.data.neighbors)
-        setAccLinks((prev) => [...prev, ...newLinks])
+        const newLinks = pathsToLinks(res.data.paths)
+        setAccLinks((prev) => {
+          // Dedup by source:target pair to avoid duplicate lines.
+          const seen = new Set(prev.map((l) => `${l.source}:${l.target}`))
+          const fresh = newLinks.filter((l) => !seen.has(`${l.source}:${l.target}`))
+          return fresh.length > 0 ? [...prev, ...fresh] : prev
+        })
       }
       setExpanding(false)
     },
     [entities, onNodeSelect],
+  )
+
+  // --- Node label canvas paint (rendered "after" the default circle) -----------
+  const paintNodeLabel = useCallback(
+    (rawNode: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const node = rawNode as MutableNode
+      const fontSize = 12 / globalScale
+      ctx.save()
+      ctx.font = `${fontSize}px Sans-Serif`
+      ctx.textAlign = "center"
+      ctx.textBaseline = "top"
+      ctx.fillStyle = "#e2e8f0" // slate-100 — readable on the dark canvas background
+      // The default node radius = nodeRelSize(4) * sqrt(nodeVal) where nodeVal = Math.max(2, mentionCount).
+      const r = 4 * Math.sqrt(Math.max(2, node.mentionCount)) + 2
+      ctx.fillText(node.label, node.x ?? 0, (node.y ?? 0) + r)
+      ctx.restore()
+    },
+    [],
   )
 
   const kinds = useMemo(() => {
@@ -151,6 +176,8 @@ export function EntityGraph({ entities, onNodeSelect }: EntityGraphProps) {
             nodeColor={(n: unknown) => (n as MutableNode).color}
             nodeLabel={(n: unknown) => `${(n as MutableNode).label} (${(n as MutableNode).kind})`}
             nodeVal={(n: unknown) => Math.max(2, (n as MutableNode).mentionCount)}
+            nodeCanvasObject={paintNodeLabel}
+            nodeCanvasObjectMode={() => "after"}
             linkColor={() => "#94a3b8"}
             linkLabel={(l: unknown) => (l as GraphLink).label}
             linkDirectionalArrowLength={4}

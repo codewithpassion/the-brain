@@ -26,7 +26,7 @@ import {
   type Principal,
 } from "@brain/shared"
 import { and, desc, eq, inArray, isNull, like, or, type SQL, sql } from "drizzle-orm"
-import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
+import { type AnySQLiteColumn, alias } from "drizzle-orm/sqlite-core"
 import {
   chunks,
   docLinks,
@@ -445,6 +445,42 @@ export class ScopedGraph {
       .orderBy(desc(entities.updatedAt))
       .limit(opts?.limit ?? 50)
     return rows.map((row) => ({ ...row, aliases: parseStringArray(row.aliases) }))
+  }
+
+  /**
+   * List entity-to-entity edges, gated so BOTH endpoints satisfy the same scope +
+   * `{world,team}` visibility rules as `listEntities`. Returns at most `limit` edges.
+   * Uses Drizzle `alias()` to reuse the exact same helper predicates as `listEntities`,
+   * preventing any gate-drift between nodes and edges.
+   */
+  async listEntityEdges(limit = 1000): Promise<{ fromId: string; toId: string; kind: string }[]> {
+    const ef = alias(entities, "ef")
+    const et = alias(entities, "et")
+    return this.db
+      .select({
+        fromId: entityRelations.fromEntityId,
+        toId: entityRelations.toEntityId,
+        kind: entityRelations.kind,
+      })
+      .from(entityRelations)
+      .innerJoin(
+        ef,
+        and(eq(ef.id, entityRelations.fromEntityId), eq(ef.tenantId, entityRelations.tenantId)),
+      )
+      .innerJoin(
+        et,
+        and(eq(et.id, entityRelations.toEntityId), eq(et.tenantId, entityRelations.tenantId)),
+      )
+      .where(
+        and(
+          eq(entityRelations.tenantId, this.p.tenantId),
+          scopePredicate(this.p, ef.scope),
+          entityVisibility(this.p, { visibility: ef.visibility, teamId: ef.teamId }),
+          scopePredicate(this.p, et.scope),
+          entityVisibility(this.p, { visibility: et.visibility, teamId: et.teamId }),
+        ),
+      )
+      .limit(limit)
   }
 
   /**

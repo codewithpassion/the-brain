@@ -1,8 +1,8 @@
 /**
  * Pure data model for the entity-graph canvas — no browser APIs, server-side safe.
- * Maps the-brain's Entity/TraversalNeighbor shapes into graph nodes/links.
+ * Maps the-brain's Entity/EntityEdge/TraversalResult shapes into graph nodes/links.
  */
-import type { Entity, TraversalNeighbor } from "../server/types"
+import type { Entity, EntityEdge, TraversalResult } from "../server/types"
 
 export interface GraphNode {
   readonly id: string
@@ -18,14 +18,16 @@ export interface GraphLink {
   readonly label: string
 }
 
-// Stable colour palette — same hues across sessions so the visual stays consistent.
+// Stable colour palette — maps actual entity kinds (person|org|project|concept|place|event|other)
+// to distinct hues. Falls back to slate for any unrecognised kind.
 const PALETTE: Readonly<Record<string, string>> = {
   person: "#60a5fa", // sky-400
   org: "#f59e0b", // amber-500
-  topic: "#a78bfa", // violet-400
-  habit: "#34d399", // emerald-400
-  goal: "#f472b6", // pink-400
+  project: "#a78bfa", // violet-400
+  concept: "#34d399", // emerald-400
   place: "#fb7185", // rose-400
+  event: "#f472b6", // pink-400
+  other: "#64748b", // slate-500
 }
 
 const FALLBACK_COLOR = "#64748b" // slate-500
@@ -44,13 +46,22 @@ export function entitiesToNodes(entities: readonly Entity[]): readonly GraphNode
   }))
 }
 
-export function neighborsToLinks(
-  seedId: string,
-  neighbors: readonly TraversalNeighbor[],
+/** Convert entity-relation edges loaded on mount into graph links. */
+export function edgesToLinks(edges: readonly EntityEdge[]): readonly GraphLink[] {
+  return edges.map((e) => ({
+    source: e.fromId,
+    target: e.toId,
+    label: e.kind,
+  }))
+}
+
+/** Convert traversal paths (from traverse_graph op) into graph links. */
+export function pathsToLinks(
+  paths: readonly Pick<TraversalResult["paths"][number], "from_id" | "to_id" | "link_type">[],
 ): readonly GraphLink[] {
-  return neighbors.map((n) => ({
-    source: seedId,
-    target: n.id,
-    label: n.relation,
+  return paths.map((p) => ({
+    source: p.from_id,
+    target: p.to_id,
+    label: p.link_type,
   }))
 }

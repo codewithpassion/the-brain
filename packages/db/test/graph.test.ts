@@ -297,6 +297,7 @@ describe("registerGraphOps — op registry wiring", () => {
         "get_tags",
         "get_timeline",
         "list_entities",
+        "list_entity_edges",
         "search_entities",
         "traverse_graph",
       ].sort(),

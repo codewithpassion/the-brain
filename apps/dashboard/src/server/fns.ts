@@ -24,6 +24,7 @@ import type {
   ListBackfillRunsResult,
   ListDocumentsResult,
   ListEntitiesResult,
+  ListEntityEdgesResult,
   ListOrgsResult,
   ListSessionsResult,
   MembershipsResult,
@@ -131,11 +132,40 @@ export const getMemberships = createServerFn({ method: "GET" }).handler(
 
 // --- Graph ops ---
 
-/** `list_entities` — all entities in the knowledge graph. */
+/** `list_entities` — all entities in the knowledge graph (maps canonicalName → name). */
 export const getEntities = createServerFn({ method: "GET" }).handler(
   async (): Promise<Result<ListEntitiesResult>> => {
     try {
-      const out = await brainCall<ListEntitiesResult>("list_entities", true, {})
+      const raw = await brainCall<{
+        entities: Array<{
+          id: string
+          kind: string
+          canonicalName: string
+          mentionCount: number
+        }>
+      }>("list_entities", true, {})
+      return {
+        ok: true,
+        data: {
+          entities: raw.entities.map((e) => ({
+            id: e.id,
+            name: e.canonicalName,
+            kind: e.kind,
+            mentionCount: e.mentionCount,
+          })),
+        },
+      }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `list_entity_edges` — all entity-relation edges in the knowledge graph. */
+export const getEntityEdges = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListEntityEdgesResult>> => {
+    try {
+      const out = await brainCall<ListEntityEdgesResult>("list_entity_edges", true, { limit: 1000 })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

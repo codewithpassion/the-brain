@@ -72,15 +72,25 @@ export interface ListEntitiesResult {
   entities: Entity[]
 }
 
-export interface TraversalNeighbor {
-  id: string
-  name: string
+export interface EntityEdge {
+  fromId: string
+  toId: string
   kind: string
-  relation: string
+}
+
+export interface ListEntityEdgesResult {
+  edges: EntityEdge[]
 }
 
 export interface TraversalResult {
-  neighbors: TraversalNeighbor[]
+  paths: {
+    from_id: string
+    to_id: string
+    link_type: string
+    context: string
+    depth: number
+    confidence?: number
+  }[]
 }
 
 export interface FindOrphansResult {

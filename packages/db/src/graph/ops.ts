@@ -162,6 +162,18 @@ export const LIST_ENTITIES_OP = defineOp({
   }),
 })
 
+export const LIST_ENTITY_EDGES_OP = defineOp({
+  name: "list_entity_edges",
+  description:
+    "List entity-relation edges in the knowledge graph (scope/visibility gated on both endpoints).",
+  capability: "read",
+  readOnly: true,
+  input: z.object({ limit: z.number().int().min(1).max(2000).default(1000) }),
+  output: z.object({
+    edges: z.array(z.object({ fromId: z.string(), toId: z.string(), kind: z.string() })),
+  }),
+})
+
 export const FIND_ORPHANS_OP = defineOp({
   name: "find_orphans",
   description: "Report disconnected nodes in the document or entity graph (not a deleter).",
@@ -241,6 +253,14 @@ export const listEntitiesOp: BoundOp<{ kind?: string; limit: number }, { entitie
     }),
   }
 
+export const listEntityEdgesOp: BoundOp<
+  { limit: number },
+  { edges: { fromId: string; toId: string; kind: string }[] }
+> = {
+  def: LIST_ENTITY_EDGES_OP,
+  handler: async (ctx, input) => ({ edges: await ctx.deps.graph.listEntityEdges(input.limit) }),
+}
+
 export const findOrphansOp: BoundOp<{ graph: "doc" | "entity" }, OrphanReport> = {
   def: FIND_ORPHANS_OP,
   handler: (ctx, input) => ctx.deps.graph.findOrphans(input.graph),
@@ -261,6 +281,7 @@ export const GRAPH_OPS = [
   getTagsOp,
   getTimelineOp,
   listEntitiesOp,
+  listEntityEdgesOp,
   findOrphansOp,
   searchEntitiesOp,
 ] as const
