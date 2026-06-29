@@ -13,8 +13,10 @@ export const EMBEDDING_DIMS = 1024 as const
 export const GENERATION_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as const
 /** Cross-encoder reranker. */
 export const RERANK_MODEL = "@cf/baai/bge-reranker-base" as const
-/** KG / fact extraction model. */
-export const EXTRACT_MODEL = "@cf/meta/llama-3.1-8b-instruct" as const
+/** KG / fact extraction model. NOTE: @cf/meta/llama-3.1-8b-instruct was DEPRECATED by Cloudflare
+ * on 2026-05-30 (AiError 5028), which silently broke KG extraction → an empty entity graph. Use the
+ * current model that GENERATION_MODEL already proves working on Workers AI. */
+export const EXTRACT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as const
 
 // ── Hybrid-search / ranking algorithm constants (PRD §5) ─────────────────────
 /** Reciprocal Rank Fusion constant. */
