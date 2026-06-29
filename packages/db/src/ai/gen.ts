@@ -101,7 +101,10 @@ export const genExtract = async (
     // output and the caller's `parseKgJson` salvages it. (The openai-compat path above keeps it.)
     const res = (await deps.ai.run(
       EXTRACT_MODEL,
-      { messages },
+      // `max_tokens` is REQUIRED here: Workers AI defaults to 256 tokens, which truncates the KG
+      // JSON mid-entity → unparseable → 0 entities (the empty-graph bug). Give it room for a full
+      // batch's entity list.
+      { messages, max_tokens: 4096 },
       aiGateway(deps.gatewayId, deps.tenantId),
     )) as LlamaGenOutput
     const out = res.response
