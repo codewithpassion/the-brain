@@ -46,6 +46,34 @@ export function entitiesToNodes(entities: readonly Entity[]): readonly GraphNode
   }))
 }
 
+/**
+ * Build nodes from the EDGE endpoints (each edge carries both endpoints' name+kind). This makes the
+ * graph the actual relationship network — every loaded edge has both its nodes present, so no line is
+ * dropped. Merge with `entitiesToNodes` (which adds standalone, edge-less entities + mention sizes).
+ */
+export function edgesToNodes(edges: readonly EntityEdge[]): readonly GraphNode[] {
+  const byId = new Map<string, GraphNode>()
+  for (const e of edges) {
+    if (!byId.has(e.fromId))
+      byId.set(e.fromId, {
+        id: e.fromId,
+        label: e.fromName,
+        kind: e.fromKind,
+        color: colorForKind(e.fromKind),
+        mentionCount: 1,
+      })
+    if (!byId.has(e.toId))
+      byId.set(e.toId, {
+        id: e.toId,
+        label: e.toName,
+        kind: e.toKind,
+        color: colorForKind(e.toKind),
+        mentionCount: 1,
+      })
+  }
+  return [...byId.values()]
+}
+
 /** Convert entity-relation edges loaded on mount into graph links. */
 export function edgesToLinks(edges: readonly EntityEdge[]): readonly GraphLink[] {
   return edges.map((e) => ({

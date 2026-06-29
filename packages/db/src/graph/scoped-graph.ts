@@ -453,13 +453,27 @@ export class ScopedGraph {
    * Uses Drizzle `alias()` to reuse the exact same helper predicates as `listEntities`,
    * preventing any gate-drift between nodes and edges.
    */
-  async listEntityEdges(limit = 1000): Promise<{ fromId: string; toId: string; kind: string }[]> {
+  async listEntityEdges(limit = 1000): Promise<
+    {
+      fromId: string
+      fromName: string
+      fromKind: string
+      toId: string
+      toName: string
+      toKind: string
+      kind: string
+    }[]
+  > {
     const ef = alias(entities, "ef")
     const et = alias(entities, "et")
     return this.db
       .select({
         fromId: entityRelations.fromEntityId,
+        fromName: ef.canonicalName,
+        fromKind: ef.kind,
         toId: entityRelations.toEntityId,
+        toName: et.canonicalName,
+        toKind: et.kind,
         kind: entityRelations.kind,
       })
       .from(entityRelations)

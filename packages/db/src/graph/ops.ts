@@ -170,7 +170,17 @@ export const LIST_ENTITY_EDGES_OP = defineOp({
   readOnly: true,
   input: z.object({ limit: z.number().int().min(1).max(2000).default(1000) }),
   output: z.object({
-    edges: z.array(z.object({ fromId: z.string(), toId: z.string(), kind: z.string() })),
+    edges: z.array(
+      z.object({
+        fromId: z.string(),
+        fromName: z.string(),
+        fromKind: z.string(),
+        toId: z.string(),
+        toName: z.string(),
+        toKind: z.string(),
+        kind: z.string(),
+      }),
+    ),
   }),
 })
 

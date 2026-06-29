@@ -15,7 +15,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { traverseGraph } from "../server/fns"
 import type { Entity, EntityEdge } from "../server/types"
 import type { GraphLink, GraphNode } from "./graph-model"
-import { colorForKind, edgesToLinks, entitiesToNodes, pathsToLinks } from "./graph-model"
+import {
+  colorForKind,
+  edgesToLinks,
+  edgesToNodes,
+  entitiesToNodes,
+  pathsToLinks,
+} from "./graph-model"
 
 // Mutable variants — react-force-graph-2d adds x/y/vx/vy to each object in-place.
 interface MutableNode extends GraphNode {
@@ -77,7 +83,16 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
   }, [])
 
   // --- Graph data ---------------------------------------------------------------
-  const nodes = useMemo(() => entitiesToNodes(entities), [entities])
+  // Node set = the listed entities (carry mentionCount for sizing + standalone, edge-less ones)
+  // MERGED with every edge endpoint (so the relationship network renders fully — no line dropped
+  // because one endpoint fell outside the listed top-N). Dedupe by id; the listed entity wins
+  // (it has the real mentionCount).
+  const nodes = useMemo(() => {
+    const byId = new Map<string, GraphNode>()
+    for (const n of edgesToNodes(edges)) byId.set(n.id, n)
+    for (const n of entitiesToNodes(entities)) byId.set(n.id, n)
+    return [...byId.values()]
+  }, [entities, edges])
 
   // Drop links whose endpoints are not in the current node set (safety net).
   const nodeIdSet = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes])
@@ -175,7 +190,10 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
             height={size.height}
             nodeColor={(n: unknown) => (n as MutableNode).color}
             nodeLabel={(n: unknown) => `${(n as MutableNode).label} (${(n as MutableNode).kind})`}
-            nodeVal={(n: unknown) => Math.max(2, (n as MutableNode).mentionCount)}
+            nodeRelSize={3}
+            // Gentle sqrt scale + cap so high-mention entities don't become giant blobs that hide
+            // the relationship lines underneath.
+            nodeVal={(n: unknown) => Math.min(10, 1 + Math.sqrt((n as MutableNode).mentionCount))}
             nodeCanvasObject={paintNodeLabel}
             nodeCanvasObjectMode={() => "after"}
             linkColor={() => "#94a3b8"}

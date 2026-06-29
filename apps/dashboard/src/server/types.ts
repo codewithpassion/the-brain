@@ -74,7 +74,11 @@ export interface ListEntitiesResult {
 
 export interface EntityEdge {
   fromId: string
+  fromName: string
+  fromKind: string
   toId: string
+  toName: string
+  toKind: string
   kind: string
 }
 
