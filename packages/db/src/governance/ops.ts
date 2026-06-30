@@ -13,15 +13,16 @@ import type { BreakGlassFact } from "./store"
 
 // ── Op contracts ──────────────────────────────────────────────────────────────────
 
-/** `memory_review` — human-confirmed promotion (the ONLY path to `instruction`, invariant 9). */
+/** `memory_review` — human-confirmed promotion (the ONLY path to `instruction`). */
 export const MEMORY_REVIEW_OP = defineOp({
   name: "memory_review",
   description:
-    "Human review of a fact; a confirmed review promotes its trust_grade to instruction.",
+    "Human review of a hot-memory fact. A confirmed review promotes its trust_grade to 'instruction' — the only path to that grade. " +
+    "Use in moderation workflows when a fact needs verification before becoming a persistent instruction.",
   capability: "write",
   readOnly: false,
   input: z.object({
-    factId: z.number().int(),
+    factId: z.number().int().describe("The integer fact id from a recall result."),
     status: z.enum(["confirmed", "rejected", "needs_revision"]).default("confirmed"),
     note: z.string().optional(),
   }),
@@ -32,13 +33,23 @@ export const MEMORY_REVIEW_OP = defineOp({
 export const BREAK_GLASS_READ_OP = defineOp({
   name: "break_glass_read",
   description:
-    "Admin-only audited+alerted read of other users' private chunks/facts (fails closed).",
+    "Admin-only emergency read of other users' private chunks and facts. Every invocation is audited and alerted; fails closed for non-admins. " +
+    "Only use when normal visibility rules block access you have documented grounds to override.",
   capability: "admin",
   readOnly: true,
   input: z.object({
-    reason: z.string().min(1),
-    chunkIds: z.array(z.string()).default([]),
-    factIds: z.array(z.number().int()).default([]),
+    reason: z
+      .string()
+      .min(1)
+      .describe("Documented justification for the emergency access, written to the audit log."),
+    chunkIds: z
+      .array(z.string())
+      .default([])
+      .describe("Chunk ids to read (from search hit 'id' fields)."),
+    factIds: z
+      .array(z.number().int())
+      .default([])
+      .describe("Fact ids to read (from recall 'id' fields)."),
   }),
   output: z.object({
     chunks: z.array(z.object({ id: z.string(), content: z.string() })),
@@ -49,11 +60,21 @@ export const BREAK_GLASS_READ_OP = defineOp({
 /** `audit_export` — append-only export of new `memory_audit` rows to R2 ndjson (admin-only). */
 export const AUDIT_EXPORT_OP = defineOp({
   name: "audit_export",
-  description: "Export new append-only memory_audit rows to tamper-evident R2 ndjson (admin-only).",
+  description:
+    "Export new memory audit rows since a cursor to a tamper-evident R2 ndjson file and return the new cursor. " +
+    "Exported files are never rewritten (append-only). Use on a recurring schedule to maintain an immutable audit trail.",
   capability: "admin",
   readOnly: true,
   surfaces: ["rest", "cli"],
-  input: z.object({ cursor: z.number().int().default(0) }),
+  input: z.object({
+    cursor: z
+      .number()
+      .int()
+      .default(0)
+      .describe(
+        "Epoch-ms cursor from the last export (0 for first run). Persist the returned cursor for the next call.",
+      ),
+  }),
   output: z.object({ r2Key: z.string().nullable(), exported: z.number(), cursor: z.number() }),
 })
 

@@ -46,7 +46,9 @@ export interface BoundOp<I, O> {
 /** `query` — like `search` but with the cross-encoder rerank stage ON (no synthesis). */
 export const QUERY_OP = defineOp({
   name: "query",
-  description: "Hybrid keyword + vector search (RRF-fused) with cross-encoder rerank.",
+  description:
+    "Hybrid keyword+vector search with cross-encoder rerank for higher passage precision — no synthesis. " +
+    "Between search (fast, no rerank) and think (adds AI synthesis). Use when passage quality matters but you don't need an answer generated.",
   capability: "read",
   readOnly: true,
   input: SEARCH_OP.input,

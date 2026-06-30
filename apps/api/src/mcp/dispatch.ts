@@ -85,7 +85,104 @@ export const callMcpTool = async (
   try {
     return { ok: true, output: await op.invoke(ctx, args ?? {}) }
   } catch (cause) {
+    // Teaching errors: a Zod validation failure names the exact bad field(s) so the agent can
+    // self-correct and retry, instead of getting an opaque blob. Duck-typed (zod isn't a direct
+    // dep here; the error crosses the @brain/db boundary).
+    const issues = zodIssueSummary(cause)
+    if (issues !== null) {
+      return {
+        ok: false,
+        error: {
+          error: "invalid_arguments",
+          message: `invalid arguments for "${name}": ${issues}. Check the tool's input schema and retry.`,
+        },
+      }
+    }
     const message = cause instanceof Error ? cause.message : "tool invocation failed"
     return { ok: false, error: { error: "tool_error", message } }
   }
+}
+
+/** Field-level summary of a ZodError (duck-typed), or null if `cause` isn't one. */
+const zodIssueSummary = (cause: unknown): string | null => {
+  if (cause === null || typeof cause !== "object") return null
+  const c = cause as { name?: unknown; issues?: unknown }
+  if (c.name !== "ZodError" || !Array.isArray(c.issues)) return null
+  return (c.issues as { path?: (string | number)[]; message?: string }[])
+    .map((i) => `${(i.path ?? []).join(".") || "(arguments)"}: ${i.message ?? "invalid"}`)
+    .join("; ")
+}
+
+// ── brain://ops resource — the catalog grouped by purpose (generated from the live registry) ──
+
+const PURPOSE_ORDER = [
+  "Memory",
+  "Facts & sessions",
+  "Search & think",
+  "Graph",
+  "Sync",
+  "Admin & governance",
+] as const
+
+const FACTS_SESSION_OPS = new Set([
+  "recall",
+  "forget_fact",
+  "capture_turn",
+  "finalize_session",
+  "get_session_context",
+  "create_snapshot",
+  "list_snapshots",
+  "list_sessions",
+])
+const SEARCH_OPS = new Set(["search", "think", "query"])
+const GRAPH_OPS = new Set([
+  "traverse_graph",
+  "get_links",
+  "get_backlinks",
+  "get_tags",
+  "get_timeline",
+  "find_orphans",
+  "list_entities",
+  "list_entity_edges",
+  "search_entities",
+])
+
+/** Bucket a tool into a human-meaningful family for the catalog resource. */
+const purposeOf = (name: string): (typeof PURPOSE_ORDER)[number] => {
+  if (name.startsWith("memory_") || name.startsWith("okf_")) return "Memory"
+  if (FACTS_SESSION_OPS.has(name)) return "Facts & sessions"
+  if (SEARCH_OPS.has(name)) return "Search & think"
+  if (GRAPH_OPS.has(name)) return "Graph"
+  if (name.includes("vault")) return "Sync"
+  return "Admin & governance"
+}
+
+/** Render the tools VISIBLE to `principal`, grouped by purpose, as a markdown catalog. */
+export const brainOpsCatalogText = (principal: Principal): string => {
+  const tools = mcpToolsFor(principal)
+  const groups = new Map<string, McpListedTool[]>()
+  for (const tool of tools) {
+    const purpose = purposeOf(tool.name)
+    const arr = groups.get(purpose) ?? []
+    arr.push(tool)
+    groups.set(purpose, arr)
+  }
+  const lines: string[] = [
+    "# Brain tools by purpose",
+    "",
+    `${tools.length} tools are available to you (read tools always; write/admin appear only when your credential holds the capability).`,
+    "",
+  ]
+  for (const purpose of PURPOSE_ORDER) {
+    const arr = groups.get(purpose)
+    if (arr === undefined || arr.length === 0) continue
+    lines.push(`## ${purpose}`)
+    for (const tool of [...arr].sort((a, b) => a.name.localeCompare(b.name))) {
+      lines.push(
+        `- **${tool.name}** (${tool.annotations.readOnlyHint ? "read" : "write"}) — ${tool.description}`,
+      )
+    }
+    lines.push("")
+  }
+  return lines.join("\n")
 }

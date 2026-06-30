@@ -45,11 +45,13 @@ const assertAdmin = (principal: Principal): void => {
 export const CREATE_VAULT_CREDENTIAL_OP = defineOp({
   name: "create_vault_credential",
   description:
-    "Generate a vault WebDAV credential (username + password). The password is shown ONCE — " +
-    "store it immediately. Returns the Remotely Save WebDAV endpoint.",
+    "Generate a WebDAV credential (username + password) for the Obsidian vault sync. The password is shown ONCE — store it immediately. " +
+    "Returns the WebDAV endpoint to configure in Remotely Save.",
   capability: "admin",
   readOnly: false,
-  input: z.object({ label: z.string().optional() }),
+  input: z.object({
+    label: z.string().optional().describe("Optional human-readable label for this credential."),
+  }),
   output: z.object({ username: z.string(), password: z.string(), endpoint: z.string() }),
 })
 
@@ -57,7 +59,8 @@ export const CREATE_VAULT_CREDENTIAL_OP = defineOp({
 export const LIST_VAULT_CREDENTIALS_OP = defineOp({
   name: "list_vault_credentials",
   description:
-    "List this tenant's vault WebDAV credentials (no secret returned). Shows revoked credentials too.",
+    "List this tenant's vault WebDAV credentials without the secret. Includes revoked credentials. " +
+    "Use to find a username before calling revoke_vault_credential.",
   capability: "admin",
   readOnly: true,
   input: z.object({}),
@@ -77,10 +80,13 @@ export const LIST_VAULT_CREDENTIALS_OP = defineOp({
 export const REVOKE_VAULT_CREDENTIAL_OP = defineOp({
   name: "revoke_vault_credential",
   description:
-    "Revoke a vault WebDAV credential by username (no-op if not in this tenant or already revoked).",
+    "Revoke a vault WebDAV credential by username. No-op if not in this tenant or already revoked. " +
+    "Use list_vault_credentials first to find the username.",
   capability: "admin",
   readOnly: false,
-  input: z.object({ username: z.string() }),
+  input: z.object({
+    username: z.string().describe("The credential username from list_vault_credentials."),
+  }),
   output: z.object({ revoked: z.boolean() }),
 })
 

@@ -21,17 +21,25 @@ import {
 /** `capture_turn` — append one live turn (write scope, honors `read_only`). */
 export const CAPTURE_TURN_OP = defineOp({
   name: "capture_turn",
-  description: "Append one session turn (refreshes last_activity_at; offloads long turns to R2).",
+  description:
+    "Append one conversation turn to a session and refresh its last_activity timestamp. " +
+    "Long turn bodies are offloaded to object storage. Call at every turn to build a searchable session transcript.",
   capability: "write",
   readOnly: false,
   input: z.object({
-    sessionId: z.string().min(1),
+    sessionId: z
+      .string()
+      .min(1)
+      .describe("Client-side session id (becomes the Brain session key on first turn)."),
     role: z.enum(["user", "assistant", "system", "tool"]),
     content: z.string(),
     client: z.enum(["claude-code", "claude-desktop", "chatgpt", "cli", "web", "import"]),
     scope: z.string().optional(),
     teamId: z.string().optional(),
-    visibility: z.enum(["private", "team", "world"]).optional(),
+    visibility: z
+      .enum(["private", "team", "world"])
+      .optional()
+      .describe("'world' (whole tenant) | 'team' | 'private' (you only). Default private."),
     title: z.string().optional(),
   }),
   output: z.object({ brainSessionId: z.string(), idx: z.number(), offloaded: z.boolean() }),
@@ -40,26 +48,44 @@ export const CAPTURE_TURN_OP = defineOp({
 /** `finalize_session` — the stop-hook: mark finalizing + trigger `SessionPromoteWorkflow`. */
 export const FINALIZE_SESSION_OP = defineOp({
   name: "finalize_session",
-  description: "Close a session (status=finalizing) and trigger the promote-to-fact workflow.",
+  description:
+    "Close a session (marks it 'finalizing') and trigger async promotion of session observations to hot-memory facts. " +
+    "Call at session end (e.g. stop-hook) to persist key observations for future recall.",
   capability: "write",
   readOnly: false,
-  input: z.object({ brainSessionId: z.string().min(1) }),
+  input: z.object({
+    brainSessionId: z
+      .string()
+      .min(1)
+      .describe("The Brain session id returned by capture_turn, not the client sessionId."),
+  }),
   output: z.object({ brainSessionId: z.string(), status: z.string() }),
 })
 
-/** `get_session_context` — the SessionStart projection; resolves pinned snapshots (§8.5). */
+/** `get_session_context` — the SessionStart projection; resolves pinned snapshots. */
 export const GET_SESSION_CONTEXT_OP = defineOp({
   name: "get_session_context",
   description:
-    "Return the brain context for a session (recent turns + visible hot-memory facts). " +
-    "When snapshotId is provided, also returns pinned page_versions content (immutable, §8.5).",
+    "Load context for a session at startup: recent turns, visible hot-memory facts, and optionally " +
+    "memory pages under a path or a pinned snapshot's immutable page versions. Call in SessionStart to inject prior context.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    brainSessionId: z.string().min(1),
-    snapshotId: z.string().optional(),
-    memoryPath: z.string().optional(),
-    memoryPrefix: z.boolean().default(false),
+    brainSessionId: z.string().min(1).describe("The Brain session id returned by capture_turn."),
+    snapshotId: z
+      .string()
+      .optional()
+      .describe(
+        "Snapshot id from list_snapshots; loads pinned immutable page versions instead of live content.",
+      ),
+    memoryPath: z
+      .string()
+      .optional()
+      .describe("Namespace to load memory items from at session start, e.g. 'agent/planner'."),
+    memoryPrefix: z
+      .boolean()
+      .default(false)
+      .describe("false = direct children of memoryPath only; true = full subtree."),
   }),
   output: z.object({
     turns: z.array(z.object({ idx: z.number(), role: z.string(), content: z.string().nullable() })),
@@ -90,14 +116,19 @@ export const GET_SESSION_CONTEXT_OP = defineOp({
   }),
 })
 
-/** `create_snapshot` — pin the current page versions into an immutable brain snapshot (§8.5). */
+/** `create_snapshot` — pin the current page versions into an immutable brain snapshot. */
 export const CREATE_SNAPSHOT_OP = defineOp({
   name: "create_snapshot",
-  description: "Pin the current page versions into an immutable brain snapshot (§8.5).",
+  description:
+    "Pin the current memory page-versions into an immutable, named snapshot you can later load by id for reproducible context. " +
+    "Use before a context-sensitive task you may need to replay.",
   capability: "write",
   readOnly: false,
   input: z.object({
-    label: z.string().min(1),
+    label: z
+      .string()
+      .min(1)
+      .describe("Human-readable name for this snapshot, e.g. 'pre-refactor-2026-06'."),
     scope: z.string().optional(),
   }),
   output: z.object({ snapshotId: z.string() }),
@@ -106,10 +137,19 @@ export const CREATE_SNAPSHOT_OP = defineOp({
 /** `list_snapshots` — list brain snapshots for the tenant, newest-first. */
 export const LIST_SNAPSHOTS_OP = defineOp({
   name: "list_snapshots",
-  description: "List brain snapshots for the tenant (newest-first, §8.5).",
+  description:
+    "List saved memory snapshots newest-first. Each snapshotId can be passed to get_session_context to reload a pinned context.",
   capability: "read",
   readOnly: true,
-  input: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+  input: z.object({
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe("Max snapshots to return (1–200, default 50)."),
+  }),
   output: z.object({
     snapshots: z.array(
       z.object({
@@ -126,16 +166,33 @@ export const LIST_SNAPSHOTS_OP = defineOp({
 /** `recall` — hot-memory recall by entity / since / session / grep / keyword (visibility-gated). */
 export const RECALL_OP = defineOp({
   name: "recall",
-  description: "Recall hot-memory facts (entity/since/session/grep/keyword), newest-first.",
+  description:
+    "Recall hot-memory facts about the user/world, newest-first. Filter by entity, since-date, session, or keyword/grep. " +
+    "Use for 'what do I know about X'; use search/think for document content.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    entitySlug: z.string().optional(),
-    since: z.string().optional(),
-    sessionId: z.string().optional(),
-    grep: z.string().optional(),
-    query: z.string().optional(),
-    limit: z.number().int().min(1).max(200).default(50),
+    entitySlug: z.string().optional().describe("Filter to facts linked to this entity slug."),
+    since: z
+      .string()
+      .optional()
+      .describe("ISO 8601 datetime; return only facts observed after this timestamp."),
+    sessionId: z
+      .string()
+      .optional()
+      .describe("Filter to facts extracted from this specific session."),
+    grep: z.string().optional().describe("Substring filter applied to the fact text."),
+    query: z
+      .string()
+      .optional()
+      .describe("Keyword search over facts via full-text index (alternative to grep)."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe("Max facts to return (1–200, default 50)."),
   }),
   output: z.object({
     facts: z.array(z.object({ id: z.number(), fact: z.string(), kind: z.string() })),
@@ -145,10 +202,14 @@ export const RECALL_OP = defineOp({
 /** `forget_fact` — soft-expire a fact (never a hard delete). */
 export const FORGET_FACT_OP = defineOp({
   name: "forget_fact",
-  description: "Soft-expire a hot-memory fact (sets expired_at; preserves lineage).",
+  description:
+    "Soft-expire a hot-memory fact so it no longer appears in recall results. Sets expired_at; the fact row is preserved for audit. " +
+    "Use when a known fact is outdated.",
   capability: "write",
   readOnly: false,
-  input: z.object({ factId: z.number().int() }),
+  input: z.object({
+    factId: z.number().int().describe("The integer fact id from a recall result."),
+  }),
   output: z.object({ factId: z.number(), forgotten: z.boolean() }),
 })
 

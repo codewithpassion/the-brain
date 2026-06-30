@@ -45,19 +45,29 @@ const RevisionSchema = z.object({
 export const MEMORY_SET_OP = defineOp({
   name: "memory_set",
   description:
-    "Create or update an agent-memory item by slug (an OKF concept). Appends a version on " +
-    "change; an unchanged write is a no-op. `type` is required (OKF).",
+    "Save durable, addressable agent memory (a preference, decision, instruction, or note) under a slug you can re-read verbatim. " +
+    "Appends a version on change; unchanged=no-op. Not for searchable content (use ingest_document) or transient observations (those become facts).",
   capability: "write",
   readOnly: false,
   input: z.object({
-    slug: z.string().min(1),
-    type: z.string().min(1),
+    slug: z
+      .string()
+      .min(1)
+      .describe(
+        "Stable id/path, e.g. 'agent/planner/prefs'. Slashes allowed; this is the key across versions.",
+      ),
+    type: z
+      .string()
+      .min(1)
+      .describe("OKF concept type, required & non-empty, e.g. 'preference' | 'decision' | 'note'."),
     body: z.string(),
     title: z.string().optional(),
     description: z.string().optional(),
     resource: z.string().optional(),
     tags: z.array(z.string()).optional(),
-    visibility: VISIBILITY.optional(),
+    visibility: VISIBILITY.optional().describe(
+      "'world' (whole tenant) | 'team' | 'private' (you only). Default private.",
+    ),
     scope: z.string().optional(),
     teamId: z.string().optional(),
   }),
@@ -72,10 +82,19 @@ export const MEMORY_SET_OP = defineOp({
 /** `memory_get` — load a single memory item in full by its exact slug. */
 export const MEMORY_GET_OP = defineOp({
   name: "memory_get",
-  description: "Load a single agent-memory item in full by its exact slug (null when absent).",
+  description:
+    "Load a single memory item in full by its exact slug; returns null when absent. " +
+    "Use when you know the slug; use memory_list when browsing a namespace.",
   capability: "read",
   readOnly: true,
-  input: z.object({ slug: z.string().min(1) }),
+  input: z.object({
+    slug: z
+      .string()
+      .min(1)
+      .describe(
+        "Stable id/path, e.g. 'agent/planner/prefs'. Slashes allowed; this is the key across versions.",
+      ),
+  }),
   output: z.object({ memory: MemorySchema.nullable() }),
 })
 
@@ -83,14 +102,26 @@ export const MEMORY_GET_OP = defineOp({
 export const MEMORY_LIST_OP = defineOp({
   name: "memory_list",
   description:
-    "List live agent-memory items under a path. prefix=false matches the namespace exactly " +
-    "(or a direct child); prefix=true matches the whole subtree. No path lists all.",
+    "List live memory items under a path namespace. prefix=false = direct children only; prefix=true = full subtree. Omit path to list all. " +
+    "Use to browse a namespace; use memory_get when you know the exact slug.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    path: z.string().optional(),
-    prefix: z.boolean().default(false),
-    limit: z.number().int().min(1).max(1000).default(200),
+    path: z
+      .string()
+      .optional()
+      .describe("Namespace to list, e.g. 'agent/planner'. Omit to list all memory items."),
+    prefix: z
+      .boolean()
+      .default(false)
+      .describe("false = direct children of path only; true = full subtree."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .default(200)
+      .describe("Max items to return (1–1000, default 200)."),
   }),
   output: z.object({ memories: z.array(MemorySchema) }),
 })
@@ -98,10 +129,18 @@ export const MEMORY_LIST_OP = defineOp({
 /** `memory_history` — a memory item's full version history, newest-first. */
 export const MEMORY_HISTORY_OP = defineOp({
   name: "memory_history",
-  description: "List a memory item's full version history, newest-first (the rollback targets).",
+  description:
+    "List all version revisions of a memory item newest-first. Returns the revisionIds you need to call memory_rollback.",
   capability: "read",
   readOnly: true,
-  input: z.object({ slug: z.string().min(1) }),
+  input: z.object({
+    slug: z
+      .string()
+      .min(1)
+      .describe(
+        "Stable id/path, e.g. 'agent/planner/prefs'. Slashes allowed; this is the key across versions.",
+      ),
+  }),
   output: z.object({ versions: z.array(RevisionSchema) }),
 })
 
@@ -109,11 +148,22 @@ export const MEMORY_HISTORY_OP = defineOp({
 export const MEMORY_ROLLBACK_OP = defineOp({
   name: "memory_rollback",
   description:
-    "Roll a memory item back to an earlier revision (forward-only: appends a new version " +
-    "with the old content; history is never mutated).",
+    "Revert a memory item to an earlier revision. Forward-only: appends a new version with the old content; history is never erased. " +
+    "Get the revisionId from memory_history.",
   capability: "write",
   readOnly: false,
-  input: z.object({ slug: z.string().min(1), toRevisionId: z.number().int() }),
+  input: z.object({
+    slug: z
+      .string()
+      .min(1)
+      .describe(
+        "Stable id/path, e.g. 'agent/planner/prefs'. Slashes allowed; this is the key across versions.",
+      ),
+    toRevisionId: z
+      .number()
+      .int()
+      .describe("The revisionId from memory_history, NOT the version number."),
+  }),
   output: z.object({
     slug: z.string(),
     pageId: z.string(),
@@ -125,10 +175,19 @@ export const MEMORY_ROLLBACK_OP = defineOp({
 /** `memory_forget` — soft-delete a memory item (revision history retained). */
 export const MEMORY_FORGET_OP = defineOp({
   name: "memory_forget",
-  description: "Soft-delete a memory item (sets deleted_at; the version history is retained).",
+  description:
+    "Soft-delete a memory item so it no longer appears in memory_list or memory_get results. Sets deleted_at; the revision history is retained. " +
+    "Use when a memory item is obsolete.",
   capability: "write",
   readOnly: false,
-  input: z.object({ slug: z.string().min(1) }),
+  input: z.object({
+    slug: z
+      .string()
+      .min(1)
+      .describe(
+        "Stable id/path, e.g. 'agent/planner/prefs'. Slashes allowed; this is the key across versions.",
+      ),
+  }),
   output: z.object({ slug: z.string(), forgotten: z.boolean() }),
 })
 
@@ -138,12 +197,21 @@ const OkfFileSchema = z.object({ path: z.string(), content: z.string() })
 export const OKF_EXPORT_OP = defineOp({
   name: "okf_export",
   description:
-    "Export agent-memory items under a path as an OKF bundle (index.md + one .md per concept " +
-    "+ log.md). Vendor-neutral markdown; portable to any OKF tool.",
+    "Serialize memory items under a path as a portable OKF bundle (index.md + one .md per concept + log.md). " +
+    "Use for export, archival, or migration to another OKF-compatible tool.",
   capability: "read",
   readOnly: true,
   // A bundle export under a path means the WHOLE subtree by default (not just direct children).
-  input: z.object({ path: z.string().optional(), prefix: z.boolean().default(true) }),
+  input: z.object({
+    path: z
+      .string()
+      .optional()
+      .describe("Namespace to export, e.g. 'agent/planner'. Omit to export all."),
+    prefix: z
+      .boolean()
+      .default(true)
+      .describe("true = export full subtree (default); false = direct children only."),
+  }),
   output: z.object({
     okfVersion: z.string(),
     count: z.number(),
@@ -155,8 +223,8 @@ export const OKF_EXPORT_OP = defineOp({
 export const OKF_IMPORT_OP = defineOp({
   name: "okf_import",
   description:
-    "Import an OKF bundle (a list of markdown files) into agent memory. Each concept is " +
-    "upserted (so the import is itself versioned); reserved/typeless files are skipped.",
+    "Import an OKF bundle (markdown files with YAML frontmatter) into agent memory, upserting each concept as a new version. " +
+    "Reserved/typeless files are skipped. Use to restore a previously exported bundle or migrate memory from another tool.",
   capability: "write",
   readOnly: false,
   input: z.object({ files: z.array(OkfFileSchema) }),

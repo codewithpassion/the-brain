@@ -72,27 +72,41 @@ const EntityHitSchema = z.object({
   teamId: z.string().nullable(),
 })
 
-const anchorInput = z.object({ target: z.string().min(1) })
+const anchorInput = z.object({
+  target: z.string().min(1).describe("Document slug or entity id to query."),
+})
 
 // ── Op definitions ──────────────────────────────────────────────────────────────
 
 export const TRAVERSE_OP = defineOp({
   name: "traverse_graph",
-  description: "Generalized BFS over the document link graph or the entity knowledge graph.",
+  description:
+    "BFS traversal of the document link graph or entity knowledge graph up to a given depth and direction. " +
+    "Use for multi-hop paths; use get_links/get_backlinks for direct one-hop edges.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    target: z.string().min(1),
-    depth: z.number().int().min(1).max(10).default(5),
-    direction: z.enum(["in", "out", "both"]).default("both"),
-    graph: z.enum(["doc", "entity"]).default("doc"),
+    target: z.string().min(1).describe("Slug or id of the start node."),
+    depth: z.number().int().min(1).max(10).default(5).describe("BFS hop depth 1–10 (default 5)."),
+    direction: z
+      .enum(["in", "out", "both"])
+      .default("both")
+      .describe(
+        "'out' = follows links forward; 'in' = follows backlinks; 'both' = all directions.",
+      ),
+    graph: z
+      .enum(["doc", "entity"])
+      .default("doc")
+      .describe("'doc' = document link graph; 'entity' = entity knowledge graph."),
   }),
   output: z.object({ paths: z.array(GraphPathSchema) }),
 })
 
 export const GET_LINKS_OP = defineOp({
   name: "get_links",
-  description: "Outgoing typed links from a page (scope/visibility gated).",
+  description:
+    "Return all outgoing typed links from a document or entity node (one hop). " +
+    "Use before traverse_graph when you only need immediate forward neighbors.",
   capability: "read",
   readOnly: true,
   input: anchorInput,
@@ -101,7 +115,9 @@ export const GET_LINKS_OP = defineOp({
 
 export const GET_BACKLINKS_OP = defineOp({
   name: "get_backlinks",
-  description: "Incoming typed links to a page (scope/visibility gated).",
+  description:
+    "Return all incoming typed links pointing at a document or entity node (one hop). " +
+    "Complements get_links for discovering what references a given node.",
   capability: "read",
   readOnly: true,
   input: anchorInput,
@@ -110,7 +126,9 @@ export const GET_BACKLINKS_OP = defineOp({
 
 export const GET_TAGS_OP = defineOp({
   name: "get_tags",
-  description: "Tags on a page.",
+  description:
+    "Return the tags attached to a document or entity node by slug. " +
+    "Use to check categorization before filtering list_documents by tag.",
   capability: "read",
   readOnly: true,
   input: anchorInput,
@@ -119,7 +137,9 @@ export const GET_TAGS_OP = defineOp({
 
 export const GET_TIMELINE_OP = defineOp({
   name: "get_timeline",
-  description: "Timeline entries for a page, newest first.",
+  description:
+    "Return the ordered timeline entries for a document or entity node, newest first. " +
+    "Use to reconstruct the chronological history of events associated with a node.",
   capability: "read",
   readOnly: true,
   input: anchorInput,
@@ -138,12 +158,23 @@ export const GET_TIMELINE_OP = defineOp({
 
 export const LIST_ENTITIES_OP = defineOp({
   name: "list_entities",
-  description: "List knowledge-graph entities (scope/visibility gated), optionally by kind.",
+  description:
+    "List knowledge-graph entities (people, orgs, concepts) visible to the caller, optionally filtered by kind. " +
+    "Use to enumerate entities before graph traversal; use search_entities to find one by name.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    kind: z.string().optional(),
-    limit: z.number().int().min(1).max(200).default(50),
+    kind: z
+      .string()
+      .optional()
+      .describe("Filter by entity kind, e.g. 'person', 'org', 'concept'. Omit for all kinds."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe("Max entities to return (1–200, default 50)."),
   }),
   output: z.object({
     entities: z.array(
@@ -165,10 +196,19 @@ export const LIST_ENTITIES_OP = defineOp({
 export const LIST_ENTITY_EDGES_OP = defineOp({
   name: "list_entity_edges",
   description:
-    "List entity-relation edges in the knowledge graph (scope/visibility gated on both endpoints).",
+    "List all entity-relation edges in the knowledge graph. " +
+    "Use for full graph export or visualization; for a single node's neighborhood use traverse_graph with graph='entity'.",
   capability: "read",
   readOnly: true,
-  input: z.object({ limit: z.number().int().min(1).max(2000).default(1000) }),
+  input: z.object({
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(2000)
+      .default(1000)
+      .describe("Max edges to return (1–2000, default 1000)."),
+  }),
   output: z.object({
     edges: z.array(
       z.object({
@@ -186,10 +226,17 @@ export const LIST_ENTITY_EDGES_OP = defineOp({
 
 export const FIND_ORPHANS_OP = defineOp({
   name: "find_orphans",
-  description: "Report disconnected nodes in the document or entity graph (not a deleter).",
+  description:
+    "Report document or entity nodes with no graph connections. Not a deleter. " +
+    "Use to audit coverage gaps in the knowledge graph before running traversal.",
   capability: "read",
   readOnly: true,
-  input: z.object({ graph: z.enum(["doc", "entity"]).default("doc") }),
+  input: z.object({
+    graph: z
+      .enum(["doc", "entity"])
+      .default("doc")
+      .describe("'doc' = document link graph; 'entity' = entity knowledge graph."),
+  }),
   output: z.object({
     orphans: z.array(z.object({ id: z.string(), label: z.string(), type: z.string() })),
     totalOrphans: z.number().int(),
@@ -201,12 +248,20 @@ export const FIND_ORPHANS_OP = defineOp({
 
 export const SEARCH_ENTITIES_OP = defineOp({
   name: "search_entities",
-  description: "Entity vector search over brain-entities + entity_fts (RRF), D1 re-checked.",
+  description:
+    "Semantic search over knowledge-graph entities using vector+FTS RRF fusion. " +
+    "Use to find an entity by name or description when you don't know its id; use list_entities to enumerate all.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    query: z.string().min(1),
-    topK: z.number().int().min(1).max(100).default(20),
+    query: z.string().min(1).describe("Name or description to search for."),
+    topK: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(20)
+      .describe("Max entities to return (1–100, default 20)."),
   }),
   output: z.object({ hits: z.array(EntityHitSchema) }),
 })

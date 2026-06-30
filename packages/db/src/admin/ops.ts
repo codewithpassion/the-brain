@@ -70,7 +70,8 @@ const ScopeGrantSchema = z.union([z.array(z.string()), z.literal("*")])
 /** `mint_api_key` — issue a scope-bounded `bk_` key (intersected DOWN to the minter; no escalation). */
 export const MINT_API_KEY_OP = defineOp({
   name: "mint_api_key",
-  description: "Mint a bk_ API key bounded to a subset of the caller's own scopes + capabilities.",
+  description:
+    "Mint a bk_ API key bounded to a subset of the caller's own scopes and capabilities. The new key can never exceed the minter's own access — escalation is impossible.",
   capability: "admin",
   readOnly: false,
   input: z.object({
@@ -78,7 +79,7 @@ export const MINT_API_KEY_OP = defineOp({
     requestedScopes: ScopeGrantSchema.optional(),
     requestedCapabilities: z.array(CapabilitySchema).optional(),
     readOnly: z.boolean().optional(),
-    expiresAt: z.string().optional(),
+    expiresAt: z.string().optional().describe("ISO 8601 expiry datetime for the key."),
   }),
   output: z.object({ token: z.string(), keyId: z.string() }),
 })
@@ -86,10 +87,17 @@ export const MINT_API_KEY_OP = defineOp({
 /** `get_token_spend` — the tenant's window spend from the `token_spend` ledger (tenant-scoped). */
 export const GET_TOKEN_SPEND_OP = defineOp({
   name: "get_token_spend",
-  description: "Report this tenant's AI spend (neurons + USD) for a monthly window vs the ceiling.",
+  description:
+    "Return this tenant's AI spend (neurons + USD) for a monthly window vs the configured cost ceiling. " +
+    "Use to check budget before triggering expensive AI operations.",
   capability: "admin",
   readOnly: true,
-  input: z.object({ window: z.string().optional() }),
+  input: z.object({
+    window: z
+      .string()
+      .optional()
+      .describe("Month window in 'YYYY-MM' format. Defaults to the current calendar month."),
+  }),
   output: z.object({
     window: z.string(),
     neurons: z.number(),
@@ -101,10 +109,16 @@ export const GET_TOKEN_SPEND_OP = defineOp({
 /** `memberships` — list/inspect this tenant's memberships (owner/admin only). */
 export const MEMBERSHIPS_OP = defineOp({
   name: "memberships",
-  description: "List the memberships of the caller's tenant (owner/admin only).",
+  description:
+    "List the memberships in the active tenant, including role and allowed-scopes per member. Optionally filter to a single userId.",
   capability: "admin",
   readOnly: true,
-  input: z.object({ userId: z.string().optional() }),
+  input: z.object({
+    userId: z
+      .string()
+      .optional()
+      .describe("Filter to a specific user's membership. Omit to list all tenant members."),
+  }),
   output: z.object({
     memberships: z.array(
       z.object({
@@ -229,7 +243,13 @@ const listLimitInput = z.object({
   // `.max(200)` clamps the range declaratively (1–200) — NOT `.transform()`, which strips the
   // numeric `type` from the generated JSON Schema and breaks CLI flag coercion (limit would derive
   // as a string and a `--limit 5` would fail `.parse()`). Default 50 when omitted.
-  limit: z.number().int().min(1).max(200).default(50),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .default(50)
+    .describe("Max items to return (1–200, default 50)."),
 })
 
 // ── LIST_DOCUMENTS_OP ─────────────────────────────────────────────────────
@@ -238,14 +258,26 @@ const listLimitInput = z.object({
 export const LIST_DOCUMENTS_OP = defineOp({
   name: "list_documents",
   description:
-    "List this tenant's documents, newest first (dashboard read view). Filterable by tag, path prefix, and created_at date range.",
+    "List this tenant's ingested documents newest-first. Filter by tag, path prefix, or date range. " +
+    "Use for document browsing or audit; use search/think for content retrieval.",
   capability: "read",
   readOnly: true,
   input: listLimitInput.extend({
-    tag: z.string().optional(), // filter: document has this tag (exact match within JSON array)
-    path: z.string().optional(), // filter: document path equals or is under this prefix
-    since: z.string().optional(), // filter: created_at >= this ISO date string
-    until: z.string().optional(), // filter: created_at <= this ISO date string
+    tag: z.string().optional().describe("Filter to documents that contain exactly this tag."),
+    path: z
+      .string()
+      .optional()
+      .describe(
+        "Filter to documents whose path equals or is under this prefix, e.g. '/project/x'.",
+      ),
+    since: z
+      .string()
+      .optional()
+      .describe("ISO 8601 date; return only documents created at or after this timestamp."),
+    until: z
+      .string()
+      .optional()
+      .describe("ISO 8601 date; return only documents created at or before this timestamp."),
   }),
   output: z.object({
     documents: z.array(
@@ -349,7 +381,8 @@ export const listDocumentsOp: AdminBoundOp<ListDocumentsInput, { documents: List
 export const LIST_SESSIONS_OP = defineOp({
   name: "list_sessions",
   description:
-    "List this tenant's sessions, newest activity first (admin dashboard view — returns all users' sessions).",
+    "List all sessions in the active tenant newest-activity-first (all users' sessions). Admin-only. " +
+    "Use for session audit or dashboard views.",
   capability: "admin",
   readOnly: true,
   input: listLimitInput,
@@ -420,7 +453,9 @@ export const listSessionsOp: AdminBoundOp<{ limit?: number }, { sessions: ListSe
 /** `list_backfill_runs` — newest-first tenant job/sync run list for the dashboard. */
 export const LIST_BACKFILL_RUNS_OP = defineOp({
   name: "list_backfill_runs",
-  description: "List this tenant's backfill/sync runs, newest first (jobs dashboard view).",
+  description:
+    "List recent backfill and sync job runs newest-first. " +
+    "Use to monitor ingest pipeline health or diagnose stuck jobs.",
   capability: "read",
   readOnly: true,
   input: listLimitInput,
@@ -487,7 +522,8 @@ export const listBackfillRunsOp: AdminBoundOp<{ limit?: number }, { runs: ListBa
 export const LIST_AUDIT_OP = defineOp({
   name: "list_audit",
   description:
-    "List this tenant's memory audit entries, newest first (admin dashboard view — returns all users' audit entries).",
+    "List memory audit entries newest-first (all users' actions). Admin-only. " +
+    "Use for compliance review or to trace who changed what; use audit_export for durable tamper-evident archival.",
   capability: "admin",
   readOnly: true,
   input: listLimitInput,
@@ -545,7 +581,8 @@ export const listAuditOp: AdminBoundOp<{ limit?: number }, { entries: ListAuditE
 export const GET_STATS_OP = defineOp({
   name: "get_stats",
   description:
-    "Tenant-wide aggregate counts (docs/chunks/entities/sessions/facts) + current-month token spend vs ceiling (admin only).",
+    "Return tenant-wide counts (documents, chunks, entities, sessions, facts) and current-month token spend vs the cost ceiling. Admin-only. " +
+    "Use for a dashboard health summary.",
   capability: "admin",
   readOnly: true,
   input: z.object({}),
@@ -621,7 +658,8 @@ export const getStatsOp: AdminBoundOp<Record<string, never>, GetStatsOutput> = {
  */
 export const CREATE_ORG_OP = defineOp({
   name: "create_org",
-  description: "Create a new org and become its owner. Returns the new org id + slug.",
+  description:
+    "Create a new organization and become its owner. Slug defaults to a slugified name; conflicts are rejected. Returns the new org id and slug.",
   capability: "write",
   readOnly: false,
   // rest-only: cross-tenant by nature (creates a brand-new tenant). Exposing on mcp/cli would let
@@ -712,7 +750,8 @@ export const createOrgOp: AdminBoundOp<CreateOrgInput, { id: string; slug: strin
 export const LIST_ORGS_OP = defineOp({
   name: "list_orgs",
   description:
-    "List all orgs the current user is a member of (cross-org; reads memberships by user_id, not tenant_id). Powers the org switcher.",
+    "List all organizations the current user belongs to across all tenants. Powers the org switcher. " +
+    "Returns only the caller's own memberships — never another user's.",
   capability: "read",
   readOnly: true,
   // rest-only: cross-tenant enumeration is intentional for the dashboard switcher but should not
@@ -808,7 +847,8 @@ export interface ClerkUserResult {
 export const SEARCH_USER_BY_EMAIL_OP = defineOp({
   name: "search_user_by_email",
   description:
-    "Look up a Brain user by email address via the Clerk Backend API. Returns user info or null if not found (they must have signed in at least once).",
+    "Look up a Brain user by email via the auth provider. Returns user info if they have signed in at least once, or null. " +
+    "Use before add_member to resolve an email address to a userId.",
   capability: "admin",
   readOnly: true,
   surfaces: ["rest"],
@@ -882,7 +922,8 @@ export const searchUserByEmailOp: AdminBoundOp<
 export const ADD_MEMBER_OP = defineOp({
   name: "add_member",
   description:
-    "Add a Brain user to the active org by email (owner/admin only). The user must have signed in at least once. Rejects duplicates.",
+    "Add a user to the active org by email address. The user must have signed in at least once. Rejects if already a member. " +
+    "Use search_user_by_email first to confirm the user exists.",
   capability: "admin",
   readOnly: false,
   surfaces: ["rest"],
@@ -972,7 +1013,8 @@ export const addMemberOp: AdminBoundOp<AddMemberInput, { userId: string; members
 export const UPDATE_MEMBER_OP = defineOp({
   name: "update_member",
   description:
-    "Update a member's role or allowed scopes in the active org (owner/admin only). Protects the last owner from demotion.",
+    "Update a member's role or allowed scopes in the active org. Guards against demoting the last owner. " +
+    "Returns updated=false when nothing changed.",
   capability: "admin",
   readOnly: false,
   surfaces: ["rest"],
@@ -1084,7 +1126,7 @@ export const updateMemberOp: AdminBoundOp<UpdateMemberInput, { userId: string; u
 export const REMOVE_MEMBER_OP = defineOp({
   name: "remove_member",
   description:
-    "Remove a member from the active org (owner/admin only). Protects the last owner from removal.",
+    "Remove a member from the active org. Guards against removing the last owner. Returns removed=false if the user is not a member (no-op).",
   capability: "admin",
   readOnly: false,
   surfaces: ["rest"],
@@ -1161,7 +1203,8 @@ export const removeMemberOp: AdminBoundOp<
 export const LIST_API_KEYS_OP = defineOp({
   name: "list_api_keys",
   description:
-    "List this tenant's API keys (REDACTED — no key_hash, no raw token). Admin only. read-only.",
+    "List this tenant's API keys with metadata (no raw secret returned). Admin-only. " +
+    "Use to review active keys before revoking; use revoke_api_key to disable a key.",
   capability: "admin",
   readOnly: true,
   surfaces: ["rest"],
@@ -1241,7 +1284,8 @@ export const listApiKeysOp: AdminBoundOp<Record<string, never>, { keys: ApiKeyRo
 export const CREATE_API_KEY_OP = defineOp({
   name: "create_api_key",
   description:
-    "Mint a bk_ API key bound to the active tenant. Returns the raw token ONCE — store it immediately. Admin only.",
+    "Mint a new bk_ API key bound to this tenant. Returns the raw token ONCE — store it immediately. Admin-only. " +
+    "Use to provision API access for integrations.",
   capability: "admin",
   readOnly: false,
   surfaces: ["rest"],
@@ -1322,11 +1366,12 @@ export const createApiKeyOp: AdminBoundOp<CreateApiKeyInput, CreateApiKeyOutput>
 export const REVOKE_API_KEY_OP = defineOp({
   name: "revoke_api_key",
   description:
-    "Revoke a bk_ API key for the active tenant. No-op if keyId is not in this tenant. Admin only.",
+    "Revoke a bk_ API key by id. No-op if the key does not belong to this tenant. Admin-only. " +
+    "Use when a key is compromised or no longer needed.",
   capability: "admin",
   readOnly: false,
   surfaces: ["rest"],
-  input: z.object({ keyId: z.string().min(1) }),
+  input: z.object({ keyId: z.string().min(1).describe("The key id from list_api_keys.") }),
   output: z.object({ keyId: z.string(), revoked: z.boolean() }),
 })
 
@@ -1378,16 +1423,25 @@ export const revokeApiKeyOp: AdminBoundOp<{ keyId: string }, { keyId: string; re
 export const INGEST_DOCUMENT_OP = defineOp({
   name: "ingest_document",
   description:
-    "Ingest a text document into the knowledge base. Accepts text/markdown or text/plain. " +
-    "Supports optional namespace path (e.g. /project/x) and tags array for filtering. " +
-    "Returns accepted (workflow-dispatched) or indexed (inline) status.",
+    "Ingest a text or markdown document into the searchable knowledge base. Returns 'accepted' (async workflow) or 'indexed' (inline) status. " +
+    "Use to add content that search/think can retrieve. Not for durable agent memory (use memory_set) or transient observations (those become facts).",
   capability: "write",
   readOnly: false,
   input: z.object({
     content: z.string().min(1),
     title: z.string().optional(),
-    path: z.string().optional(),
-    tags: z.array(z.string()).optional(),
+    path: z
+      .string()
+      .optional()
+      .describe(
+        "Optional namespace path for the document, e.g. '/project/x'. Used for filtering in list_documents and search.",
+      ),
+    tags: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Tags to attach for filtering. Searchable via tag filter in list_documents and search.",
+      ),
     contentType: z.enum(["text/markdown", "text/plain"]).optional().default("text/markdown"),
   }),
   output: z.object({
@@ -1407,17 +1461,23 @@ export const INGEST_DOCUMENT_OP = defineOp({
 export const DELETE_DOCUMENT_OP = defineOp({
   name: "delete_document",
   description:
-    "Soft-delete a document by id or slug. Marks the document and all its chunks as deleted " +
-    "(deleted_at), removes the chunk vectors from the search index, and excludes the document " +
-    "from all future search results. Provide exactly one of documentId or slug. " +
-    "Idempotent: deleting an already-deleted document is a no-op.",
+    "Soft-delete a document by id or slug: marks it and its chunks deleted and removes their vectors from the search index. Idempotent. " +
+    "Provide exactly one of documentId or slug.",
   capability: "write",
   readOnly: false,
   // Flat optional object (not a z.union) so the MCP inputSchema is a valid JSON Schema object
   // and the CLI generator can derive --documentId / --slug flags. The handler enforces the xor.
   input: z.object({
-    documentId: z.string().min(1).optional(),
-    slug: z.string().min(1).optional(),
+    documentId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Document id from ingest_document or list_documents."),
+    slug: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Document slug (alternative to documentId — provide exactly one)."),
   }),
   output: z.object({
     documentId: z.string().nullable(),
@@ -1434,11 +1494,13 @@ export const DELETE_DOCUMENT_OP = defineOp({
 export const GET_DOCUMENT_OP = defineOp({
   name: "get_document",
   description:
-    "Retrieve a document by id, including its full markdown body. Returns metadata and the " +
-    "markdown body fetched from R2 (empty string when the R2 object is absent).",
+    "Retrieve a document's metadata and full markdown body by id. Body is fetched from object storage (empty string when the object is missing). " +
+    "Use list_documents to discover document ids.",
   capability: "read",
   readOnly: true,
-  input: z.object({ documentId: z.string().min(1) }),
+  input: z.object({
+    documentId: z.string().min(1).describe("Document id from ingest_document or list_documents."),
+  }),
   output: z.object({
     id: z.string(),
     slug: z.string(),
@@ -1465,13 +1527,13 @@ export const GET_DOCUMENT_OP = defineOp({
 export const REPROCESS_DOCUMENT_OP = defineOp({
   name: "reprocess_document",
   description:
-    "Re-run the full ingest pipeline (chunk + embed + entity extraction) for an existing " +
-    "document. Resets status to `pending` and dispatches a fresh BATCH_INGEST workflow " +
-    "with a unique instance id so re-dispatch is never deduped. Idempotent: re-inserting " +
-    "the same chunk ids is safe (onConflictDoNothing).",
+    "Re-run the full ingest pipeline (chunk, embed, entity extraction) on an existing document. " +
+    "Use when a document is stuck in 'processing' with 0 chunks, or after an extraction failure.",
   capability: "write",
   readOnly: false,
-  input: z.object({ documentId: z.string().min(1) }),
+  input: z.object({
+    documentId: z.string().min(1).describe("Document id from ingest_document or list_documents."),
+  }),
   output: z.object({
     documentId: z.string(),
     status: z.string(),
@@ -1488,14 +1550,12 @@ export const REPROCESS_DOCUMENT_OP = defineOp({
 export const UPDATE_DOCUMENT_OP = defineOp({
   name: "update_document",
   description:
-    "Replace a document's content and re-run the ingest pipeline. Writes the new content " +
-    "to the document's existing R2 key, hard-deletes old chunks (freeing deterministic PKs), " +
-    "removes their Vectorize vectors, updates the document row with a new fingerprint and " +
-    "status `pending`, then dispatches BATCH_INGEST. The document id and slug are preserved.",
+    "Replace a document's content in-place and re-run the ingest pipeline. Preserves the document id and slug. " +
+    "Use to refresh an existing document with updated content.",
   capability: "write",
   readOnly: false,
   input: z.object({
-    documentId: z.string().min(1),
+    documentId: z.string().min(1).describe("Document id from ingest_document or list_documents."),
     content: z.string().min(1),
     contentType: z.enum(["text/markdown", "text/plain"]).default("text/markdown"),
   }),
@@ -1515,14 +1575,22 @@ export const UPDATE_DOCUMENT_OP = defineOp({
 export const VAULT_WRITEBACK_OP = defineOp({
   name: "vault_writeback",
   description:
-    "Write Brain-authored markdown files back to the Obsidian vault's Brain/ prefix in R2. " +
-    "Each file is stamped with `source: brain` frontmatter to prevent re-ingestion by the " +
-    "Obsidian importer. Accepts an OKF bundle shape ({files:[{path,content}]}). " +
-    "Paths are written under vault/Brain/<path>.",
+    "Write Brain-authored markdown files to the Obsidian vault's Brain/ prefix in object storage. " +
+    "Each file is stamped with 'source: brain' frontmatter to prevent re-ingestion by the Obsidian importer.",
   capability: "write",
   readOnly: false,
   input: z.object({
-    files: z.array(z.object({ path: z.string().min(1), content: z.string() })).min(1),
+    files: z
+      .array(
+        z.object({
+          path: z
+            .string()
+            .min(1)
+            .describe("Relative path within the vault Brain/ prefix, e.g. 'concepts/foo.md'."),
+          content: z.string(),
+        }),
+      )
+      .min(1),
   }),
   output: z.object({ written: z.number().int() }),
 })

@@ -125,15 +125,29 @@ const SearchHitSchema = z.object({
 /** `search` — hybrid keyword+vector RRF (expansion off). */
 export const SEARCH_OP = defineOp({
   name: "search",
-  description: "Hybrid keyword + vector search (RRF-fused), query expansion off.",
+  description:
+    "Hybrid keyword+vector search returning scored passages — no rerank, no synthesis. Fast and cheap. " +
+    "Use for raw evidence passages; use query for higher-precision reranking; use think for a synthesized answer.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    query: z.string().min(1),
-    topK: z.number().int().min(1).max(50).default(12),
-    scope: z.string().optional(),
-    path: z.string().optional(), // restrict to documents under this path prefix (or exact)
-    tag: z.string().optional(), // restrict to documents containing this tag
+    query: z.string().min(1).describe("Natural-language or keyword query."),
+    topK: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(12)
+      .describe("Number of passages to return (1–50, default 12)."),
+    scope: z
+      .string()
+      .optional()
+      .describe("Scope filter, e.g. a team or project slug. Omit for all visible content."),
+    path: z
+      .string()
+      .optional()
+      .describe("Restrict to documents under this path prefix or exact match, e.g. '/project/x'."),
+    tag: z.string().optional().describe("Restrict to documents that contain exactly this tag."),
   }),
   output: z.object({
     hits: z.array(SearchHitSchema),
@@ -143,15 +157,32 @@ export const SEARCH_OP = defineOp({
 /** `think` — expansion + rerank + token-budget-guarded cited synthesis. */
 export const THINK_OP = defineOp({
   name: "think",
-  description: "Expansion + rerank + token-budget-guarded cited synthesis over retrieved evidence.",
+  description:
+    "Search + cross-encoder rerank + AI synthesis: returns a cited answer, evidence passages, and knowledge gaps. " +
+    "The full-pipeline op — slower and token-costly. Use when you need a direct answer; use search/query for raw passages.",
   capability: "read",
   readOnly: true,
   input: z.object({
-    query: z.string().min(1),
-    topK: z.number().int().min(1).max(50).default(12),
-    scope: z.string().optional(),
-    path: z.string().optional(), // restrict to documents under this path prefix (or exact)
-    tag: z.string().optional(), // restrict to documents containing this tag
+    query: z
+      .string()
+      .min(1)
+      .describe("Natural-language question to answer from the knowledge base."),
+    topK: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(12)
+      .describe("Number of passages to retrieve for synthesis (1–50, default 12)."),
+    scope: z
+      .string()
+      .optional()
+      .describe("Scope filter, e.g. a team or project slug. Omit for all visible content."),
+    path: z
+      .string()
+      .optional()
+      .describe("Restrict to documents under this path prefix or exact match, e.g. '/project/x'."),
+    tag: z.string().optional().describe("Restrict to documents that contain exactly this tag."),
   }),
   output: z.object({
     answer: z.string(),
