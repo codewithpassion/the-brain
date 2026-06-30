@@ -108,7 +108,10 @@ export class ScopedVectorize {
    */
   async deleteVectors(ids: string[]): Promise<void> {
     if (ids.length === 0) return
-    const BATCH = 500 // conservative cap; Vectorize deleteByIds limit is not published
+    // Vectorize `deleteByIds` rejects >100 ids per call (VECTOR_DELETE_ERROR 40007:
+    // "too many ids in payload; max id count is 100"), so a doc with >100 chunks failed to
+    // delete. Batch at the documented hard cap.
+    const BATCH = 100
     for (let i = 0; i < ids.length; i += BATCH) {
       await this.index.deleteByIds(ids.slice(i, i + BATCH))
     }
