@@ -316,6 +316,47 @@ describe("vault-dav HTTP round-trip (real workerd D1 + R2)", () => {
     expect(getRes.status).toBe(404)
   })
 
+  // Repro for "check connectivity" failure: Remotely Save uses the vault name as a
+  // remote base dir (e.g. /dav/Dominik/). On first setup that folder is empty and MKCOL
+  // is a no-op, so nothing exists under it. A client that stats the base dir (Depth 0)
+  // must still see a collection — not 404 — or it concludes the dir couldn't be created.
+  test("PROPFIND depth=0 on an empty base subfolder → collection (not 404)", async () => {
+    const app = createApp()
+    const res = await app.fetch(
+      new Request("http://localhost/dav/EmptyBaseDir/", {
+        method: "PROPFIND",
+        headers: { Authorization: basicAuth(rtUsername, rtPassword), Depth: "0" },
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(res.status).toBe(207)
+    const xml = await res.text()
+    expect(xml).toContain("<D:collection/>")
+  })
+
+  test("MKCOL then PROPFIND depth=0 confirms the created collection exists", async () => {
+    const app = createApp()
+    const auth = { Authorization: basicAuth(rtUsername, rtPassword) }
+
+    const mkcol = await app.fetch(
+      new Request("http://localhost/dav/MadeDir/", { method: "MKCOL", headers: auth }),
+      env_ as never,
+      ctx,
+    )
+    expect(mkcol.status).toBe(201)
+
+    const stat = await app.fetch(
+      new Request("http://localhost/dav/MadeDir/", {
+        method: "PROPFIND",
+        headers: { ...auth, Depth: "0" },
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(stat.status).toBe(207)
+  })
+
   test("path with .. never reaches vault data", async () => {
     const app = createApp()
     const res = await app.fetch(

@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "check": "biome check . && tsc --noEmit",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "test": "vitest run",

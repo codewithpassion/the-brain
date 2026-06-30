@@ -251,6 +251,10 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
     // by ScopedR2's forced `${tenantId}/` prefix over an opaque keyspace.
     const rawPath = c.req.path
     const afterDav = rawPath.startsWith("/dav/") ? rawPath.slice("/dav/".length) : ""
+    // A trailing slash is WebDAV's convention for a collection (directory). R2 has no real
+    // directories, so we can't distinguish an empty folder from a nonexistent one — a
+    // trailing-slash request is treated as an (possibly empty) collection rather than 404.
+    const isCollectionPath = afterDav.endsWith("/")
     const relpath = sanitizeRelpath(afterDav)
     if (relpath === null) {
       return new Response("Forbidden", { status: 403, headers: DAV_HEADERS })
@@ -297,9 +301,16 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
             },
           )
         }
-        // Check if it's a virtual collection.
+        // Check if it's a virtual collection (has children), or was addressed as one via a
+        // trailing slash. The latter lets clients (e.g. Remotely Save) confirm their base
+        // directory exists on first sync, when it's still empty — otherwise a 404 reads as
+        // "server unreachable".
         const listing = await r2.list({ prefix: `${vaultKey}/`, limit: 1 })
-        if (listing.objects.length > 0 || listing.delimitedPrefixes.length > 0) {
+        if (
+          isCollectionPath ||
+          listing.objects.length > 0 ||
+          listing.delimitedPrefixes.length > 0
+        ) {
           return new Response(
             multiStatus([xmlResponse({ href: `${davHref}/`, isCollection: true })]),
             {
