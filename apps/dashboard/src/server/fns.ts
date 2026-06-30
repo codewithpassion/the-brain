@@ -19,7 +19,9 @@ import type {
   DeleteDocumentResult,
   DerivedDocument,
   DocumentDetail,
+  FactsBrowseResult,
   FindOrphansResult,
+  ForgetFactResult,
   ListApiKeysResult,
   ListAuditResult,
   ListBackfillRunsResult,
@@ -30,6 +32,16 @@ import type {
   ListSessionsResult,
   ListVaultCredentialsResult,
   MembershipsResult,
+  MemoryForgetResult,
+  MemoryHistoryResult,
+  MemoryItem,
+  MemoryListResult,
+  MemoryRevision,
+  MemoryRollbackResult,
+  MemorySetResult,
+  OkfExportResult,
+  OkfFile,
+  OkfImportResult,
   RecallResult,
   RemoveMemberResult,
   ReprocessDocumentResult,
@@ -37,6 +49,7 @@ import type {
   RevokeVaultCredentialResult,
   SearchResult,
   SearchUserByEmailResult,
+  SessionContextResult,
   ThinkResult,
   TokenSpend,
   TraversalResult,
@@ -617,6 +630,244 @@ export const revokeVaultCredential = createServerFn({ method: "POST" })
         false,
         data,
       )
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Memory ops ---
+
+// Raw shapes returned by the API (frontmatter is Record<string,unknown> which TanStack cannot
+// validate for serializability — we extract what the UI needs and drop frontmatter before returning).
+interface RawMemoryItem {
+  slug: string
+  pageId: string
+  type: string
+  title: string
+  visibility: string
+  scope: string | null
+  frontmatter: Record<string, unknown>
+  body: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+interface RawRevision {
+  revisionId: number
+  version: number
+  type: string
+  title: string
+  visibility: string
+  reason: string | null
+  authorUserId: string | null
+  frontmatter: Record<string, unknown>
+  body: string
+  createdAt: string
+}
+const toMemoryItem = (r: RawMemoryItem): MemoryItem => ({
+  slug: r.slug,
+  pageId: r.pageId,
+  type: r.type,
+  title: r.title,
+  visibility: r.visibility,
+  scope: r.scope,
+  tags: Array.isArray(r.frontmatter.tags) ? (r.frontmatter.tags as string[]) : [],
+  body: r.body,
+  version: r.version,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+})
+const toRevision = (r: RawRevision): MemoryRevision => ({
+  revisionId: r.revisionId,
+  version: r.version,
+  type: r.type,
+  title: r.title,
+  visibility: r.visibility,
+  reason: r.reason,
+  authorUserId: r.authorUserId,
+  body: r.body,
+  createdAt: r.createdAt,
+})
+
+/** `memory_list` — list live agent-memory items, optionally under a path. */
+export const memoryList = createServerFn({ method: "POST" })
+  .validator((d: { path?: string; prefix?: boolean; limit?: number }) => d)
+  .handler(async ({ data }): Promise<Result<MemoryListResult>> => {
+    try {
+      const out = await brainCall<{ memories: RawMemoryItem[] }>("memory_list", true, {
+        ...(data.path ? { path: data.path } : {}),
+        ...(data.prefix !== undefined ? { prefix: data.prefix } : {}),
+        ...(data.limit !== undefined ? { limit: data.limit } : {}),
+      })
+      return { ok: true, data: { memories: out.memories.map(toMemoryItem) } }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `memory_get` — load a single memory item by slug. */
+export const memoryGet = createServerFn({ method: "POST" })
+  .validator((d: { slug: string }) => d)
+  .handler(async ({ data }): Promise<Result<{ memory: MemoryItem | null }>> => {
+    try {
+      const out = await brainCall<{ memory: RawMemoryItem | null }>("memory_get", true, {
+        slug: data.slug,
+      })
+      return { ok: true, data: { memory: out.memory ? toMemoryItem(out.memory) : null } }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `memory_set` — create or update a memory item (appends a version; unchanged = no-op). */
+export const memorySet = createServerFn({ method: "POST" })
+  .validator(
+    (d: {
+      slug: string
+      type: string
+      body: string
+      title?: string
+      description?: string
+      resource?: string
+      tags?: string[]
+      visibility?: string
+      scope?: string
+      teamId?: string
+    }) => d,
+  )
+  .handler(async ({ data }): Promise<Result<MemorySetResult>> => {
+    try {
+      const out = await brainCall<MemorySetResult>("memory_set", false, {
+        slug: data.slug,
+        type: data.type,
+        body: data.body,
+        ...(data.title !== undefined ? { title: data.title } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.resource !== undefined ? { resource: data.resource } : {}),
+        ...(data.tags !== undefined ? { tags: data.tags } : {}),
+        ...(data.visibility !== undefined ? { visibility: data.visibility } : {}),
+        ...(data.scope !== undefined ? { scope: data.scope } : {}),
+        ...(data.teamId !== undefined ? { teamId: data.teamId } : {}),
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `memory_history` — a memory item's full version history, newest-first. */
+export const memoryHistory = createServerFn({ method: "POST" })
+  .validator((d: { slug: string }) => d)
+  .handler(async ({ data }): Promise<Result<MemoryHistoryResult>> => {
+    try {
+      const out = await brainCall<{ versions: RawRevision[] }>("memory_history", true, {
+        slug: data.slug,
+      })
+      return { ok: true, data: { versions: out.versions.map(toRevision) } }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `memory_rollback` — roll a memory item back to an earlier revision (forward-only). */
+export const memoryRollback = createServerFn({ method: "POST" })
+  .validator((d: { slug: string; toRevisionId: number }) => d)
+  .handler(async ({ data }): Promise<Result<MemoryRollbackResult>> => {
+    try {
+      const out = await brainCall<MemoryRollbackResult>("memory_rollback", false, {
+        slug: data.slug,
+        toRevisionId: data.toRevisionId,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `memory_forget` — soft-delete a memory item (history retained). */
+export const memoryForget = createServerFn({ method: "POST" })
+  .validator((d: { slug: string }) => d)
+  .handler(async ({ data }): Promise<Result<MemoryForgetResult>> => {
+    try {
+      const out = await brainCall<MemoryForgetResult>("memory_forget", false, {
+        slug: data.slug,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `okf_export` — export all memory items as an OKF bundle. */
+export const okfExport = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<OkfExportResult>> => {
+    try {
+      const out = await brainCall<OkfExportResult>("okf_export", true, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `okf_import` — import an OKF bundle (list of {path,content} files) into agent memory. */
+export const okfImport = createServerFn({ method: "POST" })
+  .validator((d: { files: OkfFile[] }) => d)
+  .handler(async ({ data }): Promise<Result<OkfImportResult>> => {
+    try {
+      const out = await brainCall<OkfImportResult>("okf_import", false, {
+        files: data.files,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Facts browser ops ---
+
+/** `recall` (browse) — retrieve hot-memory facts with optional query/entity/since filters. */
+export const recallBrowse = createServerFn({ method: "POST" })
+  .validator((d: { query?: string; entitySlug?: string; since?: string; limit?: number }) => d)
+  .handler(async ({ data }): Promise<Result<FactsBrowseResult>> => {
+    try {
+      const out = await brainCall<FactsBrowseResult>("recall", true, {
+        ...(data.query ? { query: data.query } : {}),
+        ...(data.entitySlug ? { entitySlug: data.entitySlug } : {}),
+        ...(data.since ? { since: data.since } : {}),
+        limit: data.limit ?? 100,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `forget_fact` — soft-expire a hot-memory fact. */
+export const forgetFact = createServerFn({ method: "POST" })
+  .validator((d: { factId: number }) => d)
+  .handler(async ({ data }): Promise<Result<ForgetFactResult>> => {
+    try {
+      const out = await brainCall<ForgetFactResult>("forget_fact", false, {
+        factId: data.factId,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Session context ---
+
+/** `get_session_context` — turns, hot-memory facts, and loaded memories for a session. */
+export const getSessionContext = createServerFn({ method: "POST" })
+  .validator((d: { brainSessionId: string }) => d)
+  .handler(async ({ data }): Promise<Result<SessionContextResult>> => {
+    try {
+      const out = await brainCall<SessionContextResult>("get_session_context", true, {
+        brainSessionId: data.brainSessionId,
+      })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

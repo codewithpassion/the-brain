@@ -320,3 +320,130 @@ export interface BrainStats {
   tokenSpendNeurons: number
   monthlyCeilingUsd: number
 }
+
+// --- Memory types (MemorySchema / RevisionSchema mirrors from packages/db/src/memory/ops.ts) ---
+
+/** A single agent-memory item returned by memory_get / memory_list. */
+export interface MemoryItem {
+  slug: string
+  pageId: string
+  type: string
+  title: string
+  visibility: string
+  scope: string | null
+  /** Tags extracted from OKF frontmatter.tags (always an array, empty when absent). */
+  tags: string[]
+  body: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemoryListResult {
+  memories: MemoryItem[]
+}
+
+export interface MemorySetResult {
+  slug: string
+  pageId: string
+  version: number
+  changed: boolean
+}
+
+export interface MemoryForgetResult {
+  slug: string
+  forgotten: boolean
+}
+
+export interface MemoryRollbackResult {
+  slug: string
+  pageId: string
+  version: number
+  revertedFrom: number
+}
+
+/** A single revision returned by memory_history. */
+export interface MemoryRevision {
+  revisionId: number
+  version: number
+  type: string
+  title: string
+  visibility: string
+  reason: string | null
+  authorUserId: string | null
+  body: string
+  createdAt: string
+}
+
+export interface MemoryHistoryResult {
+  versions: MemoryRevision[]
+}
+
+// --- OKF types ---
+
+export interface OkfFile {
+  path: string
+  content: string
+}
+
+export interface OkfExportResult {
+  okfVersion: string
+  count: number
+  files: OkfFile[]
+}
+
+export interface OkfImportItem {
+  path: string
+  status: "imported" | "skipped" | "failed"
+  reason?: string
+  slug?: string
+}
+
+export interface OkfImportResult {
+  imported: number
+  skipped: number
+  failed: number
+  okfVersion: string | null
+  items: OkfImportItem[]
+}
+
+// --- Facts browser types (from RECALL_OP / FORGET_FACT_OP in sessions/ops.ts) ---
+
+/** A hot-memory fact as returned by recall / get_session_context. id is a DB number. */
+export interface FactItem {
+  id: number
+  fact: string
+  kind: string
+}
+
+export interface FactsBrowseResult {
+  facts: FactItem[]
+}
+
+export interface ForgetFactResult {
+  factId: number
+  forgotten: boolean
+}
+
+// --- Session context (GET_SESSION_CONTEXT_OP output) ---
+
+export interface SessionContextTurn {
+  idx: number
+  role: string
+  content: string | null
+}
+
+export interface SessionContextMemory {
+  slug: string
+  type: string
+  title: string
+  body: string
+  version: number
+}
+
+export interface SessionContextResult {
+  turns: SessionContextTurn[]
+  facts: FactItem[]
+  snapshotStubbed: boolean
+  memories?: SessionContextMemory[]
+}

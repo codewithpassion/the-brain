@@ -42,6 +42,7 @@ export const Route = createRootRoute({
 const PRIMARY_NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Search" },
   { to: "/documents", label: "Documents" },
+  { to: "/memory", label: "Memory" },
   { to: "/graph", label: "Graph" },
   { to: "/sessions", label: "Sessions" },
   { to: "/ingest", label: "Add" },
@@ -55,6 +56,7 @@ const ADMIN_NAV: readonly { to: string; label: string }[] = [
   { to: "/vault-sync", label: "Vault Sync" },
   { to: "/audit", label: "Audit" },
   { to: "/jobs", label: "Jobs" },
+  { to: "/facts", label: "Facts" },
 ]
 
 /** Flat list for the mobile menu. */
