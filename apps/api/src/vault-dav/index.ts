@@ -112,6 +112,17 @@ async function streamToMultipart(
 
 const toRfc1123 = (d: Date): string => d.toUTCString()
 
+// ── Magic root-mount keyword ──────────────────────────────────────────────────
+
+/**
+ * Obsidian's "remote base directory" can't be `/`, and an empty value falls back to the vault
+ * name — so there's no way to point Remotely Save at the vault ROOT. Setting the base directory
+ * to this keyword makes the facade strip the leading segment, mounting the vault root, so notes
+ * at `vault/youtube/…` appear at `/youtube/…` in Obsidian. (A literal top-level folder named
+ * `base` is therefore unreachable — an accepted cost of a declared magic keyword.)
+ */
+const MAGIC_ROOT = "base"
+
 // ── WebDAV XML builders ───────────────────────────────────────────────────────
 
 interface PropEntry {
@@ -251,11 +262,22 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
     // by ScopedR2's forced `${tenantId}/` prefix over an opaque keyspace.
     const rawPath = c.req.path
     const afterDav = rawPath.startsWith("/dav/") ? rawPath.slice("/dav/".length) : ""
+    // Magic root mount (see MAGIC_ROOT): when the base dir is `base`, strip that leading segment
+    // so the rest maps to the vault root. Response hrefs keep the `base/` prefix (via `hrefRoot`)
+    // so the client sees URLs consistent with what it requested.
+    const mounted = afterDav === MAGIC_ROOT || afterDav.startsWith(`${MAGIC_ROOT}/`)
+    const afterMount = !mounted
+      ? afterDav
+      : afterDav === MAGIC_ROOT
+        ? ""
+        : afterDav.slice(MAGIC_ROOT.length + 1)
+    const hrefRoot = mounted ? `/dav/${MAGIC_ROOT}` : "/dav"
     // A trailing slash is WebDAV's convention for a collection (directory). R2 has no real
     // directories, so we can't distinguish an empty folder from a nonexistent one — a
     // trailing-slash request is treated as an (possibly empty) collection rather than 404.
-    const isCollectionPath = afterDav.endsWith("/")
-    const relpath = sanitizeRelpath(afterDav)
+    // A bare `base` (mounted, no remainder) is likewise the root collection.
+    const isCollectionPath = afterMount.endsWith("/") || (mounted && afterMount === "")
+    const relpath = sanitizeRelpath(afterMount)
     if (relpath === null) {
       return new Response("Forbidden", { status: 403, headers: DAV_HEADERS })
     }
@@ -271,16 +293,19 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
     // ── PROPFIND ─────────────────────────────────────────────────────────────
     if (method === "PROPFIND") {
       const depth = (c.req.header("depth") ?? "0").trim()
-      const davHref = relpath === "" ? "/dav/" : `/dav/${relpath}`
+      const davHref = relpath === "" ? `${hrefRoot}/` : `${hrefRoot}/${relpath}`
 
       if (depth === "0") {
         // Depth 0: return properties of the addressed resource.
         if (relpath === "") {
           // Root collection.
-          return new Response(multiStatus([xmlResponse({ href: "/dav/", isCollection: true })]), {
-            status: 207,
-            headers: { ...DAV_HEADERS, "Content-Type": "application/xml; charset=utf-8" },
-          })
+          return new Response(
+            multiStatus([xmlResponse({ href: `${hrefRoot}/`, isCollection: true })]),
+            {
+              status: 207,
+              headers: { ...DAV_HEADERS, "Content-Type": "application/xml; charset=utf-8" },
+            },
+          )
         }
         // Try file first.
         const obj = await r2.head(vaultKey)
@@ -331,7 +356,7 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
 
       const entries: PropEntry[] = []
       // Include the collection itself first.
-      entries.push({ href: relpath === "" ? "/dav/" : `${davHref}/`, isCollection: true })
+      entries.push({ href: relpath === "" ? `${hrefRoot}/` : `${davHref}/`, isCollection: true })
 
       // Direct child files.
       for (const obj of listing.objects) {
@@ -340,7 +365,7 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
           : obj.key
         if (vaultRelPath === "") continue
         entries.push({
-          href: `/dav/${vaultRelPath}`,
+          href: `${hrefRoot}/${vaultRelPath}`,
           contentLength: obj.size,
           lastModified: obj.uploaded,
           etag: obj.etag,
@@ -354,7 +379,7 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
           ? prefix.slice(stripPrefix.length)
           : prefix
         if (vaultRelPath === "") continue
-        entries.push({ href: `/dav/${vaultRelPath}`, isCollection: true })
+        entries.push({ href: `${hrefRoot}/${vaultRelPath}`, isCollection: true })
       }
 
       return new Response(multiStatus(entries.map(xmlResponse)), {

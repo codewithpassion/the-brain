@@ -357,6 +357,77 @@ describe("vault-dav HTTP round-trip (real workerd D1 + R2)", () => {
     expect(stat.status).toBe(207)
   })
 
+  // Magic `base` mount: base dir `base` maps to the vault root, so a PUT to /dav/base/youtube/x.md
+  // lands at the same key as /dav/youtube/x.md, and PROPFIND hrefs keep the `base/` prefix.
+  test("magic mount: PUT /dav/base/<p> and GET /dav/<p> hit the same vault key", async () => {
+    const app = createApp()
+    const auth = basicAuth(rtUsername, rtPassword)
+    const body = "# mounted note"
+
+    const put = await app.fetch(
+      new Request("http://localhost/dav/base/mounted/note.md", {
+        method: "PUT",
+        headers: { Authorization: auth, "Content-Type": "text/markdown" },
+        body,
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(put.status).toBeOneOf([201, 204])
+
+    // Same content is reachable WITHOUT the base prefix → proves base/ == vault root.
+    const get = await app.fetch(
+      new Request("http://localhost/dav/mounted/note.md", {
+        method: "GET",
+        headers: { Authorization: auth },
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(get.status).toBe(200)
+    expect(await get.text()).toBe(body)
+  })
+
+  test("magic mount: PROPFIND depth=1 hrefs keep the base/ prefix", async () => {
+    const app = createApp()
+    const auth = basicAuth(rtUsername, rtPassword)
+    await app.fetch(
+      new Request("http://localhost/dav/base/mounted/note.md", {
+        method: "PUT",
+        headers: { Authorization: auth, "Content-Type": "text/markdown" },
+        body: "# mounted note",
+      }),
+      env_ as never,
+      ctx,
+    )
+    const res = await app.fetch(
+      new Request("http://localhost/dav/base/mounted/", {
+        method: "PROPFIND",
+        headers: { Authorization: auth, Depth: "1" },
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(res.status).toBe(207)
+    const xml = await res.text()
+    // The child href must be addressable by the client, i.e. under /dav/base/…
+    expect(xml).toContain("/dav/base/mounted/note.md")
+    expect(xml).not.toContain("<D:href>/dav/mounted/note.md</D:href>")
+  })
+
+  test("magic mount: bare /dav/base is the root collection (207, not 404)", async () => {
+    const app = createApp()
+    const res = await app.fetch(
+      new Request("http://localhost/dav/base", {
+        method: "PROPFIND",
+        headers: { Authorization: basicAuth(rtUsername, rtPassword), Depth: "0" },
+      }),
+      env_ as never,
+      ctx,
+    )
+    expect(res.status).toBe(207)
+  })
+
   test("path with .. never reaches vault data", async () => {
     const app = createApp()
     const res = await app.fetch(
