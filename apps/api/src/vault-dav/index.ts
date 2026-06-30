@@ -452,7 +452,10 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
           object: msgObj,
           eventTime: new Date().toISOString(),
         }
-        c.executionCtx.waitUntil(env.VAULT_EVENTS_QUEUE.send(msg as unknown))
+        // Await the enqueue — do NOT fire-and-forget via waitUntil. A dropped send means the
+        // note is silently never ingested (observed: bulk/rapid PUTs losing most events). The
+        // added latency is a single queue send (~ms).
+        await env.VAULT_EVENTS_QUEUE.send(msg as unknown)
       }
 
       return new Response(null, { status, headers: DAV_HEADERS })
@@ -474,7 +477,9 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
           object: { key: fullKey },
           eventTime: new Date().toISOString(),
         }
-        c.executionCtx.waitUntil(env.VAULT_EVENTS_QUEUE.send(msg as unknown))
+        // Await the enqueue (same reasoning as PUT) — a dropped delete event would leave a
+        // stale Brain doc for a note removed in Obsidian.
+        await env.VAULT_EVENTS_QUEUE.send(msg as unknown)
       }
 
       return new Response(null, { status: 204, headers: DAV_HEADERS })
