@@ -62,6 +62,35 @@ bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, ac
 - **`brain-platform-review-history.html`** — the 8-round review journey, scores, and remaining items
 - **`memory-systems-report.html`** — the original analysis comparing the three source projects
 
+## Connect Obsidian (vault sync)
+
+Sync an Obsidian vault into the Brain over a **WebDAV facade** — no S3 keys, no exposed storage
+bucket. The Brain mints a per-tenant WebDAV credential; every key is forced under
+`${tenantId}/vault/`, and writes trigger ingestion automatically. Design + internals:
+`docs/r2-facade-plan.md`.
+
+1. **Install Remotely Save** — in Obsidian, *Settings → Community plugins → Browse*; install and
+   enable **Remotely Save** (works on desktop and iOS/Android).
+2. **Generate a credential** — in the dashboard open **Vault Sync** (Admin nav) → *Generate*, and
+   copy the username, password, and endpoint (the password is shown only once).
+3. **Configure Remotely Save** — *Settings → Remotely Save*, choose **WebDAV** (not S3), then set:
+
+   | Field | Value |
+   |---|---|
+   | Server address | the `endpoint` (ends in `/dav`) |
+   | Username | the `vk_…` username |
+   | Password | the generated password |
+
+4. **Sync** — enable auto-sync, or run *Remotely Save: start sync*. The first run uploads the whole
+   vault; `.md` notes are indexed (folders become path namespaces) and the entity graph fills in.
+
+**Notes**
+
+- Markdown is indexed for search + graph; other files (images, PDFs) are stored/synced but not indexed.
+- Large attachments stream as R2 multipart uploads — no size cap.
+- The reserved `Brain/` folder is write-back only (Brain → vault) and is never re-ingested (no loop).
+- Revoking a credential in **Vault Sync** blocks all further syncs with that username immediately.
+
 ## Layout
 
 ```
