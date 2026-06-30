@@ -5,6 +5,7 @@
  * No window.confirm / window.alert / window.prompt anywhere.
  */
 import { createFileRoute } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { useState } from "react"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
@@ -368,55 +369,137 @@ function GenerateCredentialCard({
   )
 }
 
-// ── Connect Obsidian instructions ─────────────────────────────────────────────
+// ── Connect Obsidian — step-by-step guide ─────────────────────────────────────
+
+/** Bold inline emphasis matching the guide's neutral palette. */
+const B = ({ children }: { children: ReactNode }) => (
+  <span className="font-medium text-neutral-900">{children}</span>
+)
+
+/** Inline code chip (commands, field values). */
+const Cmd = ({ children }: { children: ReactNode }) => (
+  <code className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-xs">{children}</code>
+)
+
+/** One numbered step: a circular badge + title + body. */
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 font-semibold text-white text-xs">
+        {n}
+      </span>
+      <div className="min-w-0 text-sm">
+        <p className="mb-1 font-medium text-neutral-900">{title}</p>
+        <div className="text-neutral-600 leading-relaxed">{children}</div>
+      </div>
+    </li>
+  )
+}
 
 function ConnectObsidianCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Connect Obsidian</CardTitle>
+        <CardTitle>Connect Obsidian — step by step</CardTitle>
       </CardHeader>
       <CardContent>
-        <ol className="flex flex-col gap-2 text-sm text-neutral-700 list-decimal list-inside">
-          <li>
-            In Obsidian, open <span className="font-medium">Settings → Community plugins</span> and
-            install <span className="font-medium">Remotely Save</span>.
-          </li>
-          <li>
-            Open the Remotely Save settings and choose <span className="font-medium">WebDAV</span>{" "}
-            as the remote service (not S3).
-          </li>
-          <li>
-            Fill in the fields using the credential you generated above:
-            <ul className="mt-1 ml-4 flex flex-col gap-1 list-disc list-inside text-neutral-600">
+        <ol className="flex flex-col gap-5">
+          <Step n={1} title="Install the Remotely Save plugin">
+            In Obsidian open <B>Settings → Community plugins</B>. If prompted, turn off Restricted
+            mode, click <B>Browse</B>, search <B>Remotely Save</B>, then <B>Install</B> and{" "}
+            <B>Enable</B> it. (It works on desktop and the iOS / Android apps.)
+          </Step>
+
+          <Step n={2} title="Generate a credential above">
+            In the <B>Generate credential</B> section on this page, optionally give it a label (e.g.
+            the device name), click <B>Generate</B>, and copy the <B>username</B>, <B>password</B>,
+            and <B>endpoint</B>. The password is shown <B>only once</B> — keep it handy for the next
+            step.
+          </Step>
+
+          <Step n={3} title="Point Remotely Save at the Brain (WebDAV)">
+            Open <B>Settings → Remotely Save</B>. Under <B>Choose a remote service</B> pick{" "}
+            <B>WebDAV</B> (not S3, Dropbox, or OneDrive), then fill in the three fields with the
+            credential from step 2:
+            <table className="mt-2 w-full max-w-md">
+              <tbody>
+                <tr className="border-neutral-100 border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
+                    Server address
+                  </td>
+                  <td className="py-1 text-neutral-600 text-xs">
+                    the <Cmd>endpoint</Cmd> (ends in <Cmd>/dav</Cmd>)
+                  </td>
+                </tr>
+                <tr className="border-neutral-100 border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
+                    Username
+                  </td>
+                  <td className="py-1 text-neutral-600 text-xs">
+                    the <Cmd>username</Cmd> (starts with <Cmd>vk_</Cmd>)
+                  </td>
+                </tr>
+                <tr className="border-neutral-100 border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
+                    Password
+                  </td>
+                  <td className="py-1 text-neutral-600 text-xs">the generated password</td>
+                </tr>
+              </tbody>
+            </table>
+            <span className="mt-1 block">Leave the other connection fields at their defaults.</span>
+          </Step>
+
+          <Step n={4} title="Choose your sync settings (recommended)">
+            <ul className="flex list-disc flex-col gap-1 pl-4">
               <li>
-                <span className="font-medium">Server address</span> — paste the{" "}
-                <span className="font-mono text-xs">endpoint</span>
+                <B>Auto-sync</B> — enable “sync on save” or a schedule so notes flow without manual
+                syncs.
               </li>
               <li>
-                <span className="font-medium">Username</span> — paste the{" "}
-                <span className="font-mono text-xs">username</span>
+                <B>Sync direction</B> — keep the default bidirectional unless you only want to push
+                up to the Brain.
               </li>
               <li>
-                <span className="font-medium">Password</span> — paste the{" "}
-                <span className="font-mono text-xs">password</span> (saved from the banner above)
+                <B>Remote base directory</B> — optional; set one if several vaults share a
+                credential and you want them kept in separate folders.
               </li>
             </ul>
-          </li>
-          <li>
-            Optionally set a <span className="font-medium">remote base directory</span> inside
-            Remotely Save if you want to isolate this vault from others.
-          </li>
-          <li>
-            Hit <span className="font-medium">Sync</span>. Obsidian will push your vault contents to
-            the Brain over WebDAV; the Brain's ingest pipeline will index new and changed notes
-            automatically.
-          </li>
+          </Step>
+
+          <Step n={5} title="Run the first sync">
+            Click the <B>Sync</B> (circular-arrows) ribbon icon, or run the command{" "}
+            <Cmd>Remotely Save: start sync</Cmd>. The first run uploads your whole vault — give it a
+            minute for a large one.
+          </Step>
+
+          <Step n={6} title="Verify it worked">
+            Open <B>Documents</B> in the nav — your <Cmd>.md</Cmd> notes appear as indexed documents
+            (folders become path namespaces) and the <B>Graph</B> fills in as entities are
+            extracted. You can then <B>Search</B> and ask the Brain across your vault.
+          </Step>
         </ol>
-        <p className="mt-4 text-neutral-500 text-xs">
-          The WebDAV endpoint does not expose the underlying storage bucket. Revoking a credential
-          immediately blocks all further syncs using that username.
-        </p>
+
+        <div className="mt-5 border-neutral-100 border-t pt-4">
+          <p className="mb-2 font-medium text-neutral-700 text-sm">Good to know</p>
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-neutral-600 text-xs">
+            <li>
+              Markdown notes are indexed for search and the graph; other files (images, PDFs) are
+              stored and synced but not indexed.
+            </li>
+            <li>
+              Large attachments are supported — they stream as multipart uploads, with no size cap.
+            </li>
+            <li>
+              The reserved <Cmd>Brain/</Cmd> folder is written by the Brain (export / write-back)
+              and is never re-ingested, so there's no sync loop.
+            </li>
+            <li>
+              The endpoint never exposes the underlying storage bucket, and revoking a credential
+              blocks all further syncs with that username immediately.
+            </li>
+          </ul>
+        </div>
       </CardContent>
     </Card>
   )
