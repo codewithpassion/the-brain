@@ -7,11 +7,11 @@
  */
 import type { DreamRunStatus } from "./runs"
 
-/** Which dream step groups to run. */
-export type DreamKind = "consolidation" | "reflection" | "all"
+/** Which dream step groups to run. `dedup` is a STANDALONE sweep (not part of `all`). */
+export type DreamKind = "consolidation" | "reflection" | "dedup" | "all"
 
 /** The `kind` enum values — one source (op zod + dispatch default read from here). */
-export const DREAM_KINDS = ["consolidation", "reflection", "all"] as const
+export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "all"] as const
 
 /**
  * One step group in a dream run. `consolidation`/`reflection` drive a `dream_runs` row keyed by
@@ -19,19 +19,26 @@ export const DREAM_KINDS = ["consolidation", "reflection", "all"] as const
  * its `runId` is the base run id it summarizes.
  */
 export interface DreamStep {
-  group: "consolidation" | "reflection" | "digest"
+  group: "consolidation" | "reflection" | "digest" | "dedup"
   runId: string
 }
 
 /** The reflection run id — the dispatch (consolidation) run id + a `-reflection` suffix. */
 export const reflectionRunId = (baseRunId: string): string => `${baseRunId}-reflection`
+/** The dedup run id — the dispatch run id + a `-dedup` suffix (its own `dream_runs` row). */
+export const dedupRunId = (baseRunId: string): string => `${baseRunId}-dedup`
 
 /**
  * The ordered step groups for a `kind`, each with its run id derived from the SINGLE dispatch
  * `baseRunId`. Consolidation first (reflection reads consolidated facts), then reflection, then —
  * for the full daily run (`kind='all'`) only — the digest that summarizes both.
+ *
+ * `dedup` is a STANDALONE sweep (`kind='dedup'`, one step) — deliberately NOT part of `all` yet:
+ * it is graph hygiene over the whole entity set, independent of a night's new content, so it runs
+ * on its own cadence via `dream_now kind='dedup'`. The nightly `all` can adopt it later.
  */
 export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] => {
+  if (kind === "dedup") return [{ group: "dedup", runId: dedupRunId(baseRunId) }]
   const steps: DreamStep[] = []
   if (kind !== "reflection") steps.push({ group: "consolidation", runId: baseRunId })
   if (kind !== "consolidation")

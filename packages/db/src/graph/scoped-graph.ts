@@ -25,7 +25,7 @@ import {
   type GraphPath,
   type Principal,
 } from "@brain/shared"
-import { and, desc, eq, inArray, isNull, like, or, type SQL, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, like, or, type SQL, sql } from "drizzle-orm"
 import { type AnySQLiteColumn, alias } from "drizzle-orm/sqlite-core"
 import {
   chunks,
@@ -37,8 +37,14 @@ import {
   tags,
   timelineEntries,
 } from "../schema"
+import { type BatchStatement, batchWithAudit } from "../scoped/audit"
 import type { BrainDrizzle } from "../scoped/db"
-import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import {
+  liveEntityPredicate,
+  liveEntitySql,
+  scopePredicate,
+  visibilityPredicate,
+} from "../scoped/predicates"
 
 /** A typed page→page edge after the gated read. */
 export interface DocLinkRow {
@@ -437,6 +443,7 @@ export class ScopedGraph {
       .where(
         and(
           eq(entities.tenantId, this.p.tenantId),
+          liveEntityPredicate(entities.mergedInto), // hide Dream-dedup losers (D4)
           scopePredicate(this.p, entities.scope),
           entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
           opts?.kind ? eq(entities.kind, opts.kind) : undefined,
@@ -488,6 +495,8 @@ export class ScopedGraph {
       .where(
         and(
           eq(entityRelations.tenantId, this.p.tenantId),
+          liveEntityPredicate(ef.mergedInto), // both endpoints must be live (D4 dedup losers)
+          liveEntityPredicate(et.mergedInto),
           scopePredicate(this.p, ef.scope),
           entityVisibility(this.p, { visibility: ef.visibility, teamId: ef.teamId }),
           scopePredicate(this.p, et.scope),
@@ -503,9 +512,9 @@ export class ScopedGraph {
    * any cross-tenant / out-of-scope / hidden id is silently DROPPED. Chunked to respect the
    * 100 bound-param cap.
    */
-  async recheckEntities(ids: string[]): Promise<EntityRow[]> {
+  async recheckEntities(ids: string[]): Promise<(EntityRow & { createdAt: string })[]> {
     if (ids.length === 0) return []
-    const out: EntityRow[] = []
+    const out: (EntityRow & { createdAt: string })[] = []
     for (let i = 0; i < ids.length; i += CHUNK_DB_BATCH_SIZE) {
       const batch = ids.slice(i, i + CHUNK_DB_BATCH_SIZE)
       const rows = await this.db
@@ -519,12 +528,14 @@ export class ScopedGraph {
           visibility: entities.visibility,
           teamId: entities.teamId,
           mentionCount: entities.mentionCount,
+          createdAt: entities.createdAt, // D4: lets the dedup sweep pickWinner without a re-read
         })
         .from(entities)
         .where(
           and(
             eq(entities.tenantId, this.p.tenantId),
             inArray(entities.id, batch),
+            liveEntityPredicate(entities.mergedInto), // hide Dream-dedup losers (D4)
             scopePredicate(this.p, entities.scope),
             entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
           ),
@@ -562,7 +573,8 @@ export class ScopedGraph {
       FROM entity_fts f
       JOIN entities x ON x.rowid = f.rowid
       WHERE entity_fts MATCH ${match}
-        AND x.tenant_id = ${this.p.tenantId}${scopeFragment}
+        AND x.tenant_id = ${this.p.tenantId}
+        AND ${liveEntitySql("x")}${scopeFragment}
         AND (x.visibility = 'world'${teamFragment})
       ORDER BY bm25(entity_fts)
       LIMIT ${topK}`
@@ -616,6 +628,7 @@ export class ScopedGraph {
   private async findEntityOrphans(): Promise<OrphanReport> {
     const gate = and(
       eq(entities.tenantId, this.p.tenantId),
+      liveEntityPredicate(entities.mergedInto), // a merged loser is hidden, not an orphan (D4)
       scopePredicate(this.p, entities.scope),
       entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
     )
@@ -873,6 +886,30 @@ export class ScopedGraph {
    * payload) if `(tenant, COALESCE(scope,''), kind, lower(name))` matches, null on miss.
    * Called FIRST in the Phase 3.5 pipeline before vector-nearest fallback.
    */
+  /**
+   * Follow the `merged_into` chain from `id` to the LIVE winner (D4 redirect). A Dream-dedup loser
+   * keeps its row (D-i5 reversible) and its slot on the UNIQUE `idx_entities_key`, so callers that
+   * key/vector-match onto it must land on the winner, not the tombstone. Bounded to `maxHops` (a
+   * merge chain A→B→C is possible if C is later merged); returns the live id, or `null` if the id
+   * is unknown/cross-tenant or the chain is broken/too deep (caller falls back to create). Tenant-
+   * forced on every hop, so a cross-tenant id resolves to `null` — never a leak.
+   */
+  async resolveWinnerId(id: string, maxHops = 5): Promise<string | null> {
+    let current = id
+    for (let hop = 0; hop < maxHops; hop++) {
+      const rows = await this.db
+        .select({ mergedInto: entities.mergedInto })
+        .from(entities)
+        .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, current)))
+        .limit(1)
+      const row = rows[0]
+      if (!row) return null // unknown / cross-tenant
+      if (row.mergedInto === null) return current // live winner
+      current = row.mergedInto
+    }
+    return null // chain too deep (or a cycle) → give up; caller creates
+  }
+
   async findEntityByKey(
     name: string,
     kind: string,
@@ -884,9 +921,13 @@ export class ScopedGraph {
     visibility: string
     teamId: string | null
   } | null> {
+    // NOTE: no `merged_into IS NULL` filter here — a merged loser STILL holds the UNIQUE
+    // `idx_entities_key` slot, so it must match (otherwise `createEntity` collides on the index).
+    // We match the key, then REDIRECT a merged hit to its live winner (D4 anti-resurrection).
     const rows = await this.db
       .select({
         id: entities.id,
+        mergedInto: entities.mergedInto,
         aliases: entities.aliases,
         sourceChunkIds: entities.sourceChunkIds,
         visibility: entities.visibility,
@@ -902,7 +943,27 @@ export class ScopedGraph {
         ),
       )
       .limit(1)
-    return rows[0] ?? null
+    const hit = rows[0]
+    if (!hit) return null
+    if (hit.mergedInto === null) {
+      const { mergedInto: _drop, ...live } = hit
+      return live
+    }
+    // The keyed row is a Dream-dedup loser → resolve to the live winner and return ITS fields.
+    const winnerId = await this.resolveWinnerId(hit.mergedInto)
+    if (winnerId === null) return null // broken chain → caller creates (data-repair path)
+    const wrows = await this.db
+      .select({
+        id: entities.id,
+        aliases: entities.aliases,
+        sourceChunkIds: entities.sourceChunkIds,
+        visibility: entities.visibility,
+        teamId: entities.teamId,
+      })
+      .from(entities)
+      .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, winnerId)))
+      .limit(1)
+    return wrows[0] ?? null
   }
 
   /**
@@ -1042,6 +1103,291 @@ export class ScopedGraph {
       .set({ embeddedAt, embeddingModel: EMBEDDING_MODEL, embeddingDims: EMBEDDING_DIMS })
       .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, entityId)))
   }
+
+  // ── DREAM DEDUP (v2 W1/D4) ────────────────────────────────────────────────────
+
+  /**
+   * ONE page of the active (non-merged) entity set for the dedup sweep, in deterministic id order
+   * (the FSM's cursor unit). `cursor` pages by `id > cursor` so a resume never re-reads the head and
+   * a big tenant is never truncated at a fixed tail (the FSM loops pages until one returns < limit).
+   * Tenant + scope + `{world,team}` visibility gated; merged losers excluded. `embeddedAt`/`updatedAt`
+   * let the sweep skip re-embedding entities whose stored vector is still current.
+   */
+  async listActiveEntitiesForDedup(cursor: string | null, limit = 500): Promise<DedupEntity[]> {
+    return this.db
+      .select({
+        id: entities.id,
+        name: entities.canonicalName,
+        description: entities.description,
+        kind: entities.kind,
+        scope: entities.scope,
+        mentionCount: entities.mentionCount,
+        createdAt: entities.createdAt,
+        embeddedAt: entities.embeddedAt,
+        updatedAt: entities.updatedAt,
+      })
+      .from(entities)
+      .where(
+        and(
+          eq(entities.tenantId, this.p.tenantId),
+          liveEntityPredicate(entities.mergedInto),
+          cursor === null ? undefined : sql`${entities.id} > ${cursor}`,
+          scopePredicate(this.p, entities.scope),
+          entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
+        ),
+      )
+      .orderBy(entities.id)
+      .limit(limit)
+  }
+
+  /**
+   * Ids of Dream-dedup losers (soft-deleted, `merged_into` set) — for the sweep-start vector
+   * reconciliation (D4 item 6): their stale vectors are batch-deleted so a failed best-effort
+   * per-merge delete self-heals. Bounded; tenant-forced.
+   */
+  async listMergedLoserIds(limit = 1000): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: entities.id })
+      .from(entities)
+      .where(and(eq(entities.tenantId, this.p.tenantId), isNotNull(entities.mergedInto)))
+      .limit(limit)
+    return rows.map((r) => r.id)
+  }
+
+  /** One entity's dedup-relevant fields (winner selection + the staleness/merged guard). */
+  async getEntityForMerge(
+    id: string,
+  ): Promise<(DedupEntity & { mergedInto: string | null }) | null> {
+    const rows = await this.db
+      .select({
+        id: entities.id,
+        name: entities.canonicalName,
+        description: entities.description,
+        kind: entities.kind,
+        scope: entities.scope,
+        mentionCount: entities.mentionCount,
+        createdAt: entities.createdAt,
+        embeddedAt: entities.embeddedAt,
+        updatedAt: entities.updatedAt,
+        mergedInto: entities.mergedInto,
+      })
+      .from(entities)
+      .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, id)))
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /**
+   * Merge `loserId` INTO `winnerId` (v2 W1/D4) in ONE audited `db.batch` (D-i4). Order matters:
+   *   1. DELETE loser relations that would COLLIDE after re-pointing — a self-loop (both endpoints
+   *      become the winner) or a duplicate of an existing `(from,to,kind)` winner relation. A bulk
+   *      `UPDATE ... SET from=winner` would otherwise throw on the `(tenant,from,to,kind)` unique
+   *      index; deleting the colliders first lets the survivors re-point cleanly.
+   *   2-3. Re-point surviving relations (from/to loser → winner).
+   *   4. DELETE loser mentions that duplicate a winner mention `(source_kind,source_id)`.
+   *   5. Re-point surviving mentions loser → winner.
+   *   6. Soft-delete the loser (`merged_into = winner`) — the row survives (D-i5, reversible).
+   *   7. Fold the loser's canonical_name + aliases + source_chunk_ids into the winner AND recompute
+   *      `winner.mention_count = COUNT(*)` of its mentions (post-repoint; the subquery sees step-5's
+   *      writes since batch statements run in order) — dropped dups never inflate it. Folding keeps
+   *      the loser's surface form queryable on the winner (FTS/name), stopping re-extract churn.
+   *   8. `memory_audit` row (same batch — D-i4) whose diff is RICH enough to reverse the merge (D-i5):
+   *      deleted collider rows in full, re-pointed mention/relation ids, prior winner counters/aliases.
+   * Tenant-forced on every statement. Never hard-deletes an entity.
+   */
+  async mergeEntities(winnerId: string, loserId: string): Promise<void> {
+    if (this.p.readOnly) throw new Error("dedup merge denied: read-only principal")
+    const t = this.p.tenantId
+    const stamp = now()
+
+    // Re-pointed endpoint of the aliased row `r` (loser → winner), parameterized (no injection).
+    const repointExpr = (col: "from_entity_id" | "to_entity_id"): SQL =>
+      sql`(CASE WHEN r.${sql.raw(col)} = ${loserId} THEN ${winnerId} ELSE r.${sql.raw(col)} END)`
+
+    // ── PRE-READS (item 2 alias folding + item 3 reversible audit diff) ──────────
+    // Read BEFORE the batch so the audit captures pre-merge state and we can fold the loser's
+    // name/aliases/chunks into the winner (keeps FTS/name search alive for the folded surface
+    // form, stopping the "merge → re-extract → duplicate" churn loop).
+    const [winnerRow] = await this.db
+      .select({
+        aliases: entities.aliases,
+        sourceChunkIds: entities.sourceChunkIds,
+        mentionCount: entities.mentionCount,
+      })
+      .from(entities)
+      .where(and(eq(entities.tenantId, t), eq(entities.id, winnerId)))
+      .limit(1)
+    const [loserRow] = await this.db
+      .select({
+        canonicalName: entities.canonicalName,
+        aliases: entities.aliases,
+        sourceChunkIds: entities.sourceChunkIds,
+      })
+      .from(entities)
+      .where(and(eq(entities.tenantId, t), eq(entities.id, loserId)))
+      .limit(1)
+    if (!(winnerRow && loserRow)) {
+      throw new Error(`mergeEntities: winner ${winnerId} or loser ${loserId} not found`)
+    }
+    const foldedAliases = dedupeCapped(
+      [
+        ...parseStringArray(winnerRow.aliases),
+        loserRow.canonicalName,
+        ...parseStringArray(loserRow.aliases),
+      ],
+      50,
+    )
+    const foldedChunks = uniq([
+      ...parseStringArray(winnerRow.sourceChunkIds),
+      ...parseStringArray(loserRow.sourceChunkIds),
+    ])
+
+    // The colliders the batch will DELETE (full rows for the audit) — mirrors the delete predicates.
+    const collidingRelations = await this.db.all<{
+      id: string
+      fromEntityId: string
+      toEntityId: string
+      kind: string
+      confidence: number
+      evidenceChunkIds: string
+    }>(sql`
+      SELECT r.id AS id, r.from_entity_id AS fromEntityId, r.to_entity_id AS toEntityId,
+             r.kind AS kind, r.confidence AS confidence, r.evidence_chunk_ids AS evidenceChunkIds
+      FROM entity_relations r
+      WHERE r.tenant_id = ${t}
+        AND (r.from_entity_id = ${loserId} OR r.to_entity_id = ${loserId})
+        AND (
+          ${repointExpr("from_entity_id")} = ${repointExpr("to_entity_id")}
+          OR EXISTS (
+            SELECT 1 FROM entity_relations w
+            WHERE w.tenant_id = ${t} AND w.id <> r.id AND w.kind = r.kind
+              AND w.from_entity_id = ${repointExpr("from_entity_id")}
+              AND w.to_entity_id = ${repointExpr("to_entity_id")}
+          )
+        )`)
+    const collidingMentions = await this.db.all<{
+      id: string
+      sourceKind: string
+      sourceId: string
+    }>(sql`
+      SELECT m.id AS id, m.source_kind AS sourceKind, m.source_id AS sourceId
+      FROM entity_mentions m
+      WHERE m.tenant_id = ${t} AND m.entity_id = ${loserId}
+        AND EXISTS (
+          SELECT 1 FROM entity_mentions w
+          WHERE w.tenant_id = ${t} AND w.entity_id = ${winnerId}
+            AND w.source_kind = m.source_kind AND w.source_id = m.source_id
+        )`)
+    // The surviving loser rows the batch will RE-POINT = loser-touching rows minus the colliders.
+    const collidingRelIds = new Set(collidingRelations.map((r) => r.id))
+    const collidingMentionIds = new Set(collidingMentions.map((m) => m.id))
+    const loserRelRows = await this.db.all<{ id: string }>(sql`
+      SELECT id FROM entity_relations
+      WHERE tenant_id = ${t} AND (from_entity_id = ${loserId} OR to_entity_id = ${loserId})`)
+    const loserMentionRows = await this.db.all<{ id: string }>(sql`
+      SELECT id FROM entity_mentions WHERE tenant_id = ${t} AND entity_id = ${loserId}`)
+    const repointedRelationIds = loserRelRows
+      .map((r) => r.id)
+      .filter((id) => !collidingRelIds.has(id))
+    const repointedMentionIds = loserMentionRows
+      .map((m) => m.id)
+      .filter((id) => !collidingMentionIds.has(id))
+
+    const deleteCollidingRelations = this.db.delete(entityRelations).where(sql`
+      ${entityRelations.tenantId} = ${t} AND ${entityRelations.id} IN (
+        SELECT r.id FROM entity_relations r
+        WHERE r.tenant_id = ${t}
+          AND (r.from_entity_id = ${loserId} OR r.to_entity_id = ${loserId})
+          AND (
+            ${repointExpr("from_entity_id")} = ${repointExpr("to_entity_id")}
+            OR EXISTS (
+              SELECT 1 FROM entity_relations w
+              WHERE w.tenant_id = ${t} AND w.id <> r.id AND w.kind = r.kind
+                AND w.from_entity_id = ${repointExpr("from_entity_id")}
+                AND w.to_entity_id = ${repointExpr("to_entity_id")}
+            )
+          )
+      )`)
+
+    const repointRelFrom = this.db
+      .update(entityRelations)
+      .set({ fromEntityId: winnerId, updatedAt: stamp })
+      .where(and(eq(entityRelations.tenantId, t), eq(entityRelations.fromEntityId, loserId)))
+    const repointRelTo = this.db
+      .update(entityRelations)
+      .set({ toEntityId: winnerId, updatedAt: stamp })
+      .where(and(eq(entityRelations.tenantId, t), eq(entityRelations.toEntityId, loserId)))
+
+    const deleteCollidingMentions = this.db.delete(entityMentions).where(sql`
+      ${entityMentions.tenantId} = ${t} AND ${entityMentions.entityId} = ${loserId}
+      AND EXISTS (
+        SELECT 1 FROM entity_mentions w
+        WHERE w.tenant_id = ${t} AND w.entity_id = ${winnerId}
+          AND w.source_kind = ${entityMentions.sourceKind} AND w.source_id = ${entityMentions.sourceId}
+      )`)
+    const repointMentions = this.db
+      .update(entityMentions)
+      .set({ entityId: winnerId })
+      .where(and(eq(entityMentions.tenantId, t), eq(entityMentions.entityId, loserId)))
+
+    const softDeleteLoser = this.db
+      .update(entities)
+      .set({ mergedInto: winnerId, updatedAt: stamp })
+      .where(and(eq(entities.tenantId, t), eq(entities.id, loserId)))
+    // Fold the loser's name+aliases+chunks into the winner AND recompute mention_count in one
+    // update (the COUNT subquery sees the re-point above, since batch statements run in order).
+    const recountWinner = this.db
+      .update(entities)
+      .set({
+        aliases: JSON.stringify(foldedAliases),
+        sourceChunkIds: JSON.stringify(foldedChunks),
+        mentionCount: sql`(SELECT COUNT(*) FROM entity_mentions m WHERE m.tenant_id = ${t} AND m.entity_id = ${winnerId})`,
+        updatedAt: stamp,
+      })
+      .where(and(eq(entities.tenantId, t), eq(entities.id, winnerId)))
+
+    // D-i5 reversible: the diff records EVERYTHING the merge destroyed or moved — the deleted
+    // collider rows in full, the ids re-pointed, and the winner's prior mention_count + aliases.
+    // Committed atomically with a FORCED audit row through the shared seam (invariants 10, 11).
+    const statements: BatchStatement[] = [
+      deleteCollidingRelations,
+      repointRelFrom,
+      repointRelTo,
+      deleteCollidingMentions,
+      repointMentions,
+      softDeleteLoser,
+      recountWinner,
+    ]
+    await batchWithAudit(this.db, this.p, statements, {
+      action: "dream.dedup.merge",
+      targetId: winnerId,
+      diff: JSON.stringify({
+        winnerId,
+        loserId,
+        loserCanonicalName: loserRow.canonicalName,
+        priorWinnerMentionCount: winnerRow.mentionCount,
+        priorWinnerAliases: parseStringArray(winnerRow.aliases),
+        deletedRelations: collidingRelations,
+        deletedMentions: collidingMentions,
+        repointedRelationIds,
+        repointedMentionIds,
+      }),
+    })
+  }
+}
+
+/** One entity's fields for the Dream dedup sweep (v2 W1/D4). */
+export interface DedupEntity {
+  id: string
+  name: string
+  description: string
+  kind: string
+  scope: string | null
+  mentionCount: number
+  createdAt: string
+  /** Vector-staleness inputs: re-embed only when `embeddedAt` is null or `updatedAt > embeddedAt`. */
+  embeddedAt: string | null
+  updatedAt: string
 }
 
 /** Parse a JSON `string[]` column, tolerating malformed/empty values. */

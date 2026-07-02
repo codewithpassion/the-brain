@@ -22,6 +22,7 @@
 import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { BrainBindings } from "../env"
+import { createDreamDedupServices, runDreamDedup } from "./dedup"
 import { createDreamDigestServices, runDreamDigest } from "./digest"
 import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
 import { createDreamReflectServices, runDreamReflection } from "./reflect"
@@ -77,6 +78,9 @@ export const dispatchDreamRun = async (
   // records 'failure' but never aborts the sweep — so the digest still runs (must ALWAYS be written).
   const statuses: DreamRunStatus[] = []
   let consolidationPaused = false
+  // An EXHAUSTIVE switch (not a kind→runner map): reflection (per-insight KG) and dedup (a bespoke
+  // step-loop in the workflow arm) each need special-casing, so a map would collapse only 2 of 4
+  // arms while adding cases — the `never` default below is the real drift guard, so the switch stays.
   for (const step of dreamStepPlan(runId, kind)) {
     switch (step.group) {
       case "consolidation":
@@ -111,6 +115,17 @@ export const dispatchDreamRun = async (
           statuses.push(r.status)
         } catch (err) {
           console.error("dream digest failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "dedup":
+        try {
+          const r = await runDreamDedup(createDreamDedupServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream dedup failed", step.runId, err)
           statuses.push("failure")
         }
         break

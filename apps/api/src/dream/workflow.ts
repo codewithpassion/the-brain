@@ -11,6 +11,7 @@
  */
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import {
+  createDreamDedupServices,
   createDreamDigestServices,
   createDreamReflectServices,
   createDreamServices,
@@ -19,6 +20,7 @@ import {
   type DreamRunStatus,
   dreamStepPlan,
   runDreamConsolidation,
+  runDreamDedup,
   runDreamDigest,
   runDreamReflection,
   worstStatus,
@@ -51,6 +53,9 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
     let insights = 0
     let consolidationPaused = false
 
+    // An EXHAUSTIVE switch (not a kind→runner map): reflection (per-insight KG extraction) and dedup
+    // (the bespoke step-loop below) each need special-casing, so a map would collapse only 2 of 4
+    // arms while adding cases — the `never` default is the real drift guard, so the switch stays.
     for (const planStep of dreamStepPlan(runId, kind)) {
       switch (planStep.group) {
         case "consolidation": {
@@ -118,6 +123,36 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
             }
           })
           statuses.push(d.status)
+          break
+        }
+        case "dedup": {
+          // The sweep can exceed workerd's subrequest cap on a big tenant, so it is CHUNKED across
+          // step.do calls: each processes ≤ DEDUP_STEP_ITEMS entities and reports a `stopReason`.
+          // We loop while it stops on `'page'` (more to do, budget fine); a `'budget'` stop or a
+          // clean `'success'` (stopReason null) ends the loop. MAX_DEDUP_STEPS is a runaway guard.
+          const DEDUP_STEP_ITEMS = 50
+          const MAX_DEDUP_STEPS = 200
+          let last: { status: DreamRunStatus; stopReason: "budget" | "page" | null } = {
+            status: "success",
+            stopReason: null,
+          }
+          for (let i = 0; i < MAX_DEDUP_STEPS; i++) {
+            const dd = await step.do(`dream-dedup-${i}`, async () => {
+              try {
+                const res = await runDreamDedup(createDreamDedupServices(this.env, principal), {
+                  runId: planStep.runId,
+                  maxItemsPerInvocation: DEDUP_STEP_ITEMS,
+                })
+                return { status: res.status, stopReason: res.stopReason }
+              } catch (err) {
+                console.error("dream dedup failed", planStep.runId, err)
+                return { status: "failure" as DreamRunStatus, stopReason: null }
+              }
+            })
+            last = dd
+            if (dd.stopReason !== "page") break // success / budget / failure → done looping
+          }
+          statuses.push(last.status)
           break
         }
         default: {

@@ -27,7 +27,12 @@ import type { BrainBindings } from "../env"
 import { runBatchIngestCore } from "../ingest"
 import { chunks, documents, dreamRuns, entities, entityMentions } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-import { DOC_ORIGIN_DREAM, notDreamOrigin, scopePredicate } from "../scoped/predicates"
+import {
+  DOC_ORIGIN_DREAM,
+  liveEntityPredicate,
+  notDreamOrigin,
+  scopePredicate,
+} from "../scoped/predicates"
 import { thinkOp } from "../search/ops"
 import { makeBudgetPort, monthlyWindow, recordThinkSpend } from "../search/ports"
 import type { RecallSink, SearchDeps } from "../search/types"
@@ -150,6 +155,7 @@ export const selectReflectionTargets = async (
         opts.since ? gte(entityMentions.createdAt, opts.since) : undefined,
         notDreamOrigin(documents.origin),
         isNull(documents.deletedAt), // a NULL join (session/page source) keeps the mention
+        liveEntityPredicate(entities.mergedInto), // never reflect on a D4 dedup loser
         scopePredicate(principal, entities.scope),
       ),
     )

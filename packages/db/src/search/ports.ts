@@ -40,6 +40,13 @@ const GEN_NEURONS_PER_TOKEN = 0.4
 export const estimateGenNeurons = (chars: number): number =>
   Math.ceil(chars / CHARS_PER_TOKEN) * GEN_NEURONS_PER_TOKEN
 
+/**
+ * Coarse EMBED-neuron estimate (bge-m3: ~1 token/4 chars, ~1 neuron/token) — mirrors the backfill
+ * re-embed estimate so embed attribution is consistent across the codebase. Distinct from gen:
+ * embeddings have no per-token generation factor.
+ */
+export const estimateEmbedNeurons = (chars: number): number => Math.ceil(chars / CHARS_PER_TOKEN)
+
 /** Current monthly spend window key, e.g. `'2026-06'` (UTC). */
 export const monthlyWindow = (now: Date = new Date()): string =>
   `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`

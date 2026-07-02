@@ -12,3 +12,10 @@ export const extractJsonCandidates = (text: string): string[] => {
   if (first >= 0 && last > first) candidates.push(text.slice(first, last + 1))
   return candidates
 }
+
+/**
+ * Coerce a model-supplied confidence into `[0,1]` (non-number / NaN / ±Inf → 0). The ONE home for
+ * the clamp so every salvage path (KG judge, Dream dedup confirm) treats a bad confidence the same.
+ */
+export const clampConfidence = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0

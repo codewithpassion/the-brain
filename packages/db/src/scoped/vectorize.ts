@@ -118,6 +118,24 @@ export class ScopedVectorize {
   }
 
   /**
+   * Fetch stored vector VALUES by id (Dream dedup D4 — reuse a page's already-embedded vectors so
+   * the sweep doesn't re-embed under the per-invocation subrequest cap). Returns id→values for the
+   * ids that exist; missing/stale ids are simply absent (caller re-embeds those). Batched at the
+   * 100-id cap. Ids are globally-unique entity UUIDs the caller already owns (they came from a
+   * tenant-scoped D1 read), so no namespace filter is needed.
+   */
+  async getByIds(ids: string[]): Promise<Map<string, number[]>> {
+    const out = new Map<string, number[]>()
+    if (ids.length === 0) return out
+    const BATCH = 100
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const rows = await this.index.getByIds(ids.slice(i, i + BATCH))
+      for (const v of rows) if (v.values) out.set(v.id, [...v.values])
+    }
+    return out
+  }
+
+  /**
    * Upsert a vector. `namespace = tenantId` is hard-wired; `tenant_id` is also stamped
    * into metadata (belt-and-suspenders) alongside the scope/team/visibility/embedding_model
    * fields the metadata indexes and the re-embed migration read.

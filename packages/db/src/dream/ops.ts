@@ -57,6 +57,9 @@ export const LIST_DREAM_RUNS_OP = defineOp({
         superseded: z.number().int(),
         contradictions: z.number().int(),
         kept: z.number().int(),
+        entitiesExamined: z.number().int(),
+        pairsExamined: z.number().int(),
+        skipped: z.number().int(),
         neurons: z.number(),
         attempts: z.number().int(),
         createdAt: z.string(),
@@ -86,6 +89,9 @@ export interface ListDreamRunRow {
   superseded: number
   contradictions: number
   kept: number
+  entitiesExamined: number
+  pairsExamined: number
+  skipped: number
   neurons: number
   attempts: number
   createdAt: string
@@ -109,6 +115,9 @@ export const listDreamRunsCore = async (
       superseded: row.stats.superseded,
       contradictions: row.stats.contradictions,
       kept: row.stats.kept,
+      entitiesExamined: row.stats.entitiesExamined,
+      pairsExamined: row.stats.pairsExamined,
+      skipped: row.stats.skipped,
       neurons: row.stats.neurons,
       attempts: row.attempts,
       createdAt: row.createdAt,

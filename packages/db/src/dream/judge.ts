@@ -8,7 +8,7 @@
  * merge/supersede verdict below the floor is downgraded to a `contradict` (filed for human review)
  * rather than applied automatically (the plan's dream-quality risk mitigation).
  */
-import { extractJsonCandidates } from "@brain/shared"
+import { clampConfidence, extractJsonCandidates } from "@brain/shared"
 import type { DreamCluster } from "./select"
 
 /** The AI slice this step needs (genExtract only). */
@@ -85,7 +85,7 @@ const parseVerdict = (text: string, cluster: DreamCluster): DreamVerdict | null 
             : null,
         supersededIds,
         winnerId,
-        confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+        confidence: clampConfidence(parsed.confidence),
         rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
         skipped: false,
       }

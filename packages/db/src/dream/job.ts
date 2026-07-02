@@ -34,25 +34,50 @@ export interface DreamJobResult {
   noop: boolean
   resumed: boolean
   stats: DreamRunStats
-  /** Items left unprocessed when the run stopped on budget (0 on clean completion). */
+  /** Items left unprocessed when the run stopped (0 on clean completion). */
   itemsRemaining: number
+  /**
+   * Why the run stopped, when `status='paused'`. `'budget'` = the monthly neuron slice is spent →
+   * stop for the night. `'page'` = the per-invocation item cap was hit but budget is fine → the
+   * workflow should re-invoke to continue THIS sweep. `null` on clean completion / noop.
+   */
+  stopReason: "budget" | "page" | null
   /** Non-null payloads produced this run (in processing order). */
   payloads: string[]
 }
 
 export interface DreamJobSpec<Item> {
   runId: string
-  kind: "consolidation" | "reflection"
+  kind: "consolidation" | "reflection" | "dedup"
   /** Per-run neuron cap; effective threshold = min(10% remaining ceiling, this). */
   maxNeurons?: number
   /** The window's spend so far (neurons) — read once, before selection (finding: budget-first). */
   windowSpentNeurons: () => Promise<number>
-  /** Select the run's work items (deterministic order). Not called when the budget is exhausted. */
-  selectItems: () => Promise<Item[]>
+  /**
+   * Select work items in deterministic (id-ascending) order. `cursor` is the resume point:
+   * NON-paged kinds ignore it and return the full set (the driver filters by cursor); a PAGED kind
+   * (`pageSize` set) returns only `id > cursor` up to `pageSize` and the driver loops pages.
+   * Not called when the budget is already exhausted.
+   */
+  selectItems: (cursor: string | null) => Promise<Item[]>
   /** The item's stable ordering key (== the resume cursor value). */
   itemKey: (item: Item) => string
   /** Process one item; records its own spend, returns neurons + stats delta + optional payload. */
   processItem: (item: Item) => Promise<ProcessResult>
+  /**
+   * When set, the driver PAGES: it re-calls `selectItems(cursor)` (each returns ≤ `pageSize` rows
+   * WHERE id > cursor) until a page comes back short — killing both the fixed-tail blindness and the
+   * full-snapshot re-read on resume. Unset → single-shot (the original behavior, other kinds).
+   */
+  pageSize?: number
+  /**
+   * Cap on items processed in ONE invocation (subrequest-cap guard for the workflow's step loop).
+   * On hit, the run pauses with `stopReason='page'` so the caller re-invokes to continue. Unset →
+   * process until budget/exhaustion. Only meaningful with `pageSize`.
+   */
+  maxItemsPerInvocation?: number
+  /** Persist progress (cursor + stats) every N processed items (default 1 → after each). */
+  persistEvery?: number
 }
 
 /** Drive one dream run through its FSM. See the module doc for the model. */
@@ -71,6 +96,7 @@ export const runDreamJob = async <Item>(
     resumed: false,
     stats: existing?.stats ?? { ...ZERO_DREAM_STATS },
     itemsRemaining: 0,
+    stopReason: null,
     payloads: [],
   })
 
@@ -101,31 +127,34 @@ export const runDreamJob = async <Item>(
     if (threshold <= 0) {
       await runs.persistProgress(runId, resumeCursor, stats)
       await runs.finishRun(runId, "paused")
-      return { runId, status: "paused", noop: false, resumed, stats, itemsRemaining: 0, payloads }
+      return {
+        runId,
+        status: "paused",
+        noop: false,
+        resumed,
+        stats,
+        itemsRemaining: 0,
+        stopReason: "budget",
+        payloads,
+      }
     }
 
-    const items = await spec.selectItems()
-    const pending =
-      resumeCursor === null ? items : items.filter((i) => spec.itemKey(i) > resumeCursor)
-
+    const persistEvery = Math.max(1, spec.persistEvery ?? 1)
     let runNeurons = 0
     let lastKey = resumeCursor
     let processed = 0
-    let stopped = false
-    for (const item of pending) {
-      if (runNeurons >= threshold) {
-        stopped = true
-        break
-      }
+    let stopReason: "budget" | "page" | null = null
+    // Best-effort count of items known to remain when we stopped (a lower bound in the paged path).
+    let itemsRemaining = 0
+
+    // Fold one item's result into the rolling stats/spend/cursor. Returns false if the loop must
+    // stop (budget spent or ceiling 429); the caller sets `stopReason`.
+    const runItem = async (item: Item): Promise<boolean> => {
       let result: ProcessResult
       try {
         result = await spec.processItem(item)
       } catch (err) {
-        // The monthly ceiling (hard 429) mid-item → stop cleanly as a resumable budget pause.
-        if (err instanceof CostCeilingError) {
-          stopped = true
-          break
-        }
+        if (err instanceof CostCeilingError) return false // hard 429 mid-item → resumable pause
         throw err
       }
       runNeurons += result.neurons
@@ -136,18 +165,81 @@ export const runDreamJob = async <Item>(
       if (result.payload) payloads.push(result.payload)
       lastKey = spec.itemKey(item)
       processed += 1
-      await runs.persistProgress(runId, lastKey, stats)
+      if (processed % persistEvery === 0) await runs.persistProgress(runId, lastKey, stats)
+      return true
     }
 
-    const itemsRemaining = pending.length - processed
-    if (stopped) {
+    if (spec.pageSize !== undefined) {
+      // ── PAGED path (dedup): loop pages (id > cursor) until a short page (done) or a stop. ──
+      let cursor = resumeCursor
+      paging: while (true) {
+        const page = await spec.selectItems(cursor)
+        if (page.length === 0) break // exhausted → success
+        for (let i = 0; i < page.length; i++) {
+          const item = page[i] as Item
+          if (runNeurons >= threshold) {
+            stopReason = "budget"
+            itemsRemaining = page.length - i // ≥1 unprocessed in this page (more pages may follow)
+            break paging
+          }
+          if (spec.maxItemsPerInvocation !== undefined && processed >= spec.maxItemsPerInvocation) {
+            stopReason = "page"
+            itemsRemaining = page.length - i // ≥1 more; the workflow loops on 'page' regardless
+            break paging
+          }
+          if (!(await runItem(item))) {
+            stopReason = "budget"
+            itemsRemaining = page.length - i
+            break paging
+          }
+          cursor = spec.itemKey(item)
+        }
+        if (page.length < spec.pageSize) break // last (short) page → success
+      }
+    } else {
+      // ── SINGLE-SHOT path (consolidation/reflection): full set, driver-filtered by cursor. ──
+      const items = await spec.selectItems(resumeCursor)
+      const pending =
+        resumeCursor === null ? items : items.filter((i) => spec.itemKey(i) > resumeCursor)
+      for (const item of pending) {
+        if (runNeurons >= threshold) {
+          stopReason = "budget"
+          break
+        }
+        if (!(await runItem(item))) {
+          stopReason = "budget"
+          break
+        }
+      }
+      itemsRemaining = stopReason ? pending.length - processed : 0
+    }
+
+    if (stopReason) {
       await runs.persistProgress(runId, lastKey, stats)
       await runs.finishRun(runId, "paused")
-      return { runId, status: "paused", noop: false, resumed, stats, itemsRemaining, payloads }
+      return {
+        runId,
+        status: "paused",
+        noop: false,
+        resumed,
+        stats,
+        itemsRemaining,
+        stopReason,
+        payloads,
+      }
     }
     await runs.persistProgress(runId, null, stats)
     await runs.finishRun(runId, "success")
-    return { runId, status: "success", noop: false, resumed, stats, itemsRemaining: 0, payloads }
+    return {
+      runId,
+      status: "success",
+      noop: false,
+      resumed,
+      stats,
+      itemsRemaining: 0,
+      stopReason: null,
+      payloads,
+    }
   } catch (err) {
     await runs.finishRun(runId, "failure", err instanceof Error ? err.message : String(err))
     throw err

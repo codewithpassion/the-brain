@@ -152,6 +152,9 @@ function DreamsPage() {
                     <th className="pb-1 font-medium">Status</th>
                     <th className="pb-1 font-medium">Merged</th>
                     <th className="pb-1 font-medium">Contradictions</th>
+                    <th className="pb-1 font-medium">Examined</th>
+                    <th className="pb-1 font-medium">Pairs</th>
+                    <th className="pb-1 font-medium">Skipped</th>
                     <th className="pb-1 font-medium">Updated</th>
                   </tr>
                 </thead>
@@ -164,6 +167,9 @@ function DreamsPage() {
                       </td>
                       <td className="py-1.5 text-neutral-600">{run.merged}</td>
                       <td className="py-1.5 text-neutral-600">{run.contradictions}</td>
+                      <td className="py-1.5 text-neutral-600">{run.entitiesExamined}</td>
+                      <td className="py-1.5 text-neutral-600">{run.pairsExamined}</td>
+                      <td className="py-1.5 text-neutral-600">{run.skipped}</td>
                       <td className="py-1.5 text-neutral-600">{run.updatedAt}</td>
                     </tr>
                   ))}

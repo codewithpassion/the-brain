@@ -40,6 +40,9 @@ export const entities = sqliteTable(
     embedError: text("embed_error"),
     embeddingModel: text("embedding_model"), // per-row model tracking for brain-entities
     embeddingDims: integer("embedding_dims"),
+    // Soft-delete marker for Dream dedup (v2 W1/D4): non-null = merged INTO that winner entity;
+    // the row survives (reversible) but is hidden from every entity read (softDeleteCol below).
+    mergedInto: text("merged_into"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(), // updated_at > embedded_at drives computeStale
   },

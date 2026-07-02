@@ -95,13 +95,20 @@ export const upsertEntityWithVectorDedup = async (
       })
       const top = nearest[0]
       if (top !== undefined && top.score >= RELATED_FLOOR) {
-        // D1 re-check: enforces tenant_id = p.tenantId (cross-tenant never leaks),
-        // scope, {world,team} visibility. Additionally check kind + scope partition.
-        const recheck = await graph.recheckEntities([top.id])
-        const match = recheck.find(
-          (r) => r.kind === input.kind && (r.scope ?? null) === (input.scope ?? null),
-        )
-        if (match !== undefined) vectorMatchId = match.id
+        // A vector hit may resolve to a Dream-dedup loser (its stale vector can outlive the merge);
+        // REDIRECT through merged_into to the live winner BEFORE the re-check (D4 anti-resurrection)
+        // — otherwise recheckEntities drops the merged id and we'd spawn a duplicate. resolveWinnerId
+        // is tenant-forced, so a cross-tenant top.id resolves to null (create new; no leak).
+        const winnerId = await graph.resolveWinnerId(top.id)
+        if (winnerId !== null) {
+          // D1 re-check: enforces tenant_id = p.tenantId (cross-tenant never leaks),
+          // scope, {world,team} visibility. Additionally check kind + scope partition.
+          const recheck = await graph.recheckEntities([winnerId])
+          const match = recheck.find(
+            (r) => r.kind === input.kind && (r.scope ?? null) === (input.scope ?? null),
+          )
+          if (match !== undefined) vectorMatchId = match.id
+        }
       }
     }
   } catch {

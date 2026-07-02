@@ -28,11 +28,11 @@ import {
   chunks,
   documents,
   facts,
-  memoryAudit,
   memoryRecallTraces,
   memoryUsePolicy,
   tokenSpend,
 } from "../schema"
+import { type AuditSpec, batchWithAudit } from "./audit"
 import { scopePredicate, visibilityPredicate } from "./predicates"
 
 /** Both `drizzle-orm/d1` (async) and `drizzle-orm/bun-sqlite` (sync) satisfy this. */
@@ -51,13 +51,6 @@ type BatchStatement = BatchItem<"sqlite">
  */
 interface BatchCapable {
   batch(statements: [BatchStatement, ...BatchStatement[]]): Promise<unknown>
-}
-
-/** What `batchWithAudit` stamps into the `memory_audit` row written in the same batch. */
-interface AuditSpec {
-  action: string
-  targetId?: string | null
-  diff?: string | null
 }
 
 /**
@@ -627,19 +620,7 @@ export class ScopedDB {
    * — so the change and its audit either both land or neither does.
    */
   private async batchWithAudit(statements: BatchStatement[], audit: AuditSpec): Promise<void> {
-    if (this.p.readOnly) {
-      throw new Error("write denied: read-only principal")
-    }
-    const auditStatement = this.db.insert(memoryAudit).values({
-      id: crypto.randomUUID(),
-      tenantId: this.p.tenantId, // forced — never caller-supplied
-      userId: this.p.userId, // forced actor
-      action: audit.action,
-      targetId: audit.targetId ?? null,
-      at: Date.now(),
-      diff: audit.diff ?? null,
-    })
-    await this.commitBatch([...statements, auditStatement])
+    await batchWithAudit(this.db, this.p, statements, audit)
   }
 
   /**

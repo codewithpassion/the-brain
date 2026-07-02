@@ -34,8 +34,14 @@ describe("dreamStepPlan — the shared kind→steps mapping", () => {
     expect(steps).toEqual([{ group: "reflection", runId: "base-reflection" }])
   })
 
+  test("'dedup' → only the dedup step (suffixed run id); NOT part of 'all'", () => {
+    expect(dreamStepPlan("base", "dedup")).toEqual([{ group: "dedup", runId: "base-dedup" }])
+    // Dedup is a standalone sweep (graph hygiene), deliberately excluded from the nightly 'all'.
+    expect(dreamStepPlan("base", "all").some((s) => s.group === "dedup")).toBe(false)
+  })
+
   test("DREAM_KINDS is the single kind set", () => {
-    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "all"])
+    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "dedup", "all"])
   })
 })
 

@@ -34,6 +34,9 @@ export interface DreamRunStats {
   // reflection (D2) counters
   targets: number
   insights: number
+  // dedup (D4) counters
+  entitiesExamined: number
+  pairsExamined: number
   // shared
   skipped: number
   /** Neurons attributed to THIS run (the dream cost ledger, D-i3). */
@@ -75,6 +78,8 @@ export const ZERO_DREAM_STATS: DreamRunStats = {
   kept: 0,
   targets: 0,
   insights: 0,
+  entitiesExamined: 0,
+  pairsExamined: 0,
   skipped: 0,
   neurons: 0,
 }
@@ -95,6 +100,8 @@ const parseStats = (json: string | null): DreamRunStats => {
       kept: num(p.kept),
       targets: num(p.targets),
       insights: num(p.insights),
+      entitiesExamined: num(p.entitiesExamined),
+      pairsExamined: num(p.pairsExamined),
       skipped: num(p.skipped),
       neurons: num(p.neurons),
     }

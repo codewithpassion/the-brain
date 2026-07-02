@@ -5,6 +5,13 @@
  */
 export { type ApplyOutcome, AUTO_MERGE_FLOOR, applyCluster, ID_CHUNK } from "./apply"
 export {
+  createDreamDedupServices,
+  type DreamDedupOptions,
+  type DreamDedupResult,
+  type DreamDedupServices,
+  runDreamDedup,
+} from "./dedup"
+export {
   createDreamDigestServices,
   DIGEST_SLUG,
   type DreamDigestOptions,

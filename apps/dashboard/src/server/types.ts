@@ -206,6 +206,9 @@ export interface DreamRun {
   superseded: number
   contradictions: number
   kept: number
+  entitiesExamined: number
+  pairsExamined: number
+  skipped: number
   neurons: number
   attempts: number
   createdAt: string

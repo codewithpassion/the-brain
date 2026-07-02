@@ -80,7 +80,8 @@ export const DOC_GRAPH = {
 /**
  * Knowledge graph: `entities` nodes over `entity_relations` edges (PRD §6.1).
  * `scopeCol` IS set (entities are partitioned by scope in the dedup key). No
- * `userCol` (the KG node space is `{world, team}` only) and no `softDeleteCol`.
+ * `userCol` (the KG node space is `{world, team}` only). `softDeleteCol='merged_into'`
+ * (v2 W1/D4): a Dream-dedup loser (merged into a winner) is hidden from traversal.
  */
 export const ENTITY_GRAPH = {
   nodeTable: "entities",
@@ -89,6 +90,7 @@ export const ENTITY_GRAPH = {
   toCol: "to_entity_id",
   labelCol: "canonical_name",
   typeCol: "kind",
+  softDeleteCol: "merged_into",
   scopeCol: "scope",
   visibilityCol: "visibility",
   teamCol: "team_id",

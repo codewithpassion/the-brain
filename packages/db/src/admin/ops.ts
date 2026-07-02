@@ -42,7 +42,7 @@ import {
   sessions as sessionsTable,
 } from "../schema"
 import { type BrainDrizzle, ScopedDB } from "../scoped/db"
-import { scopePredicate } from "../scoped/predicates"
+import { liveEntityPredicate, scopePredicate } from "../scoped/predicates"
 import { monthlyWindow, USD_PER_NEURON } from "../search/ports"
 
 /** The per-request deps an admin handler builds from (`env` + the resolved `Principal`). */
@@ -620,7 +620,10 @@ export const getStatsCore = async (
       .select({ count: sql<number>`COUNT(*)` })
       .from(chunks)
       .where(and(eq(chunks.tenantId, tid), isNull(chunks.deletedAt))),
-    db.select({ count: sql<number>`COUNT(*)` }).from(entities).where(eq(entities.tenantId, tid)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(entities)
+      .where(and(eq(entities.tenantId, tid), liveEntityPredicate(entities.mergedInto))), // exclude D4 dedup losers
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(sessionsTable)
