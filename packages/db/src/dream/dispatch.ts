@@ -24,6 +24,7 @@ import type { Principal } from "@brain/shared"
 import type { BrainBindings } from "../env"
 import { createDreamDedupServices, runDreamDedup } from "./dedup"
 import { createDreamDigestServices, runDreamDigest } from "./digest"
+import { createDreamHygieneServices, runDreamHygiene } from "./hygiene"
 import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
 import { createDreamReflectServices, runDreamReflection } from "./reflect"
 import { createDreamServices, dreamRunId, runDreamConsolidation } from "./run"
@@ -126,6 +127,17 @@ export const dispatchDreamRun = async (
           statuses.push(r.status)
         } catch (err) {
           console.error("dream dedup failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "hygiene":
+        try {
+          const r = await runDreamHygiene(createDreamHygieneServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream hygiene failed", step.runId, err)
           statuses.push("failure")
         }
         break

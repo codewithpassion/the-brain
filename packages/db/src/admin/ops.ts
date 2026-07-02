@@ -42,7 +42,7 @@ import {
   sessions as sessionsTable,
 } from "../schema"
 import { type BrainDrizzle, ScopedDB } from "../scoped/db"
-import { liveEntityPredicate, scopePredicate } from "../scoped/predicates"
+import { liveEntityPredicate, notSoftExpired, scopePredicate } from "../scoped/predicates"
 import { monthlyWindow, USD_PER_NEURON } from "../search/ports"
 
 /** The per-request deps an admin handler builds from (`env` + the resolved `Principal`). */
@@ -631,7 +631,13 @@ export const getStatsCore = async (
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(facts)
-      .where(and(eq(facts.tenantId, tid), isNull(facts.expiredAt))),
+      .where(
+        and(
+          eq(facts.tenantId, tid),
+          isNull(facts.expiredAt),
+          notSoftExpired(facts.validUntil, new Date().toISOString()), // D5: decayed facts aren't "active"
+        ),
+      ),
   ])
   const tokenSpendNeurons = await new ScopedDB(db, principal).readWindowSpendNeurons(
     monthlyWindow(),

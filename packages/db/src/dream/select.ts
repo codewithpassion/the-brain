@@ -23,7 +23,12 @@ import { EMBED_BATCH_SIZE, RELATED_FLOOR } from "@brain/shared"
 import { and, asc, eq, isNull } from "drizzle-orm"
 import { facts } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-import { activeFactPredicate, scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import {
+  activeFactPredicate,
+  notSoftExpired,
+  scopePredicate,
+  visibilityPredicate,
+} from "../scoped/predicates"
 
 /** Max facts consolidated per cluster per night (bounds bind params + judge prompt; newest first). */
 export const MAX_CLUSTER_SIZE = 100
@@ -129,6 +134,7 @@ export const selectClusters = async (
         eq(facts.tenantId, principal.tenantId),
         isNull(facts.expiredAt),
         activeFactPredicate(lineageCols), // superseded/consolidated excluded (shared definition)
+        notSoftExpired(facts.validUntil, new Date().toISOString()), // never consolidate a decayed fact (D5)
         eq(facts.isDreamGenerated, 0), // anti-loop (D-i2)
         scopePredicate(principal, facts.scope),
         visibilityPredicate(principal, visibilityCols),

@@ -21,7 +21,7 @@
  */
 import type { Principal } from "@brain/shared"
 import { CHUNK_DB_BATCH_SIZE, EMBEDDING_DIMS, EMBEDDING_MODEL } from "@brain/shared"
-import { and, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
 import {
@@ -33,7 +33,12 @@ import {
   tokenSpend,
 } from "../schema"
 import { type AuditSpec, batchWithAudit } from "./audit"
-import { scopePredicate, visibilityPredicate } from "./predicates"
+import {
+  notSoftExpired,
+  notSoftExpiredSql,
+  scopePredicate,
+  visibilityPredicate,
+} from "./predicates"
 
 /** Both `drizzle-orm/d1` (async) and `drizzle-orm/bun-sqlite` (sync) satisfy this. */
 export type BrainDrizzle = BaseSQLiteDatabase<"sync" | "async", unknown>
@@ -358,6 +363,7 @@ export class ScopedDB {
         and(
           eq(facts.tenantId, this.p.tenantId),
           isNull(facts.expiredAt),
+          notSoftExpired(facts.validUntil, new Date().toISOString()), // D5 decay soft-expire
           scopePredicate(this.p, facts.scope),
           visibilityPredicate(this.p, visibilityCols.fact),
           opts?.entitySlug ? eq(facts.entitySlug, opts.entitySlug) : undefined,
@@ -542,7 +548,12 @@ export class ScopedDB {
    * (`f.rowid` IS `facts.id`) — NOT by the chunks-style rowid. Tenant + scope + visibility
    * + live (`expired_at IS NULL`) are re-checked on the base table before any id leaves.
    */
-  async ftsFactIds(query: string, topK: number, includeSuperseded = false): Promise<number[]> {
+  async ftsFactIds(
+    query: string,
+    topK: number,
+    includeSuperseded = false,
+    includeSoftExpired = false,
+  ): Promise<number[]> {
     const match = sanitizeFts(query)
     if (match.length === 0) return []
     const scopeFragment =
@@ -564,13 +575,17 @@ export class ScopedDB {
     const activeFragment = includeSuperseded
       ? sql``
       : sql` AND x.superseded_by IS NULL AND x.consolidated_into IS NULL`
+    // Soft-expiry is a SEPARATE axis from includeSuperseded — revealed only by includeSoftExpired.
+    const softExpireFragment = includeSoftExpired
+      ? sql``
+      : sql` AND ${notSoftExpiredSql("x", new Date().toISOString())}`
     const statement = sql`
       SELECT x.id AS id
       FROM facts_fts f
       JOIN facts x ON x.id = f.rowid
       WHERE facts_fts MATCH ${match}
         AND x.tenant_id = ${this.p.tenantId}
-        AND x.expired_at IS NULL${activeFragment}${scopeFragment}
+        AND x.expired_at IS NULL${activeFragment}${softExpireFragment}${scopeFragment}
         AND (x.visibility = 'world'
              OR (x.visibility = 'private' AND x.user_id = ${this.p.userId})${teamFragment})
       ORDER BY bm25(facts_fts)
@@ -976,5 +991,136 @@ export class ScopedDB {
         },
       })
     await this.commitBatch([statement])
+  }
+
+  /**
+   * Dream hygiene (D5) — the WHOLE LLM-free sweep (decay + soft-expire + notability boost) as ONE
+   * atomic, audited `db.batch`. ID-FIRST: candidate ids are SELECTed up front, then every mutation
+   * is driven by `id IN (chunked)` — so counts are exact (id-set sizes, not racy pre-counts), the
+   * correlated subqueries run once (not per updated row), and a failure-resume re-selects and
+   * re-applies exactly once (the batch is the last thing `processItem` does, so a `failure` means it
+   * didn't commit). NOTE: decay is inherently non-idempotent (×factor^N); once-per-day rests on the
+   * FSM's same-day-no-op, not this batch — the batch only prevents PARTIAL application.
+   *
+   * "active" is the SHARED lineage-aware definition everywhere (a future-valid fact counts as active:
+   * it corroborates, and it can itself decay/boost). Decay candidate = active + `created_at` older
+   * than the window + UNCORROBORATED (no active sibling with the same entity_slug+kind; a NULL slug
+   * never corroborates) + UNRECALLED since `recallCutoffMs`. Boost = active, recalled ≥ thresholds in
+   * the window, raise-only. The audit diff carries a CAPPED (`auditCap`) sample of ids + prior
+   * confidence / notability (reversibility's real path is `revive_fact`'s explicit arg, not this).
+   */
+  async hygieneSweep(input: {
+    now: string
+    createdCutoff: string
+    recallCutoffMs: number
+    windowCutoffMs: number
+    decayFactor: number
+    floor: number
+    toMedium: number
+    toHigh: number
+    auditCap: number
+  }): Promise<{ decayed: number; softExpired: number; boosted: number }> {
+    if (this.p.readOnly) throw new Error("dream hygiene denied: read-only principal")
+    const t = this.p.tenantId
+    const nowIso = input.now
+    // The shared lineage-aware "active" gate (future-valid = active), as a reusable fragment.
+    const active = (a: string): SQL =>
+      sql`${sql.raw(a)}.expired_at IS NULL
+        AND (${sql.raw(a)}.valid_until IS NULL OR ${sql.raw(a)}.valid_until > ${nowIso})
+        AND ${sql.raw(a)}.superseded_by IS NULL AND ${sql.raw(a)}.consolidated_into IS NULL`
+
+    // ── ID-FIRST selection ──────────────────────────────────────────────────────
+    const decayRows = await this.db.all<{ id: number; confidence: number }>(sql`
+      SELECT facts.id AS id, facts.confidence AS confidence FROM facts
+      WHERE facts.tenant_id = ${t} AND ${active("facts")}
+        AND facts.created_at < ${input.createdCutoff}
+        AND NOT EXISTS (SELECT 1 FROM facts c WHERE c.tenant_id = ${t} AND c.id <> facts.id
+          AND c.kind = facts.kind AND c.entity_slug = facts.entity_slug AND ${active("c")})
+        AND NOT EXISTS (SELECT 1 FROM memory_recall_traces r WHERE r.tenant_id = ${t}
+          AND r.target_id = CAST(facts.id AS TEXT) AND r.at >= ${input.recallCutoffMs})`)
+    const round4 = (n: number): number => Math.round(n * 10000) / 10000
+    const decayIds = decayRows.map((r) => r.id)
+    const softExpireIds = decayRows
+      .filter((r) => round4(r.confidence * input.decayFactor) < input.floor)
+      .map((r) => r.id)
+
+    const boostRows = await this.db.all<{ id: number; notability: string; cnt: number }>(sql`
+      SELECT facts.id AS id, facts.notability AS notability,
+        (SELECT COUNT(*) FROM memory_recall_traces r WHERE r.tenant_id = ${t}
+          AND r.target_id = CAST(facts.id AS TEXT) AND r.at >= ${input.windowCutoffMs}) AS cnt
+      FROM facts
+      WHERE facts.tenant_id = ${t} AND ${active("facts")} AND facts.notability <> 'high'
+        AND (SELECT COUNT(*) FROM memory_recall_traces r WHERE r.tenant_id = ${t}
+          AND r.target_id = CAST(facts.id AS TEXT) AND r.at >= ${input.windowCutoffMs}) >= ${input.toMedium}`)
+    const highIds = boostRows.filter((r) => r.cnt >= input.toHigh).map((r) => r.id)
+    const medIds = boostRows
+      .filter((r) => r.notability === "low" && r.cnt >= input.toMedium && r.cnt < input.toHigh)
+      .map((r) => r.id)
+
+    const decayed = decayIds.length
+    const softExpired = softExpireIds.length
+    const boosted = highIds.length + medIds.length
+    if (decayed === 0 && boosted === 0) return { decayed: 0, softExpired: 0, boosted: 0 }
+
+    // ── ONE atomic batch: decay → soft-expire → boost, all by id (chunked ≤90). ──
+    const CHUNK = 90
+    const chunks = <T>(xs: T[]): T[][] => {
+      const out: T[][] = []
+      for (let i = 0; i < xs.length; i += CHUNK) out.push(xs.slice(i, i + CHUNK))
+      return out
+    }
+    const statements: BatchStatement[] = []
+    for (const c of chunks(decayIds)) {
+      statements.push(
+        this.db
+          .update(facts)
+          .set({ confidence: sql`round(facts.confidence * ${input.decayFactor}, 4)` })
+          .where(and(eq(facts.tenantId, t), inArray(facts.id, c))),
+      )
+    }
+    for (const c of chunks(softExpireIds)) {
+      statements.push(
+        this.db
+          .update(facts)
+          .set({ validUntil: nowIso })
+          .where(and(eq(facts.tenantId, t), inArray(facts.id, c))),
+      )
+    }
+    for (const c of chunks(highIds)) {
+      statements.push(
+        this.db
+          .update(facts)
+          .set({ notability: "high" })
+          .where(and(eq(facts.tenantId, t), inArray(facts.id, c))),
+      )
+    }
+    for (const c of chunks(medIds)) {
+      statements.push(
+        this.db
+          .update(facts)
+          .set({ notability: "medium" })
+          .where(and(eq(facts.tenantId, t), inArray(facts.id, c))),
+      )
+    }
+    const diff = {
+      decayed,
+      softExpired,
+      boosted,
+      // Capped reversibility sample (full lists can be unbounded on a large sweep).
+      decaySample: decayRows.slice(0, input.auditCap).map((r) => ({
+        id: r.id,
+        priorConfidence: r.confidence,
+      })),
+      boostSample: boostRows.slice(0, input.auditCap).map((r) => ({
+        id: r.id,
+        priorNotability: r.notability,
+      })),
+      capped: decayRows.length > input.auditCap || boostRows.length > input.auditCap,
+    }
+    await batchWithAudit(this.db, this.p, statements, {
+      action: "dream.hygiene",
+      diff: JSON.stringify(diff),
+    })
+    return { decayed, softExpired, boosted }
   }
 }

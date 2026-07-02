@@ -26,6 +26,13 @@ export {
   dispatchDreamRun,
   isDuplicateInstanceError,
 } from "./dispatch"
+export {
+  createDreamHygieneServices,
+  type DreamHygieneOptions,
+  type DreamHygieneResult,
+  type DreamHygieneServices,
+  runDreamHygiene,
+} from "./hygiene"
 export { type DreamJobResult, type DreamJobSpec, type ProcessResult, runDreamJob } from "./job"
 export { type DreamAction, type DreamVerdict, type JudgeAi, judgeCluster } from "./judge"
 export {

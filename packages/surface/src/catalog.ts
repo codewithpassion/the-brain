@@ -68,11 +68,13 @@ import {
   RECALL_OP,
   REPROCESS_DOCUMENT_OP,
   RESOLVE_CONTRADICTION_OP,
+  REVIVE_FACT_OP,
   type RecallRequest,
   type RetrievalInput,
   recall,
   recordThinkSpend,
   resolveContradiction,
+  reviveFact,
   rollbackMemory,
   runBatchIngestCore,
   runSessionPromote,
@@ -211,6 +213,7 @@ const recallSurfaceOp: SurfaceOp = {
         kind: fact.kind,
         supersededBy: fact.supersededBy,
         consolidatedInto: fact.consolidatedInto,
+        validUntil: fact.validUntil,
       })),
     }
   },
@@ -237,6 +240,15 @@ const forgetFactSurfaceOp: SurfaceOp = {
     const { factId } = FORGET_FACT_OP.input.parse(input)
     await forgetFact(sessionServices(ctx), factId)
     return { factId, forgotten: true }
+  },
+}
+
+const reviveFactSurfaceOp: SurfaceOp = {
+  def: REVIVE_FACT_OP,
+  invoke: async (ctx, input) => {
+    const { factId, confidence } = REVIVE_FACT_OP.input.parse(input)
+    await reviveFact(sessionServices(ctx), factId, confidence)
+    return { factId, revived: true }
   },
 }
 
@@ -796,6 +808,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   getSessionContextSurfaceOp,
   recallSurfaceOp,
   forgetFactSurfaceOp,
+  reviveFactSurfaceOp,
   createSnapshotSurfaceOp,
   listSnapshotsSurfaceOp,
   dreamNowSurfaceOp,

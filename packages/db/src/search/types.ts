@@ -108,6 +108,9 @@ export interface Candidate {
   embeddingModel: string
   updatedAt: string
   armScore: number
+  /** Fact notability (D5), when the candidate is fact-bearing. Chunk candidates leave it undefined
+   *  → the notability boost is inert for content search (a no-op multiplier). */
+  notability?: string
 }
 
 /** Project a re-checked `ScopedChunk` into a ranked `Candidate` (the ONLY constructor). */

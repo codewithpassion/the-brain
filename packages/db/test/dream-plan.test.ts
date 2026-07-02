@@ -8,14 +8,16 @@ import { DREAM_KINDS, dreamStepPlan, reflectionRunId, worstStatus } from "../src
  */
 
 describe("dreamStepPlan — the shared kind→steps mapping", () => {
-  test("'all' → consolidation, reflection, digest in order, each with its derived run id", () => {
+  test("'all' → consolidation, reflection, hygiene, digest in order, each with its derived run id", () => {
     const steps = dreamStepPlan("dream-t-20260702", "all")
-    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection", "digest"])
+    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection", "hygiene", "digest"])
     expect(steps[0]?.runId).toBe("dream-t-20260702")
     expect(steps[1]?.runId).toBe(reflectionRunId("dream-t-20260702"))
     expect(steps[1]?.runId).toBe("dream-t-20260702-reflection")
+    // Hygiene (D5) runs after reflection, before digest, with its own `-hygiene` run row.
+    expect(steps[2]?.runId).toBe("dream-t-20260702-hygiene")
     // The digest is a terminal step keyed by the base run id (it has no run row of its own).
-    expect(steps[2]?.runId).toBe("dream-t-20260702")
+    expect(steps[3]?.runId).toBe("dream-t-20260702")
   })
 
   test("digest is present only for 'all' (not consolidation-only / reflection-only)", () => {
@@ -40,8 +42,14 @@ describe("dreamStepPlan — the shared kind→steps mapping", () => {
     expect(dreamStepPlan("base", "all").some((s) => s.group === "dedup")).toBe(false)
   })
 
+  test("'hygiene' → only the hygiene step (suffixed run id); IS part of 'all'", () => {
+    expect(dreamStepPlan("base", "hygiene")).toEqual([{ group: "hygiene", runId: "base-hygiene" }])
+    // Hygiene (D5, LLM-free) runs nightly as part of 'all'.
+    expect(dreamStepPlan("base", "all").some((s) => s.group === "hygiene")).toBe(true)
+  })
+
   test("DREAM_KINDS is the single kind set", () => {
-    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "dedup", "all"])
+    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "dedup", "hygiene", "all"])
   })
 })
 

@@ -878,6 +878,7 @@ export const recallBrowse = createServerFn({ method: "POST" })
       entitySlug?: string
       since?: string
       includeSuperseded?: boolean
+      includeSoftExpired?: boolean
       limit?: number
     }) => d,
   )
@@ -888,6 +889,7 @@ export const recallBrowse = createServerFn({ method: "POST" })
         ...(data.entitySlug ? { entitySlug: data.entitySlug } : {}),
         ...(data.since ? { since: data.since } : {}),
         ...(data.includeSuperseded ? { includeSuperseded: true } : {}),
+        ...(data.includeSoftExpired ? { includeSoftExpired: true } : {}),
         limit: data.limit ?? 100,
       })
       return { ok: true, data: out }

@@ -24,7 +24,7 @@
 
 import type { Principal } from "@brain/shared"
 import { GENERATION_MODEL } from "@brain/shared"
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, gt, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import { setMemory } from "../memory/ops"
@@ -34,11 +34,13 @@ import type { BrainDrizzle, ScopedDB } from "../scoped/db"
 import {
   DOC_ORIGIN_DREAM,
   notDreamOrigin,
+  notSoftExpired,
   scopePredicate,
   visibilityPredicate,
 } from "../scoped/predicates"
 import { estimateGenNeurons, MONTHLY_NEURON_CEILING, monthlyWindow } from "../search/ports"
 import { createScopedServices } from "../services"
+import { hygieneRunId } from "./plan"
 import { DreamRunStore } from "./runs"
 
 /** The addressable memory slug the daily digest is versioned at. */
@@ -83,6 +85,11 @@ interface DigestData {
   insightSlugs: string[]
   newDocs: number
   docSlugs: string[]
+  // hygiene (D5) — from the night's hygiene run stats + a world-only sample of what soft-expired.
+  decayed: number
+  softExpired: number
+  boosted: number
+  decayedSamples: string[]
 }
 
 const factVis = {
@@ -112,6 +119,8 @@ const renderFallback = (d: DigestData): string => {
     ...d.insightSlugs.map((s) => `- [[${s}]]`),
     `**Notable new documents:** ${d.newDocs}`,
     ...d.docSlugs.map((s) => `- [[${s}]]`),
+    `**Memory hygiene:** ${d.decayed} facts decayed (${d.softExpired} soft-expired), ${d.boosted} boosted`,
+    ...d.decayedSamples.map(quote),
   ]
   return lines.join("\n")
 }
@@ -168,6 +177,7 @@ export const runDreamDigest = async (
     const factWhere = and(
       eq(facts.tenantId, tenantId),
       isNull(facts.expiredAt),
+      notSoftExpired(facts.validUntil, new Date().toISOString()), // D5 decay soft-expire
       since ? gt(facts.createdAt, since) : undefined,
       scopePredicate(principal, facts.scope),
       visibilityPredicate(principal, factVis),
@@ -186,6 +196,18 @@ export const runDreamDigest = async (
       since ? gt(documents.createdAt, since) : undefined,
       scopePredicate(principal, documents.scope),
     )
+    // The night's hygiene run (its own `-hygiene` row) + a WORLD-ONLY sample of what soft-expired
+    // SINCE the last digest (windowed by the watermark, like every sibling read; scope-gated).
+    // NOTE: this fact read deliberately does NOT apply `notSoftExpired` — it LISTS the decayed ones.
+    const softExpiredWhere = and(
+      eq(facts.tenantId, tenantId),
+      isNull(facts.expiredAt),
+      isNotNull(facts.validUntil),
+      lte(facts.validUntil, now), // already soft-expired (not a future validity window)
+      since ? gt(facts.validUntil, since) : undefined, // decayed since the last digest
+      eq(facts.visibility, "world"),
+      scopePredicate(principal, facts.scope),
+    )
     const countExpr = sql<number>`count(*)`
 
     // Batch the independent reads.
@@ -198,6 +220,8 @@ export const runDreamDigest = async (
       insightRows,
       docCount,
       docRows,
+      hygieneRunRows,
+      decayedSampleRows,
     ] = await Promise.all([
       raw.select({ n: countExpr }).from(facts).where(factWhere),
       raw
@@ -234,6 +258,16 @@ export const runDreamDigest = async (
         .where(docWhere)
         .orderBy(desc(documents.createdAt))
         .limit(SAMPLE),
+      raw
+        .select({ stats: dreamRuns.stats })
+        .from(dreamRuns)
+        .where(and(eq(dreamRuns.tenantId, tenantId), eq(dreamRuns.id, hygieneRunId(opts.runId)))),
+      raw
+        .select({ fact: facts.fact })
+        .from(facts)
+        .where(softExpiredWhere)
+        .orderBy(desc(facts.validUntil))
+        .limit(SAMPLE),
     ])
 
     let merged = 0
@@ -244,6 +278,21 @@ export const runDreamDigest = async (
       superseded = typeof s.superseded === "number" ? s.superseded : 0
     } catch {
       // ignore malformed consolidation stats
+    }
+    let decayed = 0
+    let softExpired = 0
+    let boosted = 0
+    try {
+      const h = JSON.parse(hygieneRunRows[0]?.stats ?? "{}") as {
+        factsDecayed?: number
+        factsSoftExpired?: number
+        factsBoosted?: number
+      }
+      decayed = typeof h.factsDecayed === "number" ? h.factsDecayed : 0
+      softExpired = typeof h.factsSoftExpired === "number" ? h.factsSoftExpired : 0
+      boosted = typeof h.factsBoosted === "number" ? h.factsBoosted : 0
+    } catch {
+      // ignore malformed hygiene stats
     }
 
     const data: DigestData = {
@@ -257,6 +306,10 @@ export const runDreamDigest = async (
       insightSlugs: insightRows.map((r) => r.slug),
       newDocs: docCount[0]?.n ?? 0,
       docSlugs: docRows.map((r) => r.slug),
+      decayed,
+      softExpired,
+      boosted,
+      decayedSamples: decayedSampleRows.map((r) => r.fact),
     }
 
     const nothing =
@@ -265,7 +318,9 @@ export const runDreamDigest = async (
       data.newDocs === 0 &&
       data.contradictions === 0 &&
       data.merged === 0 &&
-      data.superseded === 0
+      data.superseded === 0 &&
+      data.decayed === 0 &&
+      data.boosted === 0
 
     let title = EMPTY_TITLE
     let body = EMPTY_BODY

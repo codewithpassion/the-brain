@@ -97,5 +97,9 @@ export const memoryRecallTraces = sqliteTable(
     clientId: text("client_id").notNull(), // which AI client surfaced it
     at: integer("at").notNull(), // epoch-ms (no default)
   },
-  (t) => [index("recall_traces_tenant_at").on(t.tenantId, desc(t.at))],
+  (t) => [
+    index("recall_traces_tenant_at").on(t.tenantId, desc(t.at)),
+    // Dream hygiene (D5): per-fact recall lookups (`target_id = CAST(fact.id AS TEXT)`, windowed by `at`).
+    index("recall_traces_target").on(t.tenantId, t.targetId, t.at),
+  ],
 )

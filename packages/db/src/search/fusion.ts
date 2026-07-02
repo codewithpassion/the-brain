@@ -10,12 +10,22 @@
  * Same chunk appearing in both arms fuses by `chunkId` (a stable nanoid uniquely identifies
  * the chunk, so it also subsumes gbrain's `${source_id}:${slug}:${chunk_id}` key).
  */
-import { RRF_K, TITLE_BOOST, TRUST_BOOST } from "@brain/shared"
+import { NOTABILITY_BOOST, RRF_K, TITLE_BOOST, TRUST_BOOST } from "@brain/shared"
 import type { Candidate, FusedCandidate } from "./types"
 
 /** Trust multiplier from the hydrated row's sidecar trust grade (default `evidence` = 1.0). */
 const trustBoost = (trustGrade: string): number =>
   TRUST_BOOST[trustGrade as keyof typeof TRUST_BOOST] ?? 1.0
+
+/**
+ * Notability multiplier (Dream hygiene D5). A candidate WITHOUT notability (every chunk candidate
+ * today) → 1.0, so this is inert for content search until a fact-bearing arm supplies notability;
+ * `medium` is also 1.0. Exported for a direct unit test of the flagged/tunable weight.
+ */
+export const notabilityBoost = (notability: string | undefined): number =>
+  notability === undefined
+    ? 1.0
+    : (NOTABILITY_BOOST[notability as keyof typeof NOTABILITY_BOOST] ?? 1.0)
 
 /** Lowercase content tokens (≥1 char) — the unit both title matching and fusion compare. */
 const tokens = (text: string): string[] =>
@@ -48,16 +58,23 @@ export const isTitlePhraseMatch = (query: string, title: string | null): boolean
   return false
 }
 
+/** Fusion knobs. `weighNotability` (default OFF) opts a surface into the D5 notability boost — the
+ *  future fact-bearing arm must set it explicitly; content search leaves it off (the plan's "flagged"). */
+export interface FusionOptions {
+  weighNotability?: boolean
+}
+
 /**
  * Fuse the per-arm ranked candidate lists. Each arm is consumed in its given order (the arm
  * is responsible for ranking); position `r` (0-based) contributes `1/(K + r + 1)`. The
- * fused score is then normalized by its max and multiplied by the trust + title boosts.
- * Output is sorted by final score, descending.
+ * fused score is then normalized by its max and multiplied by the trust + title boosts (and, when
+ * `opts.weighNotability`, the notability boost). Output is sorted by final score, descending.
  */
 export const rrfFusion = (
   arms: Candidate[][],
   query: string,
   k: number = RRF_K,
+  opts: FusionOptions = {},
 ): FusedCandidate[] => {
   const fused = new Map<string, { candidate: Candidate; raw: number }>()
   for (const arm of arms) {
@@ -84,7 +101,11 @@ export const rrfFusion = (
   for (const { candidate, raw } of fused.values()) {
     const normalized = maxRaw > 0 ? raw / maxRaw : 0
     const titleFactor = isTitlePhraseMatch(query, candidate.title) ? TITLE_BOOST : 1.0
-    out.push({ candidate, score: normalized * trustBoost(candidate.trustGrade) * titleFactor })
+    const notabilityFactor = opts.weighNotability ? notabilityBoost(candidate.notability) : 1.0
+    out.push({
+      candidate,
+      score: normalized * trustBoost(candidate.trustGrade) * titleFactor * notabilityFactor,
+    })
   }
   return out.sort((a, b) => b.score - a.score)
 }

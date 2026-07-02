@@ -32,6 +32,19 @@ export const TRUST_BOOST = {
   draft: 0.6,
 } as const satisfies Record<TrustGrade, number>
 
+/**
+ * Multiplicative NOTABILITY weighting (Dream hygiene D5) — applied at rank time to a candidate that
+ * carries a fact `notability` (raised by the hygiene boost / lowered implicitly by decay). TUNABLE.
+ * `medium` is neutral (1.0) so this is a no-op for the common tier; chunk candidates carry NO
+ * notability, so it is inert for content search today (effectively OFF) until a fact-bearing arm
+ * supplies it — the flagged/minimal weight the D5 plan asked for.
+ */
+export const NOTABILITY_BOOST = {
+  high: 1.15,
+  medium: 1.0,
+  low: 0.9,
+} as const satisfies Record<"high" | "medium" | "low", number>
+
 // ── Visibility (access) — PRD §3 / §7.5 ──────────────────────────────────────
 export const VISIBILITIES = ["private", "team", "world"] as const
 export const VisibilitySchema = z.enum(VISIBILITIES)

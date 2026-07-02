@@ -37,6 +37,7 @@ export {
   CapabilitySchema,
   ENTITY_VISIBILITIES,
   EntityVisibilitySchema,
+  NOTABILITY_BOOST,
   ROLES,
   RoleSchema,
   TRUST_BOOST,

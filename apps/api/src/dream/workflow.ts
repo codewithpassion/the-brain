@@ -13,6 +13,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import {
   createDreamDedupServices,
   createDreamDigestServices,
+  createDreamHygieneServices,
   createDreamReflectServices,
   createDreamServices,
   createScopedServices,
@@ -22,6 +23,7 @@ import {
   runDreamConsolidation,
   runDreamDedup,
   runDreamDigest,
+  runDreamHygiene,
   runDreamReflection,
   worstStatus,
 } from "@brain/db"
@@ -107,6 +109,22 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
               }
             })
           }
+          break
+        }
+        case "hygiene": {
+          // LLM-free bulk-SQL sweep (fact decay + notability) — one durable step, counts-only out.
+          const h = await step.do("dream-hygiene", async () => {
+            try {
+              const res = await runDreamHygiene(createDreamHygieneServices(this.env, principal), {
+                runId: planStep.runId,
+              })
+              return { status: res.status }
+            } catch (err) {
+              console.error("dream hygiene failed", planStep.runId, err)
+              return { status: "failure" as DreamRunStatus }
+            }
+          })
+          statuses.push(h.status)
           break
         }
         case "digest": {

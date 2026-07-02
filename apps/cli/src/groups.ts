@@ -46,6 +46,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   // facts / governed memory
   recall: "facts",
   forget_fact: "facts",
+  revive_fact: "facts",
   memory_review: "facts",
   list_pending_reviews: "facts",
   resolve_contradiction: "facts",

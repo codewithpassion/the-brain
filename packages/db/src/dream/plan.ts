@@ -8,18 +8,18 @@
 import type { DreamRunStatus } from "./runs"
 
 /** Which dream step groups to run. `dedup` is a STANDALONE sweep (not part of `all`). */
-export type DreamKind = "consolidation" | "reflection" | "dedup" | "all"
+export type DreamKind = "consolidation" | "reflection" | "dedup" | "hygiene" | "all"
 
 /** The `kind` enum values — one source (op zod + dispatch default read from here). */
-export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "all"] as const
+export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "hygiene", "all"] as const
 
 /**
- * One step group in a dream run. `consolidation`/`reflection` drive a `dream_runs` row keyed by
- * `runId`; `digest` is a terminal one-shot step (no run row — it writes `agent/digest/daily`), so
- * its `runId` is the base run id it summarizes.
+ * One step group in a dream run. `consolidation`/`reflection`/`hygiene` drive a `dream_runs` row
+ * keyed by `runId`; `digest` is a terminal one-shot step (no run row — it writes
+ * `agent/digest/daily`), so its `runId` is the base run id it summarizes.
  */
 export interface DreamStep {
-  group: "consolidation" | "reflection" | "digest" | "dedup"
+  group: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene"
   runId: string
 }
 
@@ -27,23 +27,34 @@ export interface DreamStep {
 export const reflectionRunId = (baseRunId: string): string => `${baseRunId}-reflection`
 /** The dedup run id — the dispatch run id + a `-dedup` suffix (its own `dream_runs` row). */
 export const dedupRunId = (baseRunId: string): string => `${baseRunId}-dedup`
+/** The hygiene run id — the dispatch run id + a `-hygiene` suffix (its own `dream_runs` row). */
+export const hygieneRunId = (baseRunId: string): string => `${baseRunId}-hygiene`
 
 /**
  * The ordered step groups for a `kind`, each with its run id derived from the SINGLE dispatch
  * `baseRunId`. Consolidation first (reflection reads consolidated facts), then reflection, then —
  * for the full daily run (`kind='all'`) only — the digest that summarizes both.
  *
- * `dedup` is a STANDALONE sweep (`kind='dedup'`, one step) — deliberately NOT part of `all` yet:
- * it is graph hygiene over the whole entity set, independent of a night's new content, so it runs
- * on its own cadence via `dream_now kind='dedup'`. The nightly `all` can adopt it later.
+ * `dedup` is a STANDALONE sweep (`kind='dedup'`, one step) — deliberately NOT part of `all`: it is
+ * graph hygiene over the whole entity set, independent of a night's new content, so it runs on its
+ * own cadence via `dream_now kind='dedup'`.
+ *
+ * `hygiene` (D5 fact decay + notability) IS part of nightly `all` — it's LLM-free/cheap and keeps
+ * hot memory fresh every night. It runs AFTER consolidation/reflection (so it decays over the
+ * post-consolidation fact set) and BEFORE digest (so the digest can report what decayed from this
+ * run's stats). It's also available standalone via `dream_now kind='hygiene'`.
  */
 export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] => {
   if (kind === "dedup") return [{ group: "dedup", runId: dedupRunId(baseRunId) }]
+  if (kind === "hygiene") return [{ group: "hygiene", runId: hygieneRunId(baseRunId) }]
   const steps: DreamStep[] = []
   if (kind !== "reflection") steps.push({ group: "consolidation", runId: baseRunId })
   if (kind !== "consolidation")
     steps.push({ group: "reflection", runId: reflectionRunId(baseRunId) })
-  if (kind === "all") steps.push({ group: "digest", runId: baseRunId })
+  if (kind === "all") {
+    steps.push({ group: "hygiene", runId: hygieneRunId(baseRunId) })
+    steps.push({ group: "digest", runId: baseRunId })
+  }
   return steps
 }
 

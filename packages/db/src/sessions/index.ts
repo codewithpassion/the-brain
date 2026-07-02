@@ -28,8 +28,10 @@ export {
   LIST_SNAPSHOTS_OP,
   listSnapshots,
   RECALL_OP,
+  REVIVE_FACT_OP,
   recall,
   registerSessionOps,
+  reviveFact,
   SESSION_OPS,
 } from "./ops"
 export type { SessionPromoteParams, SessionPromoteResult } from "./promote"

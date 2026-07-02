@@ -164,12 +164,12 @@ describe("dream digest + resolve canary (D3) — real local D1 in workerd", () =
       visibility: "private",
       userId: "someoneElse",
     })
-    // A user principal dispatched it, but the digest runs as system (world-only).
+    // The digest reads world-only (system principal). Uses a gen STUB (→ null → deterministic
+    // fallback body) so the liveness assertion below isn't a live-LLM flake; the SECURITY assertion
+    // is structural (a `private` fact is never selected into the world-only prompt in the first place).
     await runDreamDigest(
-      createDreamDigestServices(env_, admin("dgP", { userId: "u", role: "member" })),
-      {
-        runId: "dg-p-1",
-      },
+      digestServices("dgP", async () => null),
+      { runId: "dg-p-1" },
     )
     const body = await digestBody("dgP")
     expect(body).toContain("public pricing info")

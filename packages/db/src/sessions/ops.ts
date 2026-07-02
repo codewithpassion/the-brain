@@ -192,6 +192,12 @@ export const RECALL_OP = defineOp({
       .describe(
         "Include facts the Dream engine superseded or consolidated (hidden by default). Set true to see lineage.",
       ),
+    includeSoftExpired: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Include facts the Dream engine decayed below the confidence floor (soft-expired via valid_until, hidden by default). Set true to see + revive them.",
+      ),
     limit: z
       .number()
       .int()
@@ -208,6 +214,7 @@ export const RECALL_OP = defineOp({
         kind: z.string(),
         supersededBy: z.number().nullable(),
         consolidatedInto: z.number().nullable(),
+        validUntil: z.string().nullable(),
       }),
     ),
   }),
@@ -227,6 +234,30 @@ export const FORGET_FACT_OP = defineOp({
   output: z.object({ factId: z.number(), forgotten: z.boolean() }),
 })
 
+/** `revive_fact` — undo a Dream-hygiene soft-expire (D5 reversibility). */
+export const REVIVE_FACT_OP = defineOp({
+  name: "revive_fact",
+  description:
+    "Revive a fact the Dream engine decayed below the confidence floor (soft-expired via valid_until). " +
+    "Clears valid_until so it recalls again and restores its confidence. Find soft-expired facts with recall(includeSoftExpired=true). " +
+    "Does NOT un-forget a hard-forgotten (expired_at) fact.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    factId: z
+      .number()
+      .int()
+      .describe("The integer fact id (from a recall with includeSoftExpired)."),
+    confidence: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Confidence to restore (0–1); defaults to a sane above-floor value when omitted."),
+  }),
+  output: z.object({ factId: z.number(), revived: z.boolean() }),
+})
+
 /** Every session op CONTRACT (registered handler-free, mirroring `SEARCH_OPS`). */
 export const SESSION_OPS: readonly AnyOpDef[] = [
   CAPTURE_TURN_OP,
@@ -234,6 +265,7 @@ export const SESSION_OPS: readonly AnyOpDef[] = [
   GET_SESSION_CONTEXT_OP,
   RECALL_OP,
   FORGET_FACT_OP,
+  REVIVE_FACT_OP,
   CREATE_SNAPSHOT_OP,
   LIST_SNAPSHOTS_OP,
 ]
@@ -383,6 +415,8 @@ export interface RecallRequest {
   query?: string
   /** Include Dream-superseded/consolidated facts (default false). */
   includeSuperseded?: boolean
+  /** Include D5-decayed (soft-expired) facts (default false). */
+  includeSoftExpired?: boolean
   limit?: number
 }
 
@@ -399,8 +433,13 @@ export const recall = async (
 ): Promise<RecalledFact[]> => {
   const limit = req.limit ?? 50
   if (req.query !== undefined && req.query.trim().length > 0) {
-    const ids = await services.db.ftsFactIds(req.query, limit, req.includeSuperseded ?? false)
-    return services.sessions.hydrateFacts(ids, req.includeSuperseded)
+    const ids = await services.db.ftsFactIds(
+      req.query,
+      limit,
+      req.includeSuperseded ?? false,
+      req.includeSoftExpired ?? false,
+    )
+    return services.sessions.hydrateFacts(ids, req.includeSuperseded, req.includeSoftExpired)
   }
   return services.sessions.recall({
     limit,
@@ -409,10 +448,20 @@ export const recall = async (
     ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
     ...(req.grep !== undefined ? { grep: req.grep } : {}),
     ...(req.includeSuperseded !== undefined ? { includeSuperseded: req.includeSuperseded } : {}),
+    ...(req.includeSoftExpired !== undefined ? { includeSoftExpired: req.includeSoftExpired } : {}),
   })
 }
 
 /** Soft-expire a fact (`forget_fact`). */
 export const forgetFact = async (services: SessionServices, factId: number): Promise<void> => {
   await services.sessions.forgetFact(factId)
+}
+
+/** Revive a Dream-hygiene-decayed fact (`revive_fact`, D5). */
+export const reviveFact = async (
+  services: SessionServices,
+  factId: number,
+  confidence?: number,
+): Promise<void> => {
+  await services.sessions.reviveFact(factId, confidence)
 }

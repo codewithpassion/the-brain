@@ -13,7 +13,7 @@
  * unconditionally on every query — these are ADDED on top of it.
  */
 import type { Principal } from "@brain/shared"
-import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm"
+import { and, eq, gt, inArray, isNull, or, type SQL, sql } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 
 /** The three columns a visibility-bearing table exposes to the gate. */
@@ -82,6 +82,29 @@ export const activeFactPredicate = (
   includeSuperseded?: boolean,
 ): SQL | undefined =>
   includeSuperseded ? undefined : and(isNull(cols.supersededBy), isNull(cols.consolidatedInto))
+
+/**
+ * SOFT-EXPIRY gate (Dream hygiene D5). A fact whose confidence decays below the floor gets
+ * `valid_until` set — a REVERSIBLE soft-expire (clear the column to revive), DISTINCT from the
+ * `expired_at` hard-forget. The PRD reserved `valid_until` for exactly this ("active = valid_until
+ * null/future"); until D5 nothing read or wrote it, so wiring this alongside every `expired_at IS
+ * NULL` read is a no-op on existing data. Soft-expired facts stay hidden UNCONDITIONALLY — this is a
+ * SEPARATE lineage axis from supersede/consolidate: deliberately NOT coupled to `includeSuperseded`.
+ * `reveal` (a SESSION-SCOPED recall — lineage, not loss, since session-context emits no traces — OR
+ * the explicit `includeSoftExpired` flag) returns `undefined` so those paths surface a decayed fact.
+ * Pass a single `nowIso` per query so a read is internally consistent. `notSoftExpiredSql` is the
+ * raw-SQL twin for the hand-written `facts_fts` re-check.
+ */
+export const notSoftExpired = (
+  validUntilColumn: AnySQLiteColumn,
+  nowIso: string,
+  reveal?: boolean,
+): SQL | undefined =>
+  reveal ? undefined : or(isNull(validUntilColumn), gt(validUntilColumn, nowIso))
+
+/** Raw-SQL twin of `notSoftExpired` (no reveal — the caller gates it): `(<alias>.valid_until IS NULL OR <alias>.valid_until > now)`. */
+export const notSoftExpiredSql = (alias: string, nowIso: string): SQL =>
+  sql`(${sql.raw(alias)}.valid_until IS NULL OR ${sql.raw(alias)}.valid_until > ${nowIso})`
 
 /** The `documents.origin` marker for Dream-generated insight documents (D2 anti-loop D-i2). */
 export const DOC_ORIGIN_DREAM = "dream" as const

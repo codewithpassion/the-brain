@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { TITLE_BOOST } from "@brain/shared"
-import { isTitlePhraseMatch, rrfFusion } from "../src/search/fusion"
+import { NOTABILITY_BOOST, TITLE_BOOST } from "@brain/shared"
+import { isTitlePhraseMatch, notabilityBoost, rrfFusion } from "../src/search/fusion"
 import type { Candidate } from "../src/search/types"
 import { toCandidate } from "../src/search/types"
 
@@ -81,6 +81,37 @@ describe("title boost (×TITLE_BOOST)", () => {
     const fused = rrfFusion([armA, armB], "alpha beta")
     expect(fused[0]?.candidate.chunkId).toBe("titled")
     expect(score(fused, "titled") / score(fused, "plain")).toBeCloseTo(TITLE_BOOST, 5)
+  })
+})
+
+describe("notability boost (D5, NOTABILITY_BOOST) — flagged/tunable, inert for chunks", () => {
+  test("a candidate WITHOUT notability (every chunk today) → 1.0 (no-op, effectively OFF for search)", () => {
+    expect(notabilityBoost(undefined)).toBe(1.0)
+  })
+  test("medium is neutral; high raises; low lowers", () => {
+    expect(notabilityBoost("medium")).toBe(1.0)
+    expect(notabilityBoost("high")).toBe(NOTABILITY_BOOST.high)
+    expect(notabilityBoost("low")).toBe(NOTABILITY_BOOST.low)
+    expect(notabilityBoost("high")).toBeGreaterThan(1.0)
+    expect(notabilityBoost("low")).toBeLessThan(1.0)
+  })
+  test("an unknown notability value is treated as neutral (1.0)", () => {
+    expect(notabilityBoost("bogus")).toBe(1.0)
+  })
+  test("OFF by default: notability does NOT affect ranking unless weighNotability is set", () => {
+    const armA = [{ ...cand("hi"), notability: "high" }]
+    const armB = [{ ...cand("lo"), notability: "low" }]
+    const fused = rrfFusion([armA, armB], "nomatch") // no opts → flag off
+    // Equal position in their own arm, no boost applied → equal scores.
+    expect(score(fused, "hi")).toBeCloseTo(score(fused, "lo"), 10)
+  })
+
+  test("ON: a high-notability candidate outranks an equal-position medium one (weighNotability:true)", () => {
+    const armA = [{ ...cand("hi"), notability: "high" }]
+    const armB = [{ ...cand("mid"), notability: "medium" }]
+    const fused = rrfFusion([armA, armB], "nomatch", undefined, { weighNotability: true })
+    expect(fused[0]?.candidate.chunkId).toBe("hi")
+    expect(score(fused, "hi") / score(fused, "mid")).toBeCloseTo(NOTABILITY_BOOST.high, 5)
   })
 })
 

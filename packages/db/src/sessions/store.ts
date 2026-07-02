@@ -43,7 +43,12 @@ import {
   sessionTurns,
 } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-import { activeFactPredicate, scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import {
+  activeFactPredicate,
+  notSoftExpired,
+  scopePredicate,
+  visibilityPredicate,
+} from "../scoped/predicates"
 
 /** A runnable Drizzle insert/update statement for atomic batch execution. */
 type BatchStatement = BatchItem<"sqlite">
@@ -133,6 +138,8 @@ export interface RecalledFact {
   supersededBy: number | null
   /** Lineage: the consolidated fact this one was merged into (Dream engine), else null. */
   consolidatedInto: number | null
+  /** Soft-expire watermark (Dream hygiene D5): non-null = decayed below floor; drives `revive_fact`. */
+  validUntil: string | null
 }
 
 /** Dispatch shape for `recall` (port of gbrain's recall dispatcher, §8.4). */
@@ -146,6 +153,9 @@ export interface RecallQuery {
   limit?: number
   /** Include superseded/consolidated facts (Dream engine lineage). Default false. */
   includeSuperseded?: boolean
+  /** Include D5-decayed (soft-expired, `valid_until` set) facts. Default false. Session-scoped recall
+   *  reveals them regardless (lineage). */
+  includeSoftExpired?: boolean
 }
 
 /** The JSON shape stored in `brain_snapshots.manifest` (§8.5). */
@@ -488,6 +498,46 @@ export class SessionStore {
     await this.commitBatch([update, this.auditStatement("fact.forget", String(factId))])
   }
 
+  /**
+   * Revive a Dream-hygiene-decayed fact (`revive_fact`, D5 reversibility). Clears `valid_until` (the
+   * soft-expire watermark) so the fact is recallable again, and — since decay lowered its confidence
+   * over prior runs and the audit only holds the near-floor prior — restores confidence to
+   * `confidence` (caller-supplied) or a sane default.
+   *
+   * AUTHORITY (deliberately BROADER than `forgetFact`, which is strictly author/team even for admins):
+   * revive is RESTORATIVE, not destructive, and hygiene decays facts regardless of author, so the
+   * typical reviver is the tenant operator — authors/teammates revive their own; owner/admin revive
+   * ANY fact in-tenant (mirrors `assertMayPromote`'s role override). Drop-don't-error on a fact the
+   * gate doesn't match. Audited in-batch. Only touches SOFT-expired rows (`valid_until` set,
+   * `expired_at` null) — never un-forgets a hard-forgotten fact.
+   */
+  async reviveFact(factId: number, confidence?: number): Promise<void> {
+    if (this.p.readOnly) throw new Error("revive_fact denied: read-only principal")
+    const isAdmin = this.p.role === "owner" || this.p.role === "admin"
+    const teamClause =
+      this.p.teamIds.length > 0
+        ? and(isNotNull(facts.teamId), inArray(facts.teamId, [...this.p.teamIds]))
+        : undefined
+    // Admin/owner: no authorship gate (any in-tenant fact). Otherwise author OR teammate.
+    const ownership = isAdmin
+      ? undefined
+      : (or(eq(facts.userId, this.p.userId), teamClause) ?? eq(facts.userId, this.p.userId))
+    const restored = Math.min(1, Math.max(0, confidence ?? SessionStore.REVIVE_DEFAULT_CONFIDENCE))
+    const update = this.db
+      .update(facts)
+      .set({ validUntil: null, confidence: restored })
+      .where(
+        and(
+          eq(facts.id, factId),
+          eq(facts.tenantId, this.p.tenantId),
+          isNotNull(facts.validUntil), // only a soft-expired fact
+          isNull(facts.expiredAt), // never resurrect a hard-forgotten one
+          ownership,
+        ),
+      )
+    await this.commitBatch([update, this.auditStatement("fact.revive", String(factId))])
+  }
+
   // ── HOT-MEMORY RECALL (§8.4) — every read ANDs the SHARED visibility predicate ───────
 
   /** The projection shared by every recall dispatch. */
@@ -504,9 +554,13 @@ export class SessionStore {
         source: facts.source,
         supersededBy: facts.supersededBy,
         consolidatedInto: facts.consolidatedInto,
+        validUntil: facts.validUntil,
       })
       .from(facts)
   }
+
+  /** Confidence a revived fact is restored to when the caller supplies none (above the 0.30 floor). */
+  private static readonly REVIVE_DEFAULT_CONFIDENCE = 0.5
 
   /** The lineage columns the shared `activeFactPredicate` reads. */
   private static readonly lineageCols = {
@@ -527,11 +581,16 @@ export class SessionStore {
    * session's own promoted facts even after a later night consolidates them (D-i5 lineage, not loss).
    */
   async recall(query: RecallQuery): Promise<RecalledFact[]> {
+    // Two DISTINCT reveal axes (do not conflate): supersede/consolidate lineage is revealed by
+    // includeSuperseded||sessionId; soft-expiry (D5) is a separate axis revealed by sessionId (a
+    // session's own decayed facts are lineage, not loss) OR the explicit includeSoftExpired flag.
     const showAll = query.includeSuperseded === true || query.sessionId !== undefined
+    const revealSoftExpired = query.sessionId !== undefined || query.includeSoftExpired === true
     const where = and(
       eq(facts.tenantId, this.p.tenantId),
       isNull(facts.expiredAt),
       activeFactPredicate(SessionStore.lineageCols, showAll),
+      notSoftExpired(facts.validUntil, new Date().toISOString(), revealSoftExpired), // D5
       scopePredicate(this.p, facts.scope),
       visibilityPredicate(this.p, visibilityCols),
       query.entitySlug ? eq(facts.entitySlug, query.entitySlug) : undefined,
@@ -550,7 +609,11 @@ export class SessionStore {
    * SAME `tenant_id` + `scopePredicate` + `visibilityPredicate` re-check the FTS already applied
    * runs again here — defense-in-depth, drop-don't-error (an out-of-visibility id is absent).
    */
-  async hydrateFacts(ids: number[], includeSuperseded?: boolean): Promise<RecalledFact[]> {
+  async hydrateFacts(
+    ids: number[],
+    includeSuperseded?: boolean,
+    includeSoftExpired?: boolean,
+  ): Promise<RecalledFact[]> {
     if (ids.length === 0) return []
     return this.recallSelect()
       .where(
@@ -559,6 +622,7 @@ export class SessionStore {
           inArray(facts.id, ids),
           isNull(facts.expiredAt),
           activeFactPredicate(SessionStore.lineageCols, includeSuperseded),
+          notSoftExpired(facts.validUntil, new Date().toISOString(), includeSoftExpired), // D5
           scopePredicate(this.p, facts.scope),
           visibilityPredicate(this.p, visibilityCols),
         ),

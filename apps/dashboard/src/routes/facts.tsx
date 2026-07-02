@@ -52,7 +52,8 @@ function FactsPage() {
         ...(q ? { query: q } : {}),
         ...(e ? { entitySlug: e } : {}),
         ...(s ? { since: s } : {}),
-        ...(inc ? { includeSuperseded: true } : {}),
+        // One "show hidden" toggle reveals BOTH lineage axes (op flags stay separate — D5).
+        ...(inc ? { includeSuperseded: true, includeSoftExpired: true } : {}),
         limit: 100,
       },
     })
