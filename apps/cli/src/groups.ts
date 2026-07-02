@@ -22,6 +22,10 @@ const GROUP_BY_OP: Record<string, Group> = {
   think: "search",
   list_documents: "search",
   ingest_document: "search",
+  get_document: "search",
+  update_document: "search",
+  delete_document: "search",
+  reprocess_document: "search",
   // graph
   traverse_graph: "graph",
   get_links: "graph",
@@ -29,6 +33,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   get_tags: "graph",
   get_timeline: "graph",
   list_entities: "graph",
+  list_entity_edges: "graph",
   find_orphans: "graph",
   search_entities: "graph",
   // session
@@ -42,6 +47,14 @@ const GROUP_BY_OP: Record<string, Group> = {
   recall: "facts",
   forget_fact: "facts",
   memory_review: "facts",
+  memory_set: "facts",
+  memory_get: "facts",
+  memory_list: "facts",
+  memory_history: "facts",
+  memory_rollback: "facts",
+  memory_forget: "facts",
+  okf_export: "facts",
+  okf_import: "facts",
   // key (API-key minting)
   mint_api_key: "key",
   // admin / governance
@@ -52,6 +65,10 @@ const GROUP_BY_OP: Record<string, Group> = {
   list_audit: "admin",
   list_backfill_runs: "admin",
   get_stats: "admin",
+  vault_writeback: "admin",
+  create_vault_credential: "admin",
+  list_vault_credentials: "admin",
+  revoke_vault_credential: "admin",
 }
 
 /** The help group an op belongs to, or `undefined` if unmapped (a new op — caught by the test). */

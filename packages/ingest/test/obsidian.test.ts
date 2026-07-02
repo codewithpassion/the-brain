@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { MAX_CHUNKS_PER_DOC } from "@brain/shared"
-import { createObsidianImporter, type VaultR2 } from "../src/sources/obsidian"
 import { runImporterContract } from "../src/sources/contract"
+import { createObsidianImporter, type VaultR2 } from "../src/sources/obsidian"
 
 /**
  * Obsidian vault importer (Phase 1). Tests cover:
@@ -51,7 +51,7 @@ describe("Obsidian importer — folder→path mapping", () => {
     ])
     const sessions = await runImporterContract(createObsidianImporter(vault))
     expect(sessions).toHaveLength(1)
-    const item = sessions[0] as typeof sessions[0] & { path: string; tags: string[] }
+    const item = sessions[0] as (typeof sessions)[0] & { path: string; tags: string[] }
     expect(item.sourceSessionId).toBe("inbox")
     // Extra fields carried through runImporterContract (typed via cast)
     expect((item as unknown as Record<string, unknown>).path).toBe("/")
@@ -68,7 +68,7 @@ describe("Obsidian importer — folder→path mapping", () => {
     ])
     const sessions = await runImporterContract(createObsidianImporter(vault))
     expect(sessions).toHaveLength(1)
-    const item = sessions[0]!
+    const item = sessions[0]
     expect(item.sourceSessionId).toBe("Projects/Acme/notes")
     expect((item as unknown as Record<string, unknown>).path).toBe("/Projects/Acme")
     expect(item.client).toBe("obsidian")
@@ -89,9 +89,7 @@ describe("Obsidian importer — folder→path mapping", () => {
 describe("Obsidian importer — frontmatter tag extraction", () => {
   test("flow array tags: tags: [a, b, c]", async () => {
     const content = `---\ntitle: My Note\ntags: [sales, revenue, q1]\n---\n\nBody here.`
-    const vault = makeVault(TENANT, [
-      { key: `${TENANT}/vault/note.md`, etag: "e1", content },
-    ])
+    const vault = makeVault(TENANT, [{ key: `${TENANT}/vault/note.md`, etag: "e1", content }])
     const sessions = await runImporterContract(createObsidianImporter(vault))
     expect((sessions[0] as unknown as Record<string, unknown>).tags).toEqual([
       "sales",
@@ -102,9 +100,7 @@ describe("Obsidian importer — frontmatter tag extraction", () => {
 
   test("block sequence tags", async () => {
     const content = `---\ntitle: Report\ntags:\n  - finance\n  - 2026\n---\n\nBody.`
-    const vault = makeVault(TENANT, [
-      { key: `${TENANT}/vault/report.md`, etag: "e2", content },
-    ])
+    const vault = makeVault(TENANT, [{ key: `${TENANT}/vault/report.md`, etag: "e2", content }])
     const sessions = await runImporterContract(createObsidianImporter(vault))
     expect((sessions[0] as unknown as Record<string, unknown>).tags).toEqual(["finance", "2026"])
   })
@@ -306,13 +302,13 @@ describe("Obsidian importer — cursor resume + batching (FIX 3)", () => {
     expect(begin.cursor).not.toBeNull()
 
     // First batch: must be ≤ 25 items with a non-null next cursor (more remain).
-    const batch1 = await importer.nextBatch(begin.cursor!)
+    const batch1 = await importer.nextBatch(begin.cursor)
     expect(batch1.items.length).toBeGreaterThan(1) // multi-item (not the old one-at-a-time)
     expect(batch1.items.length).toBeLessThanOrEqual(25)
     expect(batch1.nextCursor).not.toBeNull() // 5 more remain
 
     // Second batch drains the rest.
-    const batch2 = await importer.nextBatch(batch1.nextCursor!)
+    const batch2 = await importer.nextBatch(batch1.nextCursor)
     expect(batch2.items.length).toBe(30 - batch1.items.length)
     expect(batch2.nextCursor).toBeNull() // terminal
   })
@@ -325,14 +321,13 @@ describe("Obsidian importer — cursor resume + batching (FIX 3)", () => {
     const imp1 = createObsidianImporter(vault)
     const begin1 = await imp1.begin({})
     expect(begin1.cursor).not.toBeNull()
-    const batch1 = await imp1.nextBatch(begin1.cursor!)
-    const firstBatchCount = batch1.items.length
+    const batch1 = await imp1.nextBatch(begin1.cursor)
     expect(batch1.nextCursor).not.toBeNull() // crash point: more items remain
 
     // ── Second run: resume from the batch-1 next cursor. ─────────────────────────────────
     // Simulate a fresh importer (new run start) resuming at the saved cursor.
     const imp2 = createObsidianImporter(vault)
-    const begin2 = await imp2.begin({ resumeCursor: batch1.nextCursor! })
+    const begin2 = await imp2.begin({ resumeCursor: batch1.nextCursor })
     expect(begin2.cursor).not.toBeNull()
 
     // Drain the rest.
@@ -355,13 +350,13 @@ describe("Obsidian importer — cursor resume + batching (FIX 3)", () => {
 
     const imp1 = createObsidianImporter(vault)
     const begin1 = await imp1.begin({})
-    const batch1 = await imp1.nextBatch(begin1.cursor!)
+    const batch1 = await imp1.nextBatch(begin1.cursor)
     const firstIds1 = batch1.items.map((s) => s.sourceSessionId)
 
     // A second fresh run (same vault) must list in the same order.
     const imp2 = createObsidianImporter(vault)
     const begin2 = await imp2.begin({})
-    const batch2 = await imp2.nextBatch(begin2.cursor!)
+    const batch2 = await imp2.nextBatch(begin2.cursor)
     const firstIds2 = batch2.items.map((s) => s.sourceSessionId)
 
     expect(firstIds1).toEqual(firstIds2)

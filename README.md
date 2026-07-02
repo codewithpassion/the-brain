@@ -50,11 +50,13 @@ bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, ac
 
 - D1 / Vectorize shard fan-out (`tenant_shards` columns present, resolve to one shard).
 - Frozen-snapshot injection (`get_session_context(snapshotId)` accepted but stubbed).
-- CLI OAuth device-flow **server** endpoints (client done; `--token` works now).
 - Dashboard Cloudflare build/co-location (`@cloudflare/vite-plugin`) + a few stubbed screens
   (graph/sessions/audit/jobs) + a `list_documents` op.
 - Cross-session semantic entity dedup; BYO/openai-compatible provider routing (seam only);
   AI Gateway spend enforcement (attribution only in v1).
+- v2 verification safety net (per `docs/v2-implementation-plan.md`, deferred 2026-07-02):
+  GitHub Actions CI (W0.1), the scheduled real-AI gate (W0.2), and the model-deprecation
+  tripwire (W0.3) — `bun check` stays a local convention until these land.
 
 ## Read this first
 

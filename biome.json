@@ -15,7 +15,8 @@
       "!workflows",
       "!**/*.html",
       "!**/worker-configuration.d.ts",
-      "!**/.wrangler"
+      "!**/.wrangler",
+      "!**/drizzle/meta"
     ]
   },
   "formatter": {

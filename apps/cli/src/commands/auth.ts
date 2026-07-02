@@ -5,11 +5,11 @@
  *   - `brain logout`                clear the active profile's credentials.
  *   - `brain whoami`                show the active profile, credentials REDACTED (invariant 17).
  *   - `brain tenant use <slug>`     pin the active tenant (sent as `X-Brain-Tenant`).
- *   - `brain auth login`            OAuth 2.1 device flow (RFC 8628); 404 ⇒ clear "pending" message.
+ *   - `brain auth login`            OAuth 2.1 device flow (RFC 8628); 404 ⇒ clear fallback message.
  *
  * NOTHING here prints a raw token: success is reported via `redactProfile`. The device-flow SERVER
- * endpoints are an orchestrator follow-up — until they exist, `auth login` reports it cleanly and
- * `login --token` remains the working path.
+ * endpoints are implemented in apps/api (`src/device-flow/routes.ts`); a 404 is only a defensive
+ * fallback (an older/misconfigured server), reported cleanly with `login --token` as the alternative.
  */
 import type { Command } from "commander"
 import {

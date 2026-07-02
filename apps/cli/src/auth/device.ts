@@ -5,9 +5,9 @@
  * `POST /token` (grant `urn:ietf:params:oauth:grant-type:device_code`) until the user approves,
  * honouring `authorization_pending` (keep waiting) and `slow_down` (back off +5s) per §3.5.
  *
- * The SERVER endpoints (`/device_authorization`, `/token`) are a small follow-up the orchestrator
- * wires into apps/api (s09 line 126). Until then a `404` surfaces as `ServerEndpointPendingError`
- * with a clear "endpoint pending" message — `brain login --token` remains the working v1 path.
+ * The SERVER endpoints (`/device_authorization`, `/activate`, `/token`) are implemented end-to-end
+ * in apps/api (`src/device-flow/routes.ts`). A `404` is now only a defensive fallback (an older or
+ * misconfigured server): it surfaces as `ServerEndpointPendingError` pointing at `brain login --token`.
  *
  * All I/O (`fetch`, `sleep`, `now`) is injected so the polling state machine is unit-testable with
  * no real network and no wall-clock waiting.
@@ -53,12 +53,12 @@ export class DeviceFlowError extends Error {
   }
 }
 
-/** The server device-flow endpoints are not deployed yet (404) — the documented v1 deferral. */
+/** A device-flow endpoint returned 404 — an older/misconfigured server; fall back to `--token`. */
 export class ServerEndpointPendingError extends Error {
   constructor(endpoint: string) {
     super(
-      `device-flow endpoint ${endpoint} is not available yet (server follow-up pending). ` +
-        "Use `brain login --token <bk_…>` for now.",
+      `device-flow endpoint ${endpoint} returned 404 (server may be outdated or misconfigured). ` +
+        "Use `brain login --token <bk_…>` instead.",
     )
     this.name = "ServerEndpointPendingError"
   }
@@ -86,7 +86,7 @@ const grantFrom = (raw: RawTokenResponse, now: number): TokenGrant => {
   }
 }
 
-/** Step 1 — request a device + user code. `404` ⇒ `ServerEndpointPendingError` (documented deferral). */
+/** Step 1 — request a device + user code. `404` ⇒ `ServerEndpointPendingError` (defensive fallback). */
 export const requestDeviceAuthorization = async (
   deps: DeviceFlowDeps,
   options: { apiUrl: string; clientId?: string; scope?: string },
