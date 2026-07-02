@@ -12,6 +12,8 @@ import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input"
 import {
+  addGraphLink,
+  addGraphTag,
   findOrphans,
   getEntities,
   getEntityEdges,
@@ -174,6 +176,8 @@ function GraphPage() {
         </Card>
       )}
 
+      <CurateCard />
+
       {selected !== null && (
         <Card>
           <CardHeader>
@@ -221,6 +225,113 @@ function GraphPage() {
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * Curate — the W4.4 manual doc-graph write surface (add_tag / add_link). Operates on doc-graph
+ * PAGES named by slug or id (distinct from the entity list above), so the inputs are free-text
+ * node references. Minimal affordance: two small forms that call the write ops and report the
+ * outcome inline (matches the screen's Card/Input/Button style; no new framework).
+ */
+function CurateCard() {
+  const [tagTarget, setTagTarget] = useState("")
+  const [tag, setTag] = useState("")
+  const [tagMsg, setTagMsg] = useState<string | null>(null)
+  const [tagBusy, setTagBusy] = useState(false)
+
+  const [from, setFrom] = useState("")
+  const [to, setTo] = useState("")
+  const [linkType, setLinkType] = useState("")
+  const [linkMsg, setLinkMsg] = useState<string | null>(null)
+  const [linkBusy, setLinkBusy] = useState(false)
+
+  const onAddTag = async (event: FormEvent) => {
+    event.preventDefault()
+    setTagBusy(true)
+    setTagMsg(null)
+    const res = await addGraphTag({ data: { target: tagTarget.trim(), tag: tag.trim() } })
+    setTagMsg(res.ok ? `Tagged ${res.data.pageId} with "${res.data.tag}".` : `Error: ${res.error}`)
+    if (res.ok) setTag("")
+    setTagBusy(false)
+  }
+
+  const onAddLink = async (event: FormEvent) => {
+    event.preventDefault()
+    setLinkBusy(true)
+    setLinkMsg(null)
+    const res = await addGraphLink({
+      data: { from: from.trim(), to: to.trim(), linkType: linkType.trim() },
+    })
+    setLinkMsg(res.ok ? `Linked ${res.data.fromId} → ${res.data.toId}.` : `Error: ${res.error}`)
+    setLinkBusy(false)
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Curate (doc graph)</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-6">
+        <form onSubmit={onAddTag} className="flex flex-col gap-2">
+          <p className="font-medium text-neutral-500 text-sm">Add tag to a page</p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={tagTarget}
+              onChange={(e) => setTagTarget(e.target.value)}
+              placeholder="page slug or id"
+              aria-label="Tag target page"
+              className="flex-1"
+            />
+            <Input
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+              placeholder="tag"
+              aria-label="Tag"
+              className="flex-1"
+            />
+            <Button
+              type="submit"
+              disabled={tagBusy || tagTarget.trim() === "" || tag.trim() === ""}
+            >
+              {tagBusy ? "Adding…" : "Add tag"}
+            </Button>
+          </div>
+          {tagMsg !== null && <p className="text-neutral-600 text-sm">{tagMsg}</p>}
+        </form>
+
+        <form onSubmit={onAddLink} className="flex flex-col gap-2">
+          <p className="font-medium text-neutral-500 text-sm">Add link between pages</p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              placeholder="from slug or id"
+              aria-label="Link source page"
+              className="flex-1"
+            />
+            <Input
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="to slug or id"
+              aria-label="Link target page"
+              className="flex-1"
+            />
+            <Input
+              value={linkType}
+              onChange={(e) => setLinkType(e.target.value)}
+              placeholder="type (optional)"
+              aria-label="Link type"
+              className="flex-1"
+            />
+            <Button type="submit" disabled={linkBusy || from.trim() === "" || to.trim() === ""}>
+              {linkBusy ? "Linking…" : "Add link"}
+            </Button>
+          </div>
+          {linkMsg !== null && <p className="text-neutral-600 text-sm">{linkMsg}</p>}
+        </form>
+      </CardContent>
+    </Card>
   )
 }
 

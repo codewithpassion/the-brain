@@ -53,12 +53,10 @@ export const softDeleteNotionPage = async (
   const slug = notionSlug(pageId)
   const existing = await services.db.getDocumentBySlug(slug)
   if (existing === null || existing.deletedAt !== null) return
-  const { chunkIds } = await services.db.softDeleteDocument(existing.id)
+  const { chunkIds, partDocumentIds } = await services.db.softDeleteDocument(existing.id)
   if (chunkIds.length > 0) await services.vectors.deleteVectors(chunkIds)
-  await services.graph.clearPriorExtraction(
-    { sourceKind: "document", sourceId: existing.id },
-    { gcOrphanedEntities: true },
-  )
+  // Clear KG extraction for the whole part family (§4.3, W4.5) so no deleted child-part entities linger.
+  await services.graph.clearExtractionForFamily([existing.id, ...partDocumentIds])
 }
 
 /** Fetch + convert + stage + ingest one page — mirrors `runVaultCreate`. */

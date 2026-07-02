@@ -10,11 +10,12 @@
  * 429 the request (a hard cost cap, distinct from the AI degrade contract). Both arms then
  * run in parallel and independently degrade to empty on missing AI/Vectorize.
  */
-import { CANDIDATE_TOP } from "@brain/shared"
+import { CANDIDATE_TOP, VECTORIZE_TOPK_MAX } from "@brain/shared"
 import { ftsArm, vectorArm } from "./arms"
+import { expandQuery } from "./expand"
 import { rrfFusion } from "./fusion"
 import { rerankStage } from "./rerank-stage"
-import type { FusedCandidate, SearchDeps } from "./types"
+import type { Candidate, FusedCandidate, SearchDeps } from "./types"
 
 export interface HybridOptions {
   /** Candidate-pool size carried out of fusion before rerank/top-k (default CANDIDATE_TOP). */
@@ -31,6 +32,12 @@ export interface HybridOptions {
    * candidate pool may shrink. Pushing the filter into Vectorize metadata is deferred.
    */
   filter?: { path?: string; tag?: string }
+  /**
+   * Query expansion (W4.1): when true, generate a few `gen()` query variants and retrieve
+   * over `[original, ...variants]`, fusing the union. Degrades to the original-only path when
+   * `gen()` returns null (never narrower than the un-expanded run). Default OFF.
+   */
+  expand?: boolean
 }
 
 /**
@@ -47,15 +54,35 @@ export const hybridSearch = async (
   await deps.budget.check()
 
   const candidateTop = options.candidateTop ?? CANDIDATE_TOP
-  const armTopK = options.armTopK ?? candidateTop
+  // W4.2 (breadth widening, NOT metadata push-down): a namespace/tag filter is applied POST-hoc at
+  // the D1 re-check, so a selective filter over a large corpus can starve the pool if each arm only
+  // fetches candidateTop ids. When a filter is active we widen per-arm retrieval to VECTORIZE_TOPK_MAX
+  // (100 — Vectorize's hard topK cap) so the re-check filters from the largest pool the platform
+  // allows. True metadata push-down is infeasible: Vectorize's filter grammar has no prefix/array-
+  // contains, and `path` is a prefix match while `tag` is multi-valued on pages — so it would need
+  // exact-path-only semantics + a metadata stamp + a full vector re-upsert (deferred follow-up).
+  const filterActive = options.filter?.path !== undefined || options.filter?.tag !== undefined
+  // Clamp to VECTORIZE_TOPK_MAX (100) — the hard per-query cap ScopedVectorize enforces; never
+  // request above it. `candidateTop` (40) < cap, so a filtered query widens to exactly the cap.
+  const armTopK = options.armTopK ?? (filterActive ? VECTORIZE_TOPK_MAX : candidateTop)
 
-  // Both arms run in parallel; each independently re-checks + hydrates through ScopedDB.
-  const [vector, fts] = await Promise.all([
-    vectorArm(deps.db, deps.vectors, deps.ai, query, armTopK, undefined, options.filter),
-    ftsArm(deps.db, query, armTopK, options.filter),
-  ])
+  // W4.1: expand into [original, ...variants] when flagged; a gen() degrade returns [query], so
+  // the retrieval below is identical to the un-expanded path (never narrower). The pipeline's
+  // budget.check() above already gated this gen() call (invariant 16).
+  const queries = options.expand ? await expandQuery(deps.ai, query) : [query]
 
-  const fused = rrfFusion([vector, fts], query).slice(0, candidateTop)
+  // One vector + FTS arm per query variant, all in parallel; each arm independently re-checks +
+  // hydrates through ScopedDB. Fusion dedups by chunkId across every arm (a chunk that surfaces
+  // for several variants accrues rank contributions from each). Title-boost + rerank use the
+  // ORIGINAL query so relevance stays anchored to what the caller actually asked.
+  const arms: Candidate[][] = await Promise.all(
+    queries.flatMap((q) => [
+      vectorArm(deps.db, deps.vectors, deps.ai, q, armTopK, undefined, options.filter),
+      ftsArm(deps.db, q, armTopK, options.filter),
+    ]),
+  )
+
+  const fused = rrfFusion(arms, query).slice(0, candidateTop)
   if (!options.rerank) return fused.slice(0, options.topK)
   return rerankStage(deps.ai, query, fused, options.topK)
 }

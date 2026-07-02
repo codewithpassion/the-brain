@@ -106,12 +106,16 @@ export const runDocIngestCore = async (
       docId = existing.id
     } else {
       // Changed content (different fingerprint) OR previously deleted (resurrection): supersede.
-      const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(existing.id)
+      const { chunkIds: oldChunkIds, partDocumentIds: oldPartIds } =
+        await services.db.hardDeleteDocumentChunks(existing.id)
       if (oldChunkIds.length > 0) {
         // Orphan vectors in Vectorize are tolerable (D1 re-check drops them), but explicit
         // deletion keeps the index tidy.
         await services.vectors.deleteVectors(oldChunkIds)
       }
+      // Clear the OLD part family's KG mentions before re-ingest (§4.3, W4.5) — old child part rows
+      // are deleted above, so their entity mentions would otherwise orphan.
+      await services.graph.clearExtractionForFamily([existing.id, ...oldPartIds])
       // Reuse the same UUID so chunkIds stay cap-safe; clear deleted_at for resurrection.
       // Re-apply path/tags WHEN PROVIDED so an edited page/note refreshes them (omitted ⇒
       // unchanged). `ingested_via` is IMMUTABLE after insert — it records the ORIGINAL ingest

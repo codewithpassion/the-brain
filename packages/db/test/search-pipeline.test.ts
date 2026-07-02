@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { OpRegistry, type Principal } from "@brain/shared"
+import { CANDIDATE_TOP, OpRegistry, type Principal, VECTORIZE_TOPK_MAX } from "@brain/shared"
 import type { ScopedChunk } from "../src/scoped/db"
 import { ScopedDB } from "../src/scoped/db"
 import { ScopedVectorize } from "../src/scoped/vectorize"
+import { expandQuery } from "../src/search/expand"
 import { registerSearchOps, searchOp, thinkOp } from "../src/search/ops"
+import { hybridSearch } from "../src/search/pipeline"
 import { rerankStage } from "../src/search/rerank-stage"
-import { buildSynthesisPrompt } from "../src/search/synthesis"
+import { buildSynthesisPrompt, partitionForMap, synthesizeAnswer } from "../src/search/synthesis"
 import type {
   AiPort,
   AiRerankHit,
@@ -339,6 +341,225 @@ describe("namespace-scoped search: path + tag filter via D1 re-check (non-vacuou
     const { deps } = seedOne(p2, { matches: [{ id: "chunk-1", score: 0.9 }] })
     const out = await searchOp.handler({ deps, principal: p2 }, { query: "kryptonite", topK: 12 })
     expect(out.hits.map((h) => h.slug)).toEqual(["needle-doc"])
+  })
+})
+
+// ── W4.2 filtered-query breadth widening ─────────────────────────────────────────
+
+describe("W4.2 breadth widening (armTopK→VECTORIZE_TOPK_MAX when a filter is active)", () => {
+  const recordingDeps = (): { deps: SearchDeps; topKs: number[] } => {
+    const topKs: number[] = []
+    const { db } = makeDb()
+    const p = principal({ tenantId: "t1" })
+    const index = {
+      query: async (_values: number[], opts: { topK: number }) => {
+        topKs.push(opts.topK)
+        return { count: 0, matches: [] }
+      },
+    } as unknown as Vectorize
+    const deps: SearchDeps = {
+      db: new ScopedDB(db, p),
+      vectors: new ScopedVectorize(index, p),
+      ai: stubAi(),
+      budget: okBudget(),
+      recall: recorder().sink,
+    }
+    return { deps, topKs }
+  }
+
+  test("no filter → the vector arm fetches only candidateTop (CANDIDATE_TOP)", async () => {
+    const { deps, topKs } = recordingDeps()
+    await hybridSearch(deps, "q", { topK: 12, rerank: false })
+    expect(topKs).toContain(CANDIDATE_TOP)
+    expect(topKs).not.toContain(VECTORIZE_TOPK_MAX)
+  })
+
+  test("path filter → the vector arm fetches VECTORIZE_TOPK_MAX (post-hoc re-check gets the max pool)", async () => {
+    const { deps, topKs } = recordingDeps()
+    await hybridSearch(deps, "q", { topK: 12, rerank: false, filter: { path: "/project/x" } })
+    expect(topKs).toContain(VECTORIZE_TOPK_MAX)
+    expect(topKs).not.toContain(CANDIDATE_TOP)
+  })
+
+  test("tag filter → same breadth widening", async () => {
+    const { deps, topKs } = recordingDeps()
+    await hybridSearch(deps, "q", { topK: 12, rerank: false, filter: { tag: "important" } })
+    expect(topKs).toContain(VECTORIZE_TOPK_MAX)
+  })
+})
+
+// ── W4.3 synthesis map/refine ──────────────────────────────────────────────────────
+
+describe("synthesizeAnswer map/refine (W4.3)", () => {
+  const budgetOk = async () => {}
+  const bigCandidates = () =>
+    [fc("a", 0.9), fc("b", 0.8), fc("c", 0.7)].map((f) => ({
+      ...f,
+      candidate: { ...f.candidate, content: "z".repeat(400) }, // ~100 tokens each
+    }))
+
+  test("fits budget → a single gen(), no map/refine", async () => {
+    let calls = 0
+    const ai = {
+      gen: async () => {
+        calls++
+        return "answer"
+      },
+    }
+    const out = await synthesizeAnswer(ai, budgetOk, "q", [fc("a", 0.9), fc("b", 0.8)], 20_000)
+    expect(calls).toBe(1)
+    expect(out.answer).toBe("answer")
+    expect(out.warnings).not.toContain("map_refine")
+  })
+
+  test("over budget → map each group then refine; answer from refine, budget-checked per gen", async () => {
+    const prompts: string[] = []
+    let budgetChecks = 0
+    const ai = {
+      gen: async (p: string) => {
+        prompts.push(p)
+        return p.includes("Evidence summaries") ? "final answer" : "group summary"
+      },
+    }
+    const out = await synthesizeAnswer(
+      ai,
+      async () => {
+        budgetChecks++
+      },
+      "q",
+      bigCandidates(),
+      150, // tiny budget → one 1-chunk group per candidate → 3 map + 1 refine
+    )
+    const mapCalls = prompts.filter((p) => !p.includes("Evidence summaries")).length
+    const refineCalls = prompts.filter((p) => p.includes("Evidence summaries")).length
+    expect(mapCalls).toBe(3)
+    expect(refineCalls).toBe(1)
+    expect(out.answer).toBe("final answer")
+    expect(out.warnings).toContain("map_refine")
+    expect(budgetChecks).toBe(4) // invariant 16: one cost-cap check before each gen()
+  })
+
+  test("a failed map gen() degrades to the truncate path (marked, never worse than before)", async () => {
+    const ai = {
+      gen: async (p: string) => (p.includes("Summarize the evidence") ? null : "truncated answer"),
+    }
+    const out = await synthesizeAnswer(ai, budgetOk, "q", bigCandidates(), 150)
+    expect(out.warnings).toContain("map_refine_degraded")
+    expect(out.answer).toBe("truncated answer")
+  })
+
+  test("a failed refine gen() → answer null (caller emits llm_unavailable)", async () => {
+    const ai = {
+      gen: async (p: string) => (p.includes("Evidence summaries") ? null : "summary"),
+    }
+    const out = await synthesizeAnswer(ai, budgetOk, "q", bigCandidates(), 150)
+    expect(out.answer).toBeNull()
+    expect(out.warnings).toContain("map_refine")
+  })
+
+  test("partitionForMap splits on the token budget, preserving rank order", () => {
+    const groups = partitionForMap(bigCandidates(), 150)
+    expect(groups.length).toBe(3)
+    expect(groups.flat().map((g) => g.candidate.chunkId)).toEqual(["a", "b", "c"])
+  })
+})
+
+// ── W4.1 query expansion ─────────────────────────────────────────────────────────
+
+describe("expandQuery (W4.1)", () => {
+  test("returns [query, ...variants], cleaning bullets/numbering and deduping", async () => {
+    const ai = stubAi({
+      gen: async () => "1. red widget cost\n- widget pricing\nRED WIDGET COST\n\nwidget price list",
+    })
+    const out = await expandQuery(ai, "red widget cost")
+    expect(out[0]).toBe("red widget cost") // original first, untouched
+    // numbering/bullets stripped; the case-insensitive dup of the original dropped
+    expect(out).toContain("widget pricing")
+    expect(out).toContain("widget price list")
+    expect(out).not.toContain("RED WIDGET COST")
+    expect(new Set(out.map((s) => s.toLowerCase())).size).toBe(out.length) // deduped
+  })
+
+  test("caps variants at the requested count", async () => {
+    const ai = stubAi({ gen: async () => "a\nb\nc\nd\ne" })
+    const out = await expandQuery(ai, "q", 2)
+    expect(out).toEqual(["q", "a", "b"]) // original + 2 variants
+  })
+
+  test("gen() degrade (null) → [query] only (never narrower than the plain path)", async () => {
+    const ai = stubAi({ gen: async () => null })
+    expect(await expandQuery(ai, "q")).toEqual(["q"])
+  })
+})
+
+describe("think handler query expansion wiring", () => {
+  const p = principal({ tenantId: "t1", userId: "userA" })
+
+  test("expansion ON by default: an extra gen() call precedes synthesis, envelope intact", async () => {
+    const genPrompts: string[] = []
+    const { deps } = seedOne(p, {
+      matches: [{ id: "chunk-1", score: 0.9 }],
+      ai: stubAi({
+        gen: async (prompt) => {
+          genPrompts.push(prompt)
+          return "alt phrasing"
+        },
+      }),
+    })
+    const out = await thinkOp.handler({ deps, principal: p }, { query: "kryptonite", topK: 12 })
+    // two gen() calls: one expansion (default ON for think) + one synthesis.
+    expect(genPrompts.length).toBe(2)
+    expect(genPrompts.some((pr) => pr.includes("alternative phrasings"))).toBe(true)
+    expect(out.evidence.map((e) => e.slug)).toEqual(["needle-doc"]) // retrieval still works
+  })
+
+  test("expandQuery:false → NO expansion gen(); only the synthesis call runs", async () => {
+    const genPrompts: string[] = []
+    const { deps } = seedOne(p, {
+      matches: [{ id: "chunk-1", score: 0.9 }],
+      ai: stubAi({
+        gen: async (prompt) => {
+          genPrompts.push(prompt)
+          return "answer"
+        },
+      }),
+    })
+    const out = await thinkOp.handler(
+      { deps, principal: p },
+      { query: "kryptonite", topK: 12, expandQuery: false },
+    )
+    expect(genPrompts.length).toBe(1) // synthesis only
+    expect(genPrompts[0]?.includes("alternative phrasings")).toBe(false)
+    expect(out.answer).toBe("answer")
+  })
+
+  test("expansion gen() degrade does not break think (still cites the original-query evidence)", async () => {
+    // gen returns null → expansion degrades to [query] AND synthesis degrades to no-answer.
+    const { deps } = seedOne(p, {
+      matches: [{ id: "chunk-1", score: 0.9 }],
+      ai: stubAi({ gen: async () => null }),
+    })
+    const out = await thinkOp.handler({ deps, principal: p }, { query: "kryptonite", topK: 12 })
+    expect(out.evidence.map((e) => e.id)).toContain("chunk-1")
+    expect(out.warnings).toContain("llm_unavailable")
+  })
+})
+
+describe("search handler leaves expansion OFF by default", () => {
+  test("no expansion gen() call on the cheap search path", async () => {
+    const p = principal({ tenantId: "t1" })
+    let genCalled = false
+    const { deps } = seedOne(p, {
+      matches: [{ id: "chunk-1", score: 0.9 }],
+      ai: stubAi({
+        gen: async () => {
+          genCalled = true
+          return "x"
+        },
+      }),
+    })
+    await searchOp.handler({ deps, principal: p }, { query: "kryptonite", topK: 12 })
+    expect(genCalled).toBe(false)
   })
 })
 

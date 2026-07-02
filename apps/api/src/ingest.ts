@@ -65,10 +65,14 @@ export const runBatchIngest = async (
 
   // KG extraction (Phase 4). NON-FATAL: a failure never fails ingest — the doc is indexed
   // regardless. At deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
+  // An oversized-doc split (§4.3, W4.5) puts overflow chunks under child part documents, so extract
+  // over the root AND every materialized part — otherwise a split doc's later parts get no KG.
   if (result.status !== "failed") {
-    await runEntityExtraction(services, params.documentId).catch((err) => {
-      console.error("entity-extraction failed for", params.documentId, err)
-    })
+    for (const docId of [params.documentId, ...result.partDocumentIds]) {
+      await runEntityExtraction(services, docId).catch((err) => {
+        console.error("entity-extraction failed for", docId, err)
+      })
+    }
   }
 
   return result

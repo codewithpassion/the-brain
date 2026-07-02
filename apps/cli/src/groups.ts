@@ -37,6 +37,9 @@ const GROUP_BY_OP: Record<string, Group> = {
   list_entity_edges: "graph",
   find_orphans: "graph",
   search_entities: "graph",
+  add_link: "graph",
+  add_tag: "graph",
+  add_timeline_entry: "graph",
   // session
   capture_turn: "session",
   finalize_session: "session",

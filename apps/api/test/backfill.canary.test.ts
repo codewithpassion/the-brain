@@ -240,11 +240,11 @@ describe("reconcileObsidianDeletions — FIX 2 safety guards", () => {
           Array.from({ length: 10 }, (_, i) => ({ id: `d${i}`, slug: `note-${i}` })),
         softDeleteDocument: async (id: string) => {
           deleted.push(id)
-          return { chunkIds: [] }
+          return { chunkIds: [], partDocumentIds: [] }
         },
       },
       vectors: { deleteVectors: async () => {} },
-      graph: { clearPriorExtraction: async () => {} },
+      graph: { clearPriorExtraction: async () => {}, clearExtractionForFamily: async () => {} },
     }
 
     const result = await reconcileObsidianDeletions(
@@ -268,11 +268,11 @@ describe("reconcileObsidianDeletions — FIX 2 safety guards", () => {
           Array.from({ length: 10 }, (_, i) => ({ id: `d${i}`, slug: `note-${i}` })),
         softDeleteDocument: async (id: string) => {
           deleted.push(id)
-          return { chunkIds: [] }
+          return { chunkIds: [], partDocumentIds: [] }
         },
       },
       vectors: { deleteVectors: async () => {} },
-      graph: { clearPriorExtraction: async () => {} },
+      graph: { clearPriorExtraction: async () => {}, clearExtractionForFamily: async () => {} },
     }
 
     const vaultSlugs = new Set(Array.from({ length: 8 }, (_, i) => `note-${i}`))

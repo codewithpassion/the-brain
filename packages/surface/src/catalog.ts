@@ -110,12 +110,14 @@ const retrievalInput = (raw: {
   scope?: string
   path?: string
   tag?: string
+  expandQuery?: boolean
 }): RetrievalInput => ({
   query: raw.query,
   topK: raw.topK,
   ...(raw.scope !== undefined ? { scope: raw.scope } : {}),
   ...(raw.path !== undefined ? { path: raw.path } : {}),
   ...(raw.tag !== undefined ? { tag: raw.tag } : {}),
+  ...(raw.expandQuery !== undefined ? { expandQuery: raw.expandQuery } : {}),
 })
 
 /** Compose the concrete `SearchDeps` (budget 429 pre-check + waitUntil recall sink) from services. */
@@ -138,6 +140,7 @@ const searchSurfaceOp = (op: BoundOp<RetrievalInput, unknown>): SurfaceOp => ({
       scope?: string
       path?: string
       tag?: string
+      expandQuery?: boolean
     }
     const out = await op.handler(
       { deps: buildSearchDeps(ctx, services), principal: ctx.principal },
@@ -677,17 +680,14 @@ const deleteDocumentSurfaceOp: SurfaceOp = {
       await services.blobs.delete(`documents/audio/${docId}`)
     }
 
-    const { chunkIds } = await services.db.softDeleteDocument(docId)
+    const { chunkIds, partDocumentIds } = await services.db.softDeleteDocument(docId)
     if (chunkIds.length > 0) {
       await services.vectors.deleteVectors(chunkIds)
     }
-    // Clear the KG knowledge extracted from this document: clear mentions, prune relations,
-    // and GC any entity that has no remaining mentions across the tenant (so the entity arm
-    // entityFtsIds / recheckEntities no longer surfaces deleted-note entities).
-    await services.graph.clearPriorExtraction(
-      { sourceKind: "document", sourceId: docId },
-      { gcOrphanedEntities: true },
-    )
+    // Clear the KG knowledge extracted from this document AND its child parts (§4.3, W4.5): clear
+    // mentions, prune relations, and GC any entity with no remaining mentions across the tenant (so
+    // the entity arm no longer surfaces deleted-note entities — including from split-doc child parts).
+    await services.graph.clearExtractionForFamily([docId, ...partDocumentIds])
     return { documentId: docId, deleted: true }
   },
 }
@@ -814,11 +814,16 @@ const updateDocumentSurfaceOp: SurfaceOp = {
     // Compute new fingerprint from the new content.
     const fp = await fingerprint(markdown)
 
-    // Hard-delete old chunks (frees deterministic PKs for the re-ingest) + drop their vectors.
-    const { chunkIds: oldChunkIds } = await services.db.hardDeleteDocumentChunks(documentId)
+    // Hard-delete old chunks (frees deterministic PKs for the re-ingest) + drop their vectors, AND
+    // remove old child part rows (§4.3, W4.5).
+    const { chunkIds: oldChunkIds, partDocumentIds: oldPartIds } =
+      await services.db.hardDeleteDocumentChunks(documentId)
     if (oldChunkIds.length > 0) {
       await services.vectors.deleteVectors(oldChunkIds)
     }
+    // Clear the OLD part family's KG mentions before re-ingest re-extracts — the old child part ids
+    // are deleted by the hard-delete above, so their mentions would otherwise orphan (privacy leak).
+    await services.graph.clearExtractionForFamily([documentId, ...oldPartIds])
 
     // Supersede the document row: new fingerprint + status → pending + clear deletedAt. The new body
     // sets content_type from the replacement content — clearing any stale 'voice' origin marker

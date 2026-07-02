@@ -291,6 +291,9 @@ describe("registerGraphOps — op registry wiring", () => {
     const names = registry.list().map((op) => op.name)
     expect(names.sort()).toEqual(
       [
+        "add_link",
+        "add_tag",
+        "add_timeline_entry",
         "find_orphans",
         "get_backlinks",
         "get_links",
@@ -303,8 +306,9 @@ describe("registerGraphOps — op registry wiring", () => {
       ].sort(),
     )
     expect(names.length).toBe(GRAPH_OPS.length)
-    // every op is read-only (the mutating §6.5 surface is deferred).
-    expect(registry.list().every((op) => op.readOnly)).toBe(true)
+    // the read surface is read-only; the W4.4 mutating curation ops are the only write ops.
+    const writeOps = new Set(["add_link", "add_tag", "add_timeline_entry"])
+    expect(registry.list().every((op) => op.readOnly === !writeOps.has(op.name))).toBe(true)
   })
 
   test("a second registration of the same name throws (frozen catalog)", () => {

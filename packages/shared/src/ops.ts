@@ -148,6 +148,12 @@ export const SEARCH_OP = defineOp({
       .optional()
       .describe("Restrict to documents under this path prefix or exact match, e.g. '/project/x'."),
     tag: z.string().optional().describe("Restrict to documents that contain exactly this tag."),
+    expandQuery: z
+      .boolean()
+      .optional()
+      .describe(
+        "Generate query variants to widen recall (extra AI cost). Off by default for search/query.",
+      ),
   }),
   output: z.object({
     hits: z.array(SearchHitSchema),
@@ -183,6 +189,12 @@ export const THINK_OP = defineOp({
       .optional()
       .describe("Restrict to documents under this path prefix or exact match, e.g. '/project/x'."),
     tag: z.string().optional().describe("Restrict to documents that contain exactly this tag."),
+    expandQuery: z
+      .boolean()
+      .optional()
+      .describe(
+        "Generate query variants to widen recall (extra AI cost). On by default for think; set false to disable.",
+      ),
   }),
   output: z.object({
     answer: z.string(),

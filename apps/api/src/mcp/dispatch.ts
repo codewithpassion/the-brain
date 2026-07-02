@@ -147,6 +147,9 @@ const GRAPH_OPS = new Set([
   "list_entities",
   "list_entity_edges",
   "search_entities",
+  "add_link",
+  "add_tag",
+  "add_timeline_entry",
 ])
 
 /** Bucket a tool into a human-meaningful family for the catalog resource. */

@@ -4,6 +4,7 @@
  * the per-stage invariants (esp. invariant 3 — evidence/citations from re-checked rows only).
  */
 export { ftsArm, vectorArm } from "./arms"
+export { expandQuery, QUERY_EXPANSION_COUNT } from "./expand"
 export { isTitlePhraseMatch, rrfFusion } from "./fusion"
 export type { BoundOp, RetrievalInput } from "./ops"
 export {
@@ -25,7 +26,15 @@ export {
   USD_PER_NEURON,
 } from "./ports"
 export { rerankStage } from "./rerank-stage"
-export { type BuiltPrompt, buildSynthesisPrompt, SYNTH_SYSTEM } from "./synthesis"
+export {
+  type BuiltPrompt,
+  buildSynthesisPrompt,
+  MAP_SYSTEM,
+  partitionForMap,
+  SYNTH_SYSTEM,
+  type SynthOutcome,
+  synthesizeAnswer,
+} from "./synthesis"
 export type {
   AiPort,
   AiRerankCandidate,

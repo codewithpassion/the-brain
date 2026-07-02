@@ -340,6 +340,9 @@ export const listDocumentsCore = async (
       and(
         eq(documents.tenantId, principal.tenantId),
         scopePredicate(principal, documents.scope),
+        // §4.3 (W4.5): hide child part rows of an oversized split — they're an internal chunking
+        // artifact, not user-facing documents. Only roots + un-split docs (parent_document_id NULL).
+        isNull(documents.parentDocumentId),
         // tag filter: JSON array contains the given tag (exact element match)
         input.tag !== undefined
           ? sql`EXISTS (SELECT 1 FROM json_each(${documents.tags}) WHERE value = ${input.tag})`
@@ -615,7 +618,11 @@ export const getStatsCore = async (
   assertAdmin(principal)
   const tid = principal.tenantId
   const [docsRes, chunksRes, entitiesRes, sessionsRes, factsRes] = await Promise.all([
-    db.select({ count: sql<number>`COUNT(*)` }).from(documents).where(eq(documents.tenantId, tid)),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(documents)
+      // §4.3 (W4.5): count a split doc as ONE — exclude child part rows (match list_documents).
+      .where(and(eq(documents.tenantId, tid), isNull(documents.parentDocumentId))),
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(chunks)

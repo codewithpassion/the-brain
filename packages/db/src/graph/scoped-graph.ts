@@ -423,6 +423,128 @@ export class ScopedGraph {
       .orderBy(desc(timelineEntries.date), desc(timelineEntries.id))
   }
 
+  // ── DOC-GRAPH WRITES (W4.4; manual curation — every mutation audited in-batch) ─────
+
+  /**
+   * Add a typed link between two doc-graph pages, each resolved by slug-or-id through the SAME
+   * visibility gate as the reads (you can only link pages you can see). Idempotent on the edge
+   * unique index. Throws when an endpoint is not found/visible or the principal is read-only
+   * (the shared `batchWithAudit` seam forces tenant/actor + rejects read-only).
+   */
+  async addLink(input: {
+    from: string
+    to: string
+    linkType?: string
+    context?: string
+  }): Promise<DocLinkRow> {
+    const fromId = await this.resolveNodeId(DOC_GRAPH, input.from)
+    const toId = await this.resolveNodeId(DOC_GRAPH, input.to)
+    if (fromId === null || toId === null) {
+      throw new Error("add_link: link endpoint page not found or not visible")
+    }
+    const linkType = input.linkType ?? ""
+    const context = input.context ?? ""
+    const insert = this.db
+      .insert(docLinks)
+      .values({
+        id: crypto.randomUUID(),
+        tenantId: this.p.tenantId, // forced
+        fromId,
+        toId,
+        linkType,
+        linkSource: "manual",
+        context,
+      })
+      .onConflictDoNothing()
+    await batchWithAudit(this.db, this.p, [insert], {
+      action: "graph.link.add",
+      targetId: fromId,
+      diff: JSON.stringify({ fromId, toId, linkType }),
+    })
+    // Return the PERSISTED edge's context: on the idempotent conflict path the STORED value wins
+    // (the caller's context does NOT overwrite an existing manual link), so the result is honest.
+    const rows = await this.db
+      .select({ context: docLinks.context })
+      .from(docLinks)
+      .where(
+        and(
+          eq(docLinks.tenantId, this.p.tenantId),
+          eq(docLinks.fromId, fromId),
+          eq(docLinks.toId, toId),
+          eq(docLinks.linkType, linkType),
+          isNull(docLinks.originId), // manual links carry no origin_id (the edge-dedup key)
+        ),
+      )
+      .limit(1)
+    return { fromId, toId, linkType, context: rows[0]?.context ?? context }
+  }
+
+  /**
+   * Attach a tag to a visible page (resolved by slug-or-id). Idempotent on the
+   * `(tenant, page, tag)` unique key. Audited in-batch; read-only principals are rejected.
+   */
+  async addTag(input: { target: string; tag: string }): Promise<{ pageId: string; tag: string }> {
+    const pageId = await this.resolveNodeId(DOC_GRAPH, input.target)
+    if (pageId === null) throw new Error("add_tag: page not found or not visible")
+    const insert = this.db
+      .insert(tags)
+      .values({ tenantId: this.p.tenantId, pageId, tag: input.tag })
+      .onConflictDoNothing()
+    await batchWithAudit(this.db, this.p, [insert], {
+      action: "graph.tag.add",
+      targetId: pageId,
+      diff: JSON.stringify({ tag: input.tag }),
+    })
+    return { pageId, tag: input.tag }
+  }
+
+  /**
+   * Append a timeline entry to a visible page (resolved by slug-or-id). Idempotent on the
+   * `(tenant, page, date, summary)` unique key. Audited in-batch; read-only principals rejected.
+   */
+  async addTimelineEntry(input: {
+    target: string
+    date: string
+    summary: string
+    detail?: string
+  }): Promise<{ id: string; pageId: string; date: string; summary: string }> {
+    const pageId = await this.resolveNodeId(DOC_GRAPH, input.target)
+    if (pageId === null) throw new Error("add_timeline_entry: page not found or not visible")
+    const id = crypto.randomUUID()
+    const insert = this.db
+      .insert(timelineEntries)
+      .values({
+        id,
+        tenantId: this.p.tenantId, // forced
+        pageId,
+        date: input.date,
+        source: "manual",
+        summary: input.summary,
+        detail: input.detail ?? "",
+      })
+      .onConflictDoNothing()
+    await batchWithAudit(this.db, this.p, [insert], {
+      action: "graph.timeline.add",
+      targetId: pageId,
+      diff: JSON.stringify({ date: input.date, summary: input.summary }),
+    })
+    // Resolve the CANONICAL id: a fresh insert → `id`; the idempotent conflict path → the
+    // PRE-EXISTING row's id (never the minted-but-unwritten one, which would reference no row).
+    const rows = await this.db
+      .select({ id: timelineEntries.id })
+      .from(timelineEntries)
+      .where(
+        and(
+          eq(timelineEntries.tenantId, this.p.tenantId),
+          eq(timelineEntries.pageId, pageId),
+          eq(timelineEntries.date, input.date),
+          eq(timelineEntries.summary, input.summary),
+        ),
+      )
+      .limit(1)
+    return { id: rows[0]?.id ?? id, pageId, date: input.date, summary: input.summary }
+  }
+
   // ── ENTITY READS (KG graph; scoped + {world,team} visibility) ──────────────────
 
   /** List entities, optionally by `kind`, ordered by recency. Scoped + visibility-gated. */
@@ -701,6 +823,21 @@ export class ScopedGraph {
    * Note: `entities` rows are NOT deleted merely because their `source_chunk_ids` column is
    * stale — only zero-mention rows are GC'd, so entities shared across documents survive correctly.
    */
+  /**
+   * Clear KG extraction for a whole oversized-split document family (§4.3, W4.5): the root plus
+   * every child part id. Each is cleared with entity GC, so a deleted/superseded split doc leaves
+   * no orphaned mentions (a privacy leak — deleted content stays queryable via search_entities/
+   * traverse_graph) and no zero-mention entities. A single-part doc → one clear (unchanged).
+   */
+  async clearExtractionForFamily(documentIds: readonly string[]): Promise<void> {
+    for (const id of documentIds) {
+      await this.clearPriorExtraction(
+        { sourceKind: "document", sourceId: id },
+        { gcOrphanedEntities: true },
+      )
+    }
+  }
+
   async clearPriorExtraction(
     source: { sourceKind: string; sourceId: string },
     opts?: { gcOrphanedEntities?: boolean },
@@ -720,7 +857,10 @@ export class ScopedGraph {
       .from(chunks)
       .where(and(eq(chunks.tenantId, this.p.tenantId), eq(chunks.documentId, source.sourceId)))
     const sourceChunkIds = new Set(chunkRows.map((row) => row.id))
-    if (sourceChunkIds.size === 0) return
+    // NOTE: do NOT early-return when `sourceChunkIds` is empty. On the supersede path (and when a
+    // whole child part is deleted, §4.3/W4.5) the chunk ROWS are hard-deleted BEFORE this runs, so
+    // the doc has zero live chunks — yet its chunk-scoped mention rows (`${sourceId}:idx`) linger
+    // and MUST be swept by the LIKE query below, or deleted content stays queryable (privacy leak).
 
     // Collect entity IDs from chunk-scoped mentions BEFORE clearing them, so we can GC after.
     // Use LIKE '${documentId}:%' instead of inArray(currentChunkIds): a supersede that shrinks

@@ -173,12 +173,21 @@ const retrievalInput = (parsed: {
   scope?: string | undefined
   path?: string | undefined
   tag?: string | undefined
-}): { query: string; topK: number; scope?: string; path?: string; tag?: string } => ({
+  expandQuery?: boolean | undefined
+}): {
+  query: string
+  topK: number
+  scope?: string
+  path?: string
+  tag?: string
+  expandQuery?: boolean
+} => ({
   query: parsed.query,
   topK: parsed.topK,
   ...(parsed.scope !== undefined ? { scope: parsed.scope } : {}),
   ...(parsed.path !== undefined ? { path: parsed.path } : {}),
   ...(parsed.tag !== undefined ? { tag: parsed.tag } : {}),
+  ...(parsed.expandQuery !== undefined ? { expandQuery: parsed.expandQuery } : {}),
 })
 
 /** Compose the concrete `SearchDeps` (budget 429 pre-check + waitUntil recall sink). */

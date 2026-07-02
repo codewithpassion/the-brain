@@ -159,15 +159,12 @@ const runVaultDelete = async (services: BackfillServices, vaultPath: string): Pr
   const existing = await services.db.getDocumentBySlug(slug)
   if (existing === null || existing.deletedAt !== null) return // already gone — no-op
 
-  const { chunkIds } = await services.db.softDeleteDocument(existing.id)
+  const { chunkIds, partDocumentIds } = await services.db.softDeleteDocument(existing.id)
   if (chunkIds.length > 0) {
     await services.vectors.deleteVectors(chunkIds)
   }
-  // Clear KG extraction so deleted note's entities are no longer queryable.
-  await services.graph.clearPriorExtraction(
-    { sourceKind: "document", sourceId: existing.id },
-    { gcOrphanedEntities: true },
-  )
+  // Clear KG extraction so the deleted note's entities (incl. split-doc child parts) are no longer queryable.
+  await services.graph.clearExtractionForFamily([existing.id, ...partDocumentIds])
 }
 
 // ── Per-message core ──────────────────────────────────────────────────────────────────────────────

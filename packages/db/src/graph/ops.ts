@@ -3,10 +3,11 @@
  * like the retrieval ops (search/ops.ts): each is a `BoundOp` = the FROZEN handler-free
  * `OpDef` contract + a runtime handler composing the chokepoints. Handlers bind in the Worker.
  *
- * SCOPE: the team-lead-enumerated read surface — `traverse_graph`, `get_links`,
- * `get_backlinks`, `get_tags`, `get_timeline`, `list_entities`, `find_orphans`,
- * `search_entities`. The mutating §6.5 surface (`add_link`/`remove_link`/`add_tag`/
- * `add_timeline_entry`/`get_versions`/`revert_version`/`get_entity`/`entity_relations`) is
+ * SCOPE: the read surface — `traverse_graph`, `get_links`, `get_backlinks`, `get_tags`,
+ * `get_timeline`, `list_entities`, `find_orphans`, `search_entities` — plus the W4.4 mutating
+ * curation surface `add_link` / `add_tag` / `add_timeline_entry` (each a `write` op routed
+ * through `ScopedGraph` with an in-batch audit row). The remaining §6.5 surface
+ * (`remove_link` / `get_versions` / `revert_version` / `get_entity` / `entity_relations`) stays
  * DEFERRED.
  */
 import {
@@ -266,6 +267,67 @@ export const SEARCH_ENTITIES_OP = defineOp({
   output: z.object({ hits: z.array(EntityHitSchema) }),
 })
 
+// ── Mutating op definitions (W4.4; capability: write) ─────────────────────────────
+
+export const ADD_LINK_OP = defineOp({
+  name: "add_link",
+  description:
+    "Create a typed link between two doc-graph pages (each named by slug or id). " +
+    "Use to manually connect pages the extractor missed; the edge then shows in get_links/get_backlinks.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    from: z.string().min(1).describe("Source page slug or id."),
+    to: z.string().min(1).describe("Target page slug or id."),
+    linkType: z
+      .string()
+      .default("")
+      .describe("Relationship label, e.g. 'relates_to', 'depends_on'. Empty for a generic link."),
+    context: z.string().default("").describe("Optional note describing why the pages are linked."),
+  }),
+  output: z.object({
+    fromId: z.string(),
+    toId: z.string(),
+    linkType: z.string(),
+    context: z.string(),
+  }),
+})
+
+export const ADD_TAG_OP = defineOp({
+  name: "add_tag",
+  description:
+    "Attach a tag to a doc-graph page (named by slug or id). Idempotent. " +
+    "Use to categorize a page so get_tags and tag-filtered listings surface it.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    target: z.string().min(1).describe("Page slug or id to tag."),
+    tag: z.string().min(1).describe("The tag to attach."),
+  }),
+  output: z.object({ pageId: z.string(), tag: z.string() }),
+})
+
+export const ADD_TIMELINE_ENTRY_OP = defineOp({
+  name: "add_timeline_entry",
+  description:
+    "Append a dated timeline entry to a doc-graph page (named by slug or id). Idempotent per " +
+    "(date, summary). Use to record an event in a page's chronological history (get_timeline).",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    target: z.string().min(1).describe("Page slug or id the entry belongs to."),
+    date: z.string().min(1).describe("Entry date (ISO-8601 or any sortable date string)."),
+    summary: z.string().min(1).describe("One-line summary of the event."),
+    detail: z.string().default("").describe("Optional longer detail for the entry."),
+  }),
+  output: z.object({
+    id: z.string(),
+    pageId: z.string(),
+    date: z.string(),
+    summary: z.string(),
+  }),
+})
+
 // ── Bound handlers ────────────────────────────────────────────────────────────
 
 const specOf = (graph: "doc" | "entity") => (graph === "entity" ? ENTITY_GRAPH : DOC_GRAPH)
@@ -338,6 +400,27 @@ export const searchEntitiesOp: BoundOp<{ query: string; topK: number }, { hits: 
   }),
 }
 
+export const addLinkOp: BoundOp<
+  { from: string; to: string; linkType: string; context: string },
+  DocLinkRow
+> = {
+  def: ADD_LINK_OP,
+  handler: (ctx, input) => ctx.deps.graph.addLink(input),
+}
+
+export const addTagOp: BoundOp<{ target: string; tag: string }, { pageId: string; tag: string }> = {
+  def: ADD_TAG_OP,
+  handler: (ctx, input) => ctx.deps.graph.addTag(input),
+}
+
+export const addTimelineEntryOp: BoundOp<
+  { target: string; date: string; summary: string; detail: string },
+  { id: string; pageId: string; date: string; summary: string }
+> = {
+  def: ADD_TIMELINE_ENTRY_OP,
+  handler: (ctx, input) => ctx.deps.graph.addTimelineEntry(input),
+}
+
 /** Every bound graph op. */
 export const GRAPH_OPS = [
   traverseOp,
@@ -349,6 +432,9 @@ export const GRAPH_OPS = [
   listEntityEdgesOp,
   findOrphansOp,
   searchEntitiesOp,
+  addLinkOp,
+  addTagOp,
+  addTimelineEntryOp,
 ] as const
 
 /** Register the graph op CONTRACTS into a shared `OpRegistry` (handlers bind in the Worker). */

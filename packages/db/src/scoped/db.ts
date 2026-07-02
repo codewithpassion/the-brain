@@ -23,7 +23,7 @@ import type { Principal } from "@brain/shared"
 import { CHUNK_DB_BATCH_SIZE, EMBEDDING_DIMS, EMBEDDING_MODEL } from "@brain/shared"
 import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
+import { alias, type BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
 import {
   chunks,
   documents,
@@ -39,6 +39,9 @@ import {
   scopePredicate,
   visibilityPredicate,
 } from "./predicates"
+
+/** Alias of `documents` for the parent-part JOIN (§4.3 citation → parent resolution, W4.5). */
+const parentDocAlias = alias(documents, "parent_doc")
 
 /** Both `drizzle-orm/d1` (async) and `drizzle-orm/bun-sqlite` (sync) satisfy this. */
 export type BrainDrizzle = BaseSQLiteDatabase<"sync" | "async", unknown>
@@ -105,6 +108,12 @@ export interface InsertDocumentInput {
   path?: string | null
   /** Provenance marker; `'dream'` flags a reflection insight (D2 anti-loop D-i2). Default NULL. */
   origin?: string | null
+  /** Oversized-upload split (§4.3): the root document this part belongs to. Default NULL (a root). */
+  parentDocumentId?: string | null
+  /** 0-based part index within the split. Default NULL (an un-split document). */
+  partIndex?: number | null
+  /** Total parts in the split. Default NULL (an un-split document). */
+  partCount?: number | null
 }
 
 /** `insertChunks` per-row input — `tenantId` is NEVER accepted; the chokepoint forces it. */
@@ -141,6 +150,9 @@ export interface UpdateDocumentStatusInput {
   chunkCount?: number | null
   bodyR2Key?: string | null
   ingestedAt?: string | null
+  /** Oversized-upload split (§4.3): stamp the root's own part identity at finalize. */
+  partIndex?: number | null
+  partCount?: number | null
 }
 
 /**
@@ -257,20 +269,26 @@ export class ScopedDB {
     this.audit = audit
   }
 
-  /** The re-check projection: chunk + its citation fields + LEFT-JOINed trust_grade. */
+  /**
+   * The re-check projection: chunk + its citation fields + LEFT-JOINed trust_grade. For a chunk
+   * belonging to a child part of an oversized split (§4.3, W4.5), the citation fields resolve to
+   * the PARENT document (COALESCE over the `parentDoc` alias) so a hit surfaces ONE coherent
+   * source (`slug`/`title`/`documentId` of the user-facing doc), not `slug-p3`. Un-split docs have
+   * `parent_document_id = NULL`, so COALESCE falls through to the doc's own fields (unchanged).
+   */
   private chunkProjection() {
     return {
       id: chunks.id,
-      documentId: chunks.documentId,
+      documentId: sql<string>`COALESCE(${documents.parentDocumentId}, ${chunks.documentId})`,
       content: chunks.content,
       headingPath: chunks.headingPath,
       chunkSource: chunks.chunkSource,
       embeddedAt: chunks.embeddedAt,
       embeddingModel: chunks.embeddingModel,
       updatedAt: chunks.updatedAt,
-      slug: documents.slug,
-      title: documents.title,
-      sourceId: documents.sourceId,
+      slug: sql<string>`COALESCE(${parentDocAlias.slug}, ${documents.slug})`,
+      title: sql<string | null>`COALESCE(${parentDocAlias.title}, ${documents.title})`,
+      sourceId: sql<string | null>`COALESCE(${parentDocAlias.sourceId}, ${documents.sourceId})`,
       trustGrade: sql<string>`COALESCE(${memoryUsePolicy.trustGrade}, 'evidence')`,
     }
   }
@@ -290,6 +308,9 @@ export class ScopedDB {
     filter?: ScopedSearchFilter,
   ): Promise<ScopedChunk[]> {
     if (ids.length === 0) return []
+    // `parentDocAlias` (module-level) is the PARENT document of a split doc's child part (§4.3,
+    // W4.5) — LEFT-JOINed so a child-part chunk's citation resolves to the parent (COALESCE in
+    // chunkProjection). NULL for un-split docs (parent_document_id IS NULL), projection unchanged.
     const out: ScopedChunk[] = []
     for (let i = 0; i < ids.length; i += CHUNK_DB_BATCH_SIZE) {
       const batch = ids.slice(i, i + CHUNK_DB_BATCH_SIZE)
@@ -299,6 +320,13 @@ export class ScopedDB {
         .innerJoin(
           documents,
           and(eq(documents.id, chunks.documentId), eq(documents.tenantId, chunks.tenantId)),
+        )
+        .leftJoin(
+          parentDocAlias,
+          and(
+            eq(parentDocAlias.id, documents.parentDocumentId),
+            eq(parentDocAlias.tenantId, documents.tenantId),
+          ),
         )
         .leftJoin(
           memoryUsePolicy,
@@ -523,6 +551,8 @@ export class ScopedDB {
     scope: string | null
     path: string | null
     tags: string | null
+    origin: string | null
+    sourceId: string | null
     chunkCount: number | null
     createdAt: string | null
     updatedAt: string | null
@@ -539,6 +569,8 @@ export class ScopedDB {
         scope: documents.scope,
         path: documents.path,
         tags: documents.tags,
+        origin: documents.origin,
+        sourceId: documents.sourceId,
         chunkCount: documents.chunkCount,
         createdAt: documents.createdAt,
         updatedAt: documents.updatedAt,
@@ -741,6 +773,9 @@ export class ScopedDB {
       tags: doc.tags !== null && doc.tags !== undefined ? JSON.stringify(doc.tags) : "[]",
       path: doc.path ?? null,
       origin: doc.origin ?? null,
+      parentDocumentId: doc.parentDocumentId ?? null,
+      partIndex: doc.partIndex ?? null,
+      partCount: doc.partCount ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -827,6 +862,8 @@ export class ScopedDB {
         ...(patch.chunkCount !== undefined ? { chunkCount: patch.chunkCount } : {}),
         ...(patch.bodyR2Key !== undefined ? { bodyR2Key: patch.bodyR2Key } : {}),
         ...(patch.ingestedAt !== undefined ? { ingestedAt: patch.ingestedAt } : {}),
+        ...(patch.partIndex !== undefined ? { partIndex: patch.partIndex } : {}),
+        ...(patch.partCount !== undefined ? { partCount: patch.partCount } : {}),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
@@ -847,28 +884,37 @@ export class ScopedDB {
    * Tenant isolation is FORCED on every WHERE; the operation is a no-op if the document is
    * already deleted (the UPDATE with `WHERE deleted_at IS NULL` touches zero rows).
    */
-  async softDeleteDocument(documentId: string): Promise<{ chunkIds: string[] }> {
-    // SELECT live chunk ids first (needed for Vectorize deletion off-batch).
+  async softDeleteDocument(
+    documentId: string,
+  ): Promise<{ chunkIds: string[]; partDocumentIds: string[] }> {
+    // §4.3 (W4.5): an oversized doc is split into child part rows (parent_document_id = this id).
+    // Cascade the soft-delete to those live children so deleting the parent doesn't orphan live,
+    // searchable part rows/chunks. `partDocumentIds` is returned so the caller can also clear the
+    // KG mentions extracted from each part. The doc set = the target + its live children.
+    const partDocumentIds = await this.childPartDocIds(documentId, { liveOnly: true })
+    const docIds = [documentId, ...partDocumentIds]
+
+    // SELECT live chunk ids across the whole set (needed for Vectorize deletion off-batch).
     const liveRows = await this.db
       .select({ id: chunks.id })
       .from(chunks)
       .where(
         and(
           eq(chunks.tenantId, this.p.tenantId),
-          eq(chunks.documentId, documentId),
+          inArray(chunks.documentId, docIds),
           isNull(chunks.deletedAt),
         ),
       )
     const chunkIds = liveRows.map((r) => r.id)
 
     const now = new Date().toISOString()
-    const deleteDoc = this.db
+    const deleteDocs = this.db
       .update(documents)
       .set({ deletedAt: now, updatedAt: now })
       .where(
         and(
-          eq(documents.id, documentId),
           eq(documents.tenantId, this.p.tenantId),
+          inArray(documents.id, docIds),
           isNull(documents.deletedAt), // idempotent: already-deleted doc → no-op
         ),
       )
@@ -877,16 +923,34 @@ export class ScopedDB {
       .set({ deletedAt: now })
       .where(
         and(
-          eq(chunks.documentId, documentId),
           eq(chunks.tenantId, this.p.tenantId),
+          inArray(chunks.documentId, docIds),
           isNull(chunks.deletedAt), // idempotent: already-deleted chunks → no-op
         ),
       )
-    await this.batchWithAudit([deleteDoc, deleteChunks], {
+    await this.batchWithAudit([deleteDocs, deleteChunks], {
       action: "document.softDelete",
       targetId: documentId,
     })
-    return { chunkIds }
+    return { chunkIds, partDocumentIds }
+  }
+
+  /** Child part document ids of an oversized split (§4.3, W4.5). `liveOnly` excludes soft-deleted. */
+  private async childPartDocIds(
+    documentId: string,
+    opts: { liveOnly: boolean },
+  ): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.tenantId, this.p.tenantId),
+          eq(documents.parentDocumentId, documentId),
+          opts.liveOnly ? isNull(documents.deletedAt) : undefined,
+        ),
+      )
+    return rows.map((r) => r.id)
   }
 
   /**
@@ -898,25 +962,53 @@ export class ScopedDB {
    * each removed row, keeping the FTS shadow in sync. Returns the deleted chunk ids for
    * Vectorize cleanup (called BEFORE this method to avoid orphan-vector leaks).
    */
-  async hardDeleteDocumentChunks(documentId: string): Promise<{ chunkIds: string[] }> {
-    // SELECT all chunk ids (live + soft-deleted) before deletion for Vectorize cleanup.
+  async hardDeleteDocumentChunks(
+    documentId: string,
+  ): Promise<{ chunkIds: string[]; partDocumentIds: string[] }> {
+    // §4.3 (W4.5): a re-ingest on the supersede path re-splits the doc and creates FRESH child
+    // part rows. The OLD children must be removed here — otherwise their chunks orphan AND the
+    // deterministic child slug (`${parentSlug}-pN`) collides on the unique (tenant, slug) index,
+    // failing the re-split. So this deletes ALL chunks (the parent's own + every child's) and the
+    // child DOC rows. The parent doc row is kept — updateDocumentForSupersede updates it in place.
+    // `partDocumentIds` is returned so the caller can clear the OLD parts' KG mentions before re-ingest.
+    const partDocumentIds = await this.childPartDocIds(documentId, { liveOnly: false })
+    const docIds = [documentId, ...partDocumentIds]
+
+    // SELECT all chunk ids (live + soft-deleted) across the set before deletion for Vectorize cleanup.
     const allRows = await this.db
       .select({ id: chunks.id })
       .from(chunks)
-      .where(and(eq(chunks.tenantId, this.p.tenantId), eq(chunks.documentId, documentId)))
+      .where(and(eq(chunks.tenantId, this.p.tenantId), inArray(chunks.documentId, docIds)))
     const chunkIds = allRows.map((r) => r.id)
 
+    const statements: BatchStatement[] = []
     if (chunkIds.length > 0) {
-      const hardDelete = this.db
-        .delete(chunks)
-        .where(and(eq(chunks.documentId, documentId), eq(chunks.tenantId, this.p.tenantId)))
-      await this.batchWithAudit([hardDelete], {
+      statements.push(
+        this.db
+          .delete(chunks)
+          .where(and(eq(chunks.tenantId, this.p.tenantId), inArray(chunks.documentId, docIds))),
+      )
+    }
+    if (partDocumentIds.length > 0) {
+      statements.push(
+        this.db
+          .delete(documents)
+          .where(
+            and(
+              eq(documents.tenantId, this.p.tenantId),
+              eq(documents.parentDocumentId, documentId),
+            ),
+          ),
+      )
+    }
+    if (statements.length > 0) {
+      await this.batchWithAudit(statements, {
         action: "chunk.supersede",
         targetId: documentId,
-        diff: JSON.stringify({ count: chunkIds.length }),
+        diff: JSON.stringify({ chunks: chunkIds.length, childDocs: partDocumentIds.length }),
       })
     }
-    return { chunkIds }
+    return { chunkIds, partDocumentIds }
   }
 
   /**

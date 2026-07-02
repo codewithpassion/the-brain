@@ -131,16 +131,13 @@ export const reconcileObsidianDeletions = async (
   }
   let deleted = 0
   for (const doc of toDelete) {
-    const { chunkIds } = await services.db.softDeleteDocument(doc.id)
+    const { chunkIds, partDocumentIds } = await services.db.softDeleteDocument(doc.id)
     if (chunkIds.length > 0) {
       await services.vectors.deleteVectors(chunkIds)
     }
-    // Clear KG extraction so the deleted note's entities are no longer queryable.
-    // gcOrphanedEntities: GC entities with zero remaining mentions across the tenant.
-    await services.graph.clearPriorExtraction(
-      { sourceKind: "document", sourceId: doc.id },
-      { gcOrphanedEntities: true },
-    )
+    // Clear KG extraction so the deleted note's entities (incl. split-doc child parts, §4.3 W4.5)
+    // are no longer queryable; GC entities with zero remaining mentions across the tenant.
+    await services.graph.clearExtractionForFamily([doc.id, ...partDocumentIds])
     deleted++
   }
   return { deleted }

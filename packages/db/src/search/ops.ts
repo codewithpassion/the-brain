@@ -7,9 +7,10 @@
  *   - `query`  — hybrid + RRF + boosts + rerank ON (no synthesis).
  *   - `think`  — `query` + token-budget-guarded cited synthesis.
  *
- * Query expansion (s05 marks it ON for `query`/`think`) is DEFERRED — the team-lead build
- * scope is arms → hydrate → RRF → boost → rerank → synthesis. The seam is `query`'s
- * rerank-on distinction from `search`; `expandQuery` lands behind the same `AiPort.gen` later.
+ * Query expansion (W4.1) is now wired behind `AiPort.gen` (see `expand.ts`) and threaded from
+ * the op input as `expandQuery?: boolean`. The DEFAULT is per-op: `think` ON (breadth matters
+ * for a synthesized answer), `search`/`query` OFF (the cheap/precise paths). It is a strict
+ * widening that degrades to the original query when gen returns null.
  *
  * Evidence, citations, and recall traces are ALL sourced from `FusedCandidate.candidate`,
  * which is built only from re-checked, hydrated rows (invariant 3) — never a raw match id.
@@ -23,7 +24,7 @@ import {
   THINK_TOP_K,
 } from "@brain/shared"
 import { hybridSearch } from "./pipeline"
-import { buildSynthesisPrompt, SYNTH_SYSTEM } from "./synthesis"
+import { synthesizeAnswer } from "./synthesis"
 import type { FusedCandidate, OpContext, SearchHit, SearchResult, ThinkResult } from "./types"
 
 /** Parsed (post-Zod) input shared by all three ops. */
@@ -35,6 +36,8 @@ export interface RetrievalInput {
   path?: string
   /** Restrict retrieval to documents that contain this tag. */
   tag?: string
+  /** W4.1 query expansion override; unset → the per-op default (think ON, search/query OFF). */
+  expandQuery?: boolean
 }
 
 /** A frozen `OpDef` contract paired with its runtime handler. */
@@ -100,6 +103,7 @@ export const searchOp: BoundOp<RetrievalInput, SearchResult> = {
     const ranked = await hybridSearch(ctx.deps, input.query, {
       topK: input.topK,
       rerank: false,
+      expand: input.expandQuery ?? false, // search: cheap path, expansion OFF by default
       ...(f !== undefined ? { filter: f } : {}),
     })
     return { hits: ranked.map(toHit) }
@@ -114,6 +118,7 @@ export const queryOp: BoundOp<RetrievalInput, SearchResult> = {
     const ranked = await hybridSearch(ctx.deps, input.query, {
       topK: input.topK,
       rerank: true,
+      expand: input.expandQuery ?? false, // query: precise-passage path, expansion OFF by default
       ...(f !== undefined ? { filter: f } : {}),
     })
     await writeRecall(ctx, input.query, ranked)
@@ -129,6 +134,7 @@ export const thinkOp: BoundOp<RetrievalInput, ThinkResult> = {
     const ranked = await hybridSearch(ctx.deps, input.query, {
       topK: THINK_TOP_K,
       rerank: true,
+      expand: input.expandQuery ?? true, // think: breadth matters — expansion ON by default
       ...(f !== undefined ? { filter: f } : {}),
     })
     await writeRecall(ctx, input.query, ranked)
@@ -146,10 +152,15 @@ export const thinkOp: BoundOp<RetrievalInput, ThinkResult> = {
       }
     }
 
-    const { prompt, warnings, gaps } = buildSynthesisPrompt(input.query, ranked)
-    // Invariant 16: re-check the cost cap before the gen() AI call (a hard 429, not a degrade).
-    await ctx.deps.budget.check()
-    const answer = await ctx.deps.ai.gen(prompt, SYNTH_SYSTEM)
+    // Synthesis: single-gen when evidence fits; map/refine over summaries when it overflows the
+    // budget (W4.3). `synthesizeAnswer` re-checks the cost cap before EACH gen() (invariant 16)
+    // and degrades a failed map step back to the truncate path.
+    const { answer, warnings, gaps } = await synthesizeAnswer(
+      ctx.deps.ai,
+      () => ctx.deps.budget.check(),
+      input.query,
+      ranked,
+    )
     if (answer === null) {
       return {
         answer: "",

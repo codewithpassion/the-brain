@@ -239,6 +239,48 @@ export const findOrphans = createServerFn({ method: "GET" }).handler(
   },
 )
 
+/** `add_tag` — attach a tag to a doc-graph page (by slug or id). Write op. */
+export const addGraphTag = createServerFn({ method: "POST" })
+  .validator((d: { target: string; tag: string }) => d)
+  .handler(async ({ data }): Promise<Result<{ pageId: string; tag: string }>> => {
+    try {
+      const out = await brainCall<{ pageId: string; tag: string }>("add_tag", false, {
+        target: data.target,
+        tag: data.tag,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `add_link` — create a typed link between two doc-graph pages (by slug or id). Write op. */
+export const addGraphLink = createServerFn({ method: "POST" })
+  .validator((d: { from: string; to: string; linkType?: string }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<Result<{ fromId: string; toId: string; linkType: string; context: string }>> => {
+      try {
+        const out = await brainCall<{
+          fromId: string
+          toId: string
+          linkType: string
+          context: string
+        }>("add_link", false, {
+          from: data.from,
+          to: data.to,
+          ...(data.linkType !== undefined && data.linkType !== ""
+            ? { linkType: data.linkType }
+            : {}),
+        })
+        return { ok: true, data: out }
+      } catch (error) {
+        return fail(error)
+      }
+    },
+  )
+
 // --- Session ops ---
 
 /** `list_sessions` — recent conversation sessions. */

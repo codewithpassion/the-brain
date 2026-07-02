@@ -185,6 +185,7 @@ export const runDreamDigest = async (
     const insightWhere = and(
       eq(documents.tenantId, tenantId),
       isNull(documents.deletedAt),
+      isNull(documents.parentDocumentId), // §4.3 (W4.5): count a split doc once, not per part
       eq(documents.origin, DOC_ORIGIN_DREAM),
       since ? gt(documents.createdAt, since) : undefined,
       scopePredicate(principal, documents.scope),
@@ -192,6 +193,7 @@ export const runDreamDigest = async (
     const docWhere = and(
       eq(documents.tenantId, tenantId),
       isNull(documents.deletedAt),
+      isNull(documents.parentDocumentId), // §4.3 (W4.5): count a split doc once, not per part
       notDreamOrigin(documents.origin),
       since ? gt(documents.createdAt, since) : undefined,
       scopePredicate(principal, documents.scope),
