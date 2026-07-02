@@ -13,7 +13,7 @@
  * unconditionally on every query — these are ADDED on top of it.
  */
 import type { Principal } from "@brain/shared"
-import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 
 /** The three columns a visibility-bearing table exposes to the gate. */
@@ -49,3 +49,21 @@ export const visibilityPredicate = (p: Principal, t: VisibilityColumns): SQL => 
 
   return or(...parts) ?? sql`1 = 0`
 }
+
+/** The two lineage columns an "active fact" gate reads (`superseded_by` / `consolidated_into`). */
+export interface FactLineageColumns {
+  supersededBy: AnySQLiteColumn
+  consolidatedInto: AnySQLiteColumn
+}
+
+/**
+ * The single definition of an ACTIVE fact w.r.t. the Dream engine (v2 W1/D1): one that has not
+ * been superseded or consolidated. Returns `undefined` when `includeSuperseded` is set (so the
+ * caller can fold it into `and(...)`, which drops undefined clauses) — that reveals lineage.
+ * Used by `SessionStore` recall AND the dream candidate select so "active" has one home.
+ */
+export const activeFactPredicate = (
+  cols: FactLineageColumns,
+  includeSuperseded?: boolean,
+): SQL | undefined =>
+  includeSuperseded ? undefined : and(isNull(cols.supersededBy), isNull(cols.consolidatedInto))

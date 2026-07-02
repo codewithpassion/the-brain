@@ -547,7 +547,7 @@ export class ScopedDB {
    * (`f.rowid` IS `facts.id`) — NOT by the chunks-style rowid. Tenant + scope + visibility
    * + live (`expired_at IS NULL`) are re-checked on the base table before any id leaves.
    */
-  async ftsFactIds(query: string, topK: number): Promise<number[]> {
+  async ftsFactIds(query: string, topK: number, includeSuperseded = false): Promise<number[]> {
     const match = sanitizeFts(query)
     if (match.length === 0) return []
     const scopeFragment =
@@ -564,13 +564,18 @@ export class ScopedDB {
             sql`, `,
           )}))`
         : sql``
+    // Hide Dream-superseded/consolidated facts by default (parity with SessionStore.recall — so
+    // the keyword arm doesn't starve the visible top-K with rows the default view would drop).
+    const activeFragment = includeSuperseded
+      ? sql``
+      : sql` AND x.superseded_by IS NULL AND x.consolidated_into IS NULL`
     const statement = sql`
       SELECT x.id AS id
       FROM facts_fts f
       JOIN facts x ON x.id = f.rowid
       WHERE facts_fts MATCH ${match}
         AND x.tenant_id = ${this.p.tenantId}
-        AND x.expired_at IS NULL${scopeFragment}
+        AND x.expired_at IS NULL${activeFragment}${scopeFragment}
         AND (x.visibility = 'world'
              OR (x.visibility = 'private' AND x.user_id = ${this.p.userId})${teamFragment})
       ORDER BY bm25(facts_fts)

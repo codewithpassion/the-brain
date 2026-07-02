@@ -54,6 +54,7 @@ import {
 } from "./backfill"
 import type { ApiBindings } from "./bindings"
 import { isDeviceFlowPath, mountDeviceFlow } from "./device-flow/routes"
+import { type DreamBindings, runNightlyDreamSweep } from "./dream"
 import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
 import { mcpApiHandler } from "./mcp/oauth-handler"
@@ -640,7 +641,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
  * The full deployed Worker env: the frozen `ApiBindings` plus the deploy-only Workflows/Queues
  * the P3/P5 cron + queue handlers reach (all OPTIONAL — absent in the local test harness).
  */
-type WorkerBindings = ApiBindings & SessionBindings & BackfillBindings
+type WorkerBindings = ApiBindings & SessionBindings & BackfillBindings & DreamBindings
 
 /**
  * `scheduled()` (every 5 minutes): the P5 idle-promotion + audit-export sweeps and the P3
@@ -650,10 +651,16 @@ type WorkerBindings = ApiBindings & SessionBindings & BackfillBindings
  * binding (boundary-lint). The re-embed sweep enqueues references onto `REEMBED_QUEUE`.
  */
 const scheduled = async (
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: WorkerBindings,
   ctx: ExecutionContext,
 ): Promise<void> => {
+  // Nightly (03:00 UTC): the Dream engine consolidation sweep, one dispatch per tenant.
+  if (controller.cron === "0 3 * * *") {
+    ctx.waitUntil(runNightlyDreamSweep(env))
+    return
+  }
+  // Every 5 minutes: the P5 idle-promotion + audit-export sweeps and the P3 re-embed sweep.
   const cursors = createAuditExportCursorStore(env)
   ctx.waitUntil(
     Promise.all([
@@ -782,6 +789,7 @@ export default {
 
 // Every Workflow class the wrangler `workflows` bindings reference MUST be exported from `main`.
 export { EnumeratorWorkflow } from "./backfill"
+export { DreamWorkflow } from "./dream"
 export { EntityExtractionWorkflow } from "./entity-extraction"
 // The MCP Durable Object class the wrangler `durable_objects` binding references (PRD §9.2).
 export { BrainMCP } from "./mcp/agent"

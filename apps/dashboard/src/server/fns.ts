@@ -26,6 +26,7 @@ import type {
   ListAuditResult,
   ListBackfillRunsResult,
   ListDocumentsResult,
+  ListDreamRunsResult,
   ListEntitiesResult,
   ListEntityEdgesResult,
   ListOrgsResult,
@@ -279,6 +280,18 @@ export const getBackfillRuns = createServerFn({ method: "GET" }).handler(
   async (): Promise<Result<ListBackfillRunsResult>> => {
     try {
       const out = await brainCall<ListBackfillRunsResult>("list_backfill_runs", true, { limit: 50 })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `list_dream_runs` — Dream engine run history (consolidation counts). */
+export const getDreamRuns = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListDreamRunsResult>> => {
+    try {
+      const out = await brainCall<ListDreamRunsResult>("list_dream_runs", true, { limit: 50 })
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)
@@ -829,13 +842,22 @@ export const okfImport = createServerFn({ method: "POST" })
 
 /** `recall` (browse) — retrieve hot-memory facts with optional query/entity/since filters. */
 export const recallBrowse = createServerFn({ method: "POST" })
-  .validator((d: { query?: string; entitySlug?: string; since?: string; limit?: number }) => d)
+  .validator(
+    (d: {
+      query?: string
+      entitySlug?: string
+      since?: string
+      includeSuperseded?: boolean
+      limit?: number
+    }) => d,
+  )
   .handler(async ({ data }): Promise<Result<FactsBrowseResult>> => {
     try {
       const out = await brainCall<FactsBrowseResult>("recall", true, {
         ...(data.query ? { query: data.query } : {}),
         ...(data.entitySlug ? { entitySlug: data.entitySlug } : {}),
         ...(data.since ? { since: data.since } : {}),
+        ...(data.includeSuperseded ? { includeSuperseded: true } : {}),
         limit: data.limit ?? 100,
       })
       return { ok: true, data: out }

@@ -88,6 +88,7 @@ describe("migrations apply cleanly", () => {
       "0002_path_columns_and_page_revisions.sql",
       "0003_smooth_leper_queen.sql",
       "0004_huge_harpoon.sql",
+      "0005_dream_runs.sql",
     ])
   })
 

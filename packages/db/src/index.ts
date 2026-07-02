@@ -16,6 +16,8 @@ export * from "./ai"
 export * from "./auth"
 // ── Backfill spine + re-embed migration (Phase 3) ─────────────────────────────
 export * from "./backfill"
+// ── Dream engine core — fact consolidation (v2 W1/D1) ─────────────────────────
+export * from "./dream"
 export type { BrainBindings } from "./env"
 // ── Sessions + hot memory + governance (Phase 5) ──────────────────────────────
 export * from "./governance"

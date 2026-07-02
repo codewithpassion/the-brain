@@ -5,11 +5,12 @@ import { createFileRoute } from "@tanstack/react-router"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
-import { getBackfillRuns } from "../server/fns"
+import { getBackfillRuns, getDreamRuns } from "../server/fns"
 
 export const Route = createFileRoute("/jobs")({
   loader: async () => ({
     runs: await getBackfillRuns(),
+    dreamRuns: await getDreamRuns(),
   }),
   component: () => (
     <RequireAuth>
@@ -26,14 +27,58 @@ function jobStatusVariant(s: string): "default" | "secondary" | "outline" | "war
 }
 
 function JobsPage() {
-  const { runs } = Route.useLoaderData()
+  const { runs, dreamRuns } = Route.useLoaderData()
 
   return (
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Jobs</h1>
-        <p className="text-neutral-500 text-sm">Backfill and re-embed run status.</p>
+        <p className="text-neutral-500 text-sm">Backfill, re-embed, and Dream run status.</p>
       </header>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Dream runs ({dreamRuns.ok ? dreamRuns.data.runs.length : 0})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {dreamRuns.ok ? (
+            dreamRuns.data.runs.length === 0 ? (
+              <p className="text-neutral-500 text-sm">No dream runs yet.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-neutral-400">
+                    <th className="pb-1 font-medium">Kind</th>
+                    <th className="pb-1 font-medium">Status</th>
+                    <th className="pb-1 font-medium">Clusters</th>
+                    <th className="pb-1 font-medium">Merged</th>
+                    <th className="pb-1 font-medium">Superseded</th>
+                    <th className="pb-1 font-medium">Contradictions</th>
+                    <th className="pb-1 font-medium">Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dreamRuns.data.runs.map((run) => (
+                    <tr key={run.id} className="border-neutral-100 border-t">
+                      <td className="py-1.5 text-neutral-700">dream · {run.kind}</td>
+                      <td className="py-1.5">
+                        <Badge variant={jobStatusVariant(run.status)}>{run.status}</Badge>
+                      </td>
+                      <td className="py-1.5 text-neutral-600">{run.clustersJudged}</td>
+                      <td className="py-1.5 text-neutral-600">{run.merged}</td>
+                      <td className="py-1.5 text-neutral-600">{run.superseded}</td>
+                      <td className="py-1.5 text-neutral-600">{run.contradictions}</td>
+                      <td className="py-1.5 text-neutral-600">{run.updatedAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : (
+            <p className="text-neutral-500 text-sm">Unavailable: {dreamRuns.error}</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

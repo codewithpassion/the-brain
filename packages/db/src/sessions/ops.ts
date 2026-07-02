@@ -186,6 +186,12 @@ export const RECALL_OP = defineOp({
       .string()
       .optional()
       .describe("Keyword search over facts via full-text index (alternative to grep)."),
+    includeSuperseded: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Include facts the Dream engine superseded or consolidated (hidden by default). Set true to see lineage.",
+      ),
     limit: z
       .number()
       .int()
@@ -195,7 +201,15 @@ export const RECALL_OP = defineOp({
       .describe("Max facts to return (1–200, default 50)."),
   }),
   output: z.object({
-    facts: z.array(z.object({ id: z.number(), fact: z.string(), kind: z.string() })),
+    facts: z.array(
+      z.object({
+        id: z.number(),
+        fact: z.string(),
+        kind: z.string(),
+        supersededBy: z.number().nullable(),
+        consolidatedInto: z.number().nullable(),
+      }),
+    ),
   }),
 })
 
@@ -367,6 +381,8 @@ export interface RecallRequest {
   grep?: string
   /** Keyword query — routed through the `facts_fts` JOIN-back (`ScopedDB.ftsFactIds`). */
   query?: string
+  /** Include Dream-superseded/consolidated facts (default false). */
+  includeSuperseded?: boolean
   limit?: number
 }
 
@@ -383,8 +399,8 @@ export const recall = async (
 ): Promise<RecalledFact[]> => {
   const limit = req.limit ?? 50
   if (req.query !== undefined && req.query.trim().length > 0) {
-    const ids = await services.db.ftsFactIds(req.query, limit)
-    return services.sessions.hydrateFacts(ids)
+    const ids = await services.db.ftsFactIds(req.query, limit, req.includeSuperseded ?? false)
+    return services.sessions.hydrateFacts(ids, req.includeSuperseded)
   }
   return services.sessions.recall({
     limit,
@@ -392,6 +408,7 @@ export const recall = async (
     ...(req.since !== undefined ? { since: req.since } : {}),
     ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
     ...(req.grep !== undefined ? { grep: req.grep } : {}),
+    ...(req.includeSuperseded !== undefined ? { includeSuperseded: req.includeSuperseded } : {}),
   })
 }
 

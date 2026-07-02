@@ -177,6 +177,26 @@ export interface ListBackfillRunsResult {
   runs: BackfillRun[]
 }
 
+/** A Dream engine run (from `list_dream_runs`). */
+export interface DreamRun {
+  id: string
+  kind: string
+  status: string
+  clustersJudged: number
+  merged: number
+  superseded: number
+  contradictions: number
+  kept: number
+  neurons: number
+  attempts: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ListDreamRunsResult {
+  runs: DreamRun[]
+}
+
 // --- Org management ---
 
 export interface OrgRow {
@@ -414,6 +434,10 @@ export interface FactItem {
   id: number
   fact: string
   kind: string
+  /** Dream lineage: the fact that superseded this one (present on recall output). */
+  supersededBy?: number | null
+  /** Dream lineage: the consolidated fact this one was merged into. */
+  consolidatedInto?: number | null
 }
 
 export interface FactsBrowseResult {

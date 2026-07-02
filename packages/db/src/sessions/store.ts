@@ -43,7 +43,7 @@ import {
   sessionTurns,
 } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import { activeFactPredicate, scopePredicate, visibilityPredicate } from "../scoped/predicates"
 
 /** A runnable Drizzle insert/update statement for atomic batch execution. */
 type BatchStatement = BatchItem<"sqlite">
@@ -129,6 +129,10 @@ export interface RecalledFact {
   notability: string
   validFrom: string
   source: string
+  /** Lineage: the fact that superseded this one (Dream engine), else null. */
+  supersededBy: number | null
+  /** Lineage: the consolidated fact this one was merged into (Dream engine), else null. */
+  consolidatedInto: number | null
 }
 
 /** Dispatch shape for `recall` (port of gbrain's recall dispatcher, §8.4). */
@@ -140,6 +144,8 @@ export interface RecallQuery {
   /** SQL `LIKE` grep over the `fact` text (newest-first). */
   grep?: string
   limit?: number
+  /** Include superseded/consolidated facts (Dream engine lineage). Default false. */
+  includeSuperseded?: boolean
 }
 
 /** The JSON shape stored in `brain_snapshots.manifest` (§8.5). */
@@ -496,8 +502,16 @@ export class SessionStore {
         notability: facts.notability,
         validFrom: facts.validFrom,
         source: facts.source,
+        supersededBy: facts.supersededBy,
+        consolidatedInto: facts.consolidatedInto,
       })
       .from(facts)
+  }
+
+  /** The lineage columns the shared `activeFactPredicate` reads. */
+  private static readonly lineageCols = {
+    supersededBy: facts.supersededBy,
+    consolidatedInto: facts.consolidatedInto,
   }
 
   /**
@@ -506,11 +520,18 @@ export class SessionStore {
    * + live (`expired_at IS NULL`) — so user B never recalls user A's `private` fact and the
    * `team` tier is enforced (invariant 8). Keyword recall (FTS) routes through
    * `ScopedDB.ftsFactIds` + `hydrateFacts` instead (it owns the `facts_fts` JOIN-back).
+   *
+   * By default Dream-superseded/consolidated facts are HIDDEN (consolidation improves recall
+   * quality). Two exemptions leave them visible: `includeSuperseded`, AND — always — a
+   * SESSION-SCOPED recall (`sessionId` set), because `get_session_context` must keep projecting a
+   * session's own promoted facts even after a later night consolidates them (D-i5 lineage, not loss).
    */
   async recall(query: RecallQuery): Promise<RecalledFact[]> {
+    const showAll = query.includeSuperseded === true || query.sessionId !== undefined
     const where = and(
       eq(facts.tenantId, this.p.tenantId),
       isNull(facts.expiredAt),
+      activeFactPredicate(SessionStore.lineageCols, showAll),
       scopePredicate(this.p, facts.scope),
       visibilityPredicate(this.p, visibilityCols),
       query.entitySlug ? eq(facts.entitySlug, query.entitySlug) : undefined,
@@ -529,7 +550,7 @@ export class SessionStore {
    * SAME `tenant_id` + `scopePredicate` + `visibilityPredicate` re-check the FTS already applied
    * runs again here — defense-in-depth, drop-don't-error (an out-of-visibility id is absent).
    */
-  async hydrateFacts(ids: number[]): Promise<RecalledFact[]> {
+  async hydrateFacts(ids: number[], includeSuperseded?: boolean): Promise<RecalledFact[]> {
     if (ids.length === 0) return []
     return this.recallSelect()
       .where(
@@ -537,6 +558,7 @@ export class SessionStore {
           eq(facts.tenantId, this.p.tenantId),
           inArray(facts.id, ids),
           isNull(facts.expiredAt),
+          activeFactPredicate(SessionStore.lineageCols, includeSuperseded),
           scopePredicate(this.p, facts.scope),
           visibilityPredicate(this.p, visibilityCols),
         ),

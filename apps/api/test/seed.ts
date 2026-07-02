@@ -86,7 +86,11 @@ export const seedChunk = async (opts: {
     .run()
 }
 
-/** Insert a `facts` row (autoincrement id); returns the new id for exact-match assertions. */
+/**
+ * Insert a `facts` row (autoincrement id); returns the new id for exact-match assertions.
+ * `kind`/`entity_slug`/`source_session_id` are OPTIONAL (schema defaults / NULL) so existing
+ * callers are unaffected; the dream canary uses them to plant consolidation clusters.
+ */
 export const seedFact = async (opts: {
   tenantId: string
   scope?: string | null
@@ -94,11 +98,15 @@ export const seedFact = async (opts: {
   userId?: string | null
   visibility?: string
   fact?: string
+  kind?: string
+  entitySlug?: string | null
+  sourceSessionId?: string | null
   expiredAt?: string | null
 }): Promise<number> => {
   const res = await env.DB.prepare(
-    `INSERT INTO facts (tenant_id, scope, team_id, user_id, visibility, fact, source, expired_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'mcp:extract_facts', ?) RETURNING id`,
+    `INSERT INTO facts (tenant_id, scope, team_id, user_id, visibility, fact, kind, entity_slug,
+                        source_session_id, source, expired_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'mcp:extract_facts', ?) RETURNING id`,
   )
     .bind(
       opts.tenantId,
@@ -107,6 +115,9 @@ export const seedFact = async (opts: {
       opts.userId ?? null,
       opts.visibility ?? "world",
       opts.fact ?? "the needle fact is essential",
+      opts.kind ?? "fact",
+      opts.entitySlug ?? null,
+      opts.sourceSessionId ?? null,
       opts.expiredAt ?? null,
     )
     .first<{ id: number }>()

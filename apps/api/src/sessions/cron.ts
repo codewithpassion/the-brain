@@ -42,7 +42,7 @@ const systemPrincipal = (session: IdleSession): Principal => ({
 })
 
 /** A system admin `Principal` for a tenant — the audit-export read needs owner/admin authority. */
-const systemAdmin = (tenantId: string): Principal => ({
+export const systemAdmin = (tenantId: string): Principal => ({
   tenantId,
   userId: "system",
   teamIds: [],

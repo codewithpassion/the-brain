@@ -33,17 +33,26 @@ function FactsPage() {
   const [query, setQuery] = useState("")
   const [entitySlug, setEntitySlug] = useState("")
   const [since, setSince] = useState("")
+  const [includeSuperseded, setIncludeSuperseded] = useState(false)
 
-  const loadFacts = async (overrides?: { query?: string; entitySlug?: string; since?: string }) => {
+  const loadFacts = async (overrides?: {
+    query?: string
+    entitySlug?: string
+    since?: string
+    includeSuperseded?: boolean
+  }) => {
     setLoading(true)
     const q = overrides?.query !== undefined ? overrides.query : query.trim()
     const e = overrides?.entitySlug !== undefined ? overrides.entitySlug : entitySlug.trim()
     const s = overrides?.since !== undefined ? overrides.since : since
+    const inc =
+      overrides?.includeSuperseded !== undefined ? overrides.includeSuperseded : includeSuperseded
     const res = await recallBrowse({
       data: {
         ...(q ? { query: q } : {}),
         ...(e ? { entitySlug: e } : {}),
         ...(s ? { since: s } : {}),
+        ...(inc ? { includeSuperseded: true } : {}),
         limit: 100,
       },
     })
@@ -61,6 +70,7 @@ function FactsPage() {
     setQuery("")
     setEntitySlug("")
     setSince("")
+    setIncludeSuperseded(false)
     const res = await recallBrowse({ data: { limit: 100 } })
     if (res.ok) setFacts(res)
     else toast(`Load failed: ${res.error}`)
@@ -76,7 +86,7 @@ function FactsPage() {
   }
 
   const factList: FactItem[] = facts.ok ? facts.data.facts : []
-  const hasFilters = query.trim() || entitySlug.trim() || since
+  const hasFilters = query.trim() || entitySlug.trim() || since || includeSuperseded
 
   return (
     <div className="flex flex-col gap-6">
@@ -128,6 +138,17 @@ function FactsPage() {
                 className="h-8 text-sm"
               />
             </div>
+            <label className="flex h-8 items-center gap-1.5 text-neutral-600 text-xs">
+              <input
+                type="checkbox"
+                checked={includeSuperseded}
+                onChange={(e) => {
+                  setIncludeSuperseded(e.target.checked)
+                  void loadFacts({ includeSuperseded: e.target.checked })
+                }}
+              />
+              Include superseded
+            </label>
             <Button type="submit" disabled={loading} className="h-8 text-sm">
               {loading ? "Loading…" : "Apply"}
             </Button>
@@ -165,7 +186,19 @@ function FactsPage() {
                         <td className="py-1.5">
                           <Badge variant="outline">{f.kind}</Badge>
                         </td>
-                        <td className="py-1.5 text-neutral-700">{f.fact}</td>
+                        <td className="py-1.5 text-neutral-700">
+                          {f.fact}
+                          {f.consolidatedInto != null && (
+                            <Badge variant="outline" className="ml-2 text-neutral-400">
+                              consolidated → #{f.consolidatedInto}
+                            </Badge>
+                          )}
+                          {f.supersededBy != null && (
+                            <Badge variant="outline" className="ml-2 text-neutral-400">
+                              superseded → #{f.supersededBy}
+                            </Badge>
+                          )}
+                        </td>
                         <td className="py-1.5">
                           <ForgetButton
                             factId={f.id}

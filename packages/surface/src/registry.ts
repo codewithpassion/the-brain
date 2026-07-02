@@ -6,6 +6,7 @@
  */
 import {
   registerAdminOps,
+  registerDreamOps,
   registerGovernanceOps,
   registerGraphOps,
   registerMemoryOps,
@@ -24,5 +25,6 @@ export const buildRegistry = (): OpRegistry => {
   registerGovernanceOps(registry)
   registerAdminOps(registry)
   registerVaultOps(registry)
+  registerDreamOps(registry)
   return registry
 }

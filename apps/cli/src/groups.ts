@@ -64,6 +64,8 @@ const GROUP_BY_OP: Record<string, Group> = {
   audit_export: "admin",
   list_audit: "admin",
   list_backfill_runs: "admin",
+  dream_now: "admin",
+  list_dream_runs: "admin",
   get_stats: "admin",
   vault_writeback: "admin",
   create_vault_credential: "admin",

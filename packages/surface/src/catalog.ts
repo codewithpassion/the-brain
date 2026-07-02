@@ -29,6 +29,8 @@ import {
   createSessionServices,
   createSnapshot,
   DELETE_DOCUMENT_OP,
+  DREAM_NOW_OP,
+  dispatchDreamRun,
   exportOkfBundle,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
@@ -43,6 +45,7 @@ import {
   INGEST_DOCUMENT_OP,
   importOkfBundle,
   LIST_SNAPSHOTS_OP,
+  listDreamRunsOp,
   listMemory,
   listSnapshots,
   MEMORY_FORGET_OP,
@@ -197,8 +200,28 @@ const recallSurfaceOp: SurfaceOp = {
       }))
       ctx.waitUntil(services.db.appendRecallTraces(traces))
     }
-    return { facts: facts.map((fact) => ({ id: fact.id, fact: fact.fact, kind: fact.kind })) }
+    return {
+      facts: facts.map((fact) => ({
+        id: fact.id,
+        fact: fact.fact,
+        kind: fact.kind,
+        supersededBy: fact.supersededBy,
+        consolidatedInto: fact.consolidatedInto,
+      })),
+    }
   },
+}
+
+// ── Dream family (dream_now / list_dream_runs) ────────────────────────────────
+
+/**
+ * `dream_now` — trigger a consolidation dream for the caller's tenant via the SHARED
+ * `dispatchDreamRun` helper (workflow-or-inline; the same path the nightly cron uses). A genuine
+ * dispatch error propagates (only a duplicate same-day instance is swallowed, inside the helper).
+ */
+const dreamNowSurfaceOp: SurfaceOp = {
+  def: DREAM_NOW_OP,
+  invoke: (ctx) => dispatchDreamRun(ctx.env, ctx.principal),
 }
 
 const forgetFactSurfaceOp: SurfaceOp = {
@@ -748,6 +771,8 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   forgetFactSurfaceOp,
   createSnapshotSurfaceOp,
   listSnapshotsSurfaceOp,
+  dreamNowSurfaceOp,
+  adminSurfaceOp(listDreamRunsOp as unknown as AdminBoundOp<unknown, unknown>),
   memorySetSurfaceOp,
   memoryGetSurfaceOp,
   memoryListSurfaceOp,

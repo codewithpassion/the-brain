@@ -94,6 +94,11 @@
       "name": "enumerator",
       "binding": "ENUMERATOR",
       "class_name": "EnumeratorWorkflow"
+    },
+    {
+      "name": "dream",
+      "binding": "DREAM",
+      "class_name": "DreamWorkflow"
     }
   ],
 
@@ -161,9 +166,11 @@
 
   // ── Cron triggers ────────────────────────────────────────────────────────────
   // Every 5 minutes the `scheduled()` handler runs the P5 idle-promotion + audit-export
-  // sweeps and the P3 re-embed sweep. (No local cron emulation in the test harness.)
+  // sweeps and the P3 re-embed sweep. The nightly `0 3 * * *` trigger runs the v2 Dream
+  // engine consolidation sweep (one dispatch per tenant). `scheduled()` branches on
+  // `controller.cron`. (No local cron emulation in the test harness.)
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["*/5 * * * *", "0 3 * * *"]
   }
 
   // ── Deploy-only / FAKED-in-tests bindings (deliberately NOT declared here) ────

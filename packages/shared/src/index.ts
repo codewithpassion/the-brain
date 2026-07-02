@@ -50,6 +50,8 @@ export type { EdgeSpec, GraphNode, GraphPath } from "./graph"
 export { DOC_GRAPH, ENTITY_GRAPH } from "./graph"
 // ── Ingestion params ─────────────────────────────────────────────────────────
 export type { IngestionParams } from "./ingest"
+// ── Truncation-salvage JSON parsing (shared by KG extractor + Dream judge) ───
+export { extractJsonCandidates } from "./json"
 export type { AnyOpDef, DefineOpInput, OpDef, OpSurface } from "./ops"
 // ── Op-registry (single source of truth for MCP + tRPC + CLI) ────────────────
 export {

@@ -46,6 +46,43 @@ export const backfillRuns = sqliteTable(
   ],
 )
 
+/**
+ * `dream_runs` — the Dream engine's run-state row (v2 W1/D1), a deliberate SIBLING of
+ * `backfill_runs` (not a `kind='dream'` reuse) so the Jobs/Dreams dashboards can label and
+ * query dream runs on their own. Same OPS-table discipline: `tenant_id` FORCED from the
+ * Principal, writes carry NO `memory_audit` row and are NOT `readOnly`-gated (run counters,
+ * recorded regardless of actor). `stats` is a JSON `DreamRunStats` roll-up; `cursor` is the
+ * last-processed cluster key (a non-null cursor on a `success` row means the run stopped on
+ * budget and is resumable — D-i3).
+ */
+export const dreamRuns = sqliteTable(
+  "dream_runs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    kind: text("kind").notNull(), // consolidation|reflection|dedup|hygiene
+    status: text("status").notNull().default("queued"),
+    cursor: text("cursor"), // last-processed cluster key (resume point)
+    stats: text("stats"), // JSON {clustersJudged,merged,superseded,contradictions,kept,neurons}
+    attempts: integer("attempts").notNull().default(0),
+    note: text("note"),
+    error: text("error"),
+    createdAt: text("created_at").notNull().default(isoNow),
+    updatedAt: text("updated_at").notNull().default(isoNow),
+  },
+  (t) => [
+    check(
+      "dream_runs_kind_ck",
+      enumCheck("kind", ["consolidation", "reflection", "dedup", "hygiene"]),
+    ),
+    check(
+      "dream_runs_status_ck",
+      enumCheck("status", ["queued", "running", "paused", "success", "failure", "cancelled"]),
+    ),
+    index("idx_dream_status").on(t.tenantId, t.status),
+  ],
+)
+
 export const sources = sqliteTable(
   "sources",
   {

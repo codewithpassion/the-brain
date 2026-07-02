@@ -24,6 +24,8 @@ export interface WorkflowLike {
 export type SurfaceEnv = BrainBindings & {
   SESSION_PROMOTE?: WorkflowLike
   BATCH_INGEST?: WorkflowLike
+  /** Deploy-only Dream engine Workflow binding (v2 W1); absent locally → inline path. */
+  DREAM?: WorkflowLike
 }
 
 /** The per-request context handed to every op `invoke` (and the tRPC procedure context). */
