@@ -21,7 +21,7 @@
  */
 import type { Principal } from "@brain/shared"
 import { CHUNK_DB_BATCH_SIZE, EMBEDDING_DIMS, EMBEDDING_MODEL } from "@brain/shared"
-import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
 import {
@@ -369,6 +369,76 @@ export class ScopedDB {
           opts?.entitySlug ? eq(facts.entitySlug, opts.entitySlug) : undefined,
         ),
       )
+  }
+
+  /**
+   * Instruction-grade facts (W2 session-context snapshot): active facts carrying a
+   * `memory_use_policy.trust_grade = 'instruction'` (invariant 6 — trust lives ONLY there). Same
+   * tenant + scope + visibility gate + active (not expired/soft-expired/superseded/consolidated) as
+   * every fact read; the JOIN keys on `target_id = CAST(id AS TEXT)`.
+   */
+  async readInstructionFacts(limit = 20): Promise<ScopedFact[]> {
+    const now = new Date().toISOString()
+    return this.db
+      .select({
+        id: facts.id,
+        entitySlug: facts.entitySlug,
+        fact: facts.fact,
+        kind: facts.kind,
+        visibility: facts.visibility,
+        notability: facts.notability,
+        validFrom: facts.validFrom,
+        source: facts.source,
+      })
+      .from(facts)
+      .innerJoin(
+        memoryUsePolicy,
+        and(
+          eq(memoryUsePolicy.tenantId, facts.tenantId),
+          eq(memoryUsePolicy.targetId, sql`CAST(${facts.id} AS TEXT)`),
+          eq(memoryUsePolicy.trustGrade, "instruction"),
+        ),
+      )
+      .where(
+        and(
+          eq(facts.tenantId, this.p.tenantId),
+          isNull(facts.expiredAt),
+          isNull(facts.supersededBy),
+          isNull(facts.consolidatedInto),
+          notSoftExpired(facts.validUntil, now),
+          scopePredicate(this.p, facts.scope),
+          visibilityPredicate(this.p, visibilityCols.fact),
+        ),
+      )
+      .orderBy(desc(facts.createdAt), desc(facts.id)) // fully deterministic under LIMIT (id tiebreak)
+      .limit(limit)
+  }
+
+  /**
+   * The newest timestamp across the session-context snapshot's inputs (W2 cheap staleness check):
+   * a fact CREATED, FORGOTTEN (`expired_at`), or DECAYED (`valid_until`), OR an instruction-promotion
+   * (`memory_use_policy.updated_at`). If the snapshot's own `created_at` is ≥ this, the cron skips
+   * re-assembly. Two tenant-scoped MAX reads (facts is indexed by `(tenant, created_at)`).
+   */
+  async snapshotInputWatermark(): Promise<string | null> {
+    const [factRows, policyRows] = await Promise.all([
+      this.db
+        .select({
+          v: sql<
+            string | null
+          >`MAX(MAX(COALESCE(${facts.createdAt}, '')), MAX(COALESCE(${facts.expiredAt}, '')), MAX(COALESCE(${facts.validUntil}, '')))`,
+        })
+        .from(facts)
+        .where(eq(facts.tenantId, this.p.tenantId)),
+      this.db
+        .select({ v: sql<string | null>`MAX(${memoryUsePolicy.updatedAt})` })
+        .from(memoryUsePolicy)
+        .where(eq(memoryUsePolicy.tenantId, this.p.tenantId)),
+    ])
+    const candidates = [factRows[0]?.v, policyRows[0]?.v].filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    )
+    return candidates.length > 0 ? candidates.reduce((a, b) => (a > b ? a : b)) : null
   }
 
   /** Scoped document read — live docs only (`deleted_at IS NULL`). Tenant + scope gated. */
@@ -898,6 +968,7 @@ export class ScopedDB {
       trustGrade: policy.trustGrade,
       scopes: JSON.stringify(policy.scopes),
       expiresAt: policy.expiresAt ?? null,
+      updatedAt: new Date().toISOString(), // W2: drives session-context staleness on promotion
     })
     await this.batchWithAudit([remove, insert], { action: "usePolicy.upsert", targetId })
   }

@@ -7,6 +7,7 @@
 import { Command } from "commander"
 import { registerAuthCommands } from "./commands/auth"
 import { registerGeneratedCommands } from "./commands/generated"
+import { registerHookCommands } from "./commands/hooks"
 import type { CliDeps } from "./deps"
 import { addGlobalFlags } from "./flags"
 
@@ -17,6 +18,7 @@ export const buildProgram = (deps: CliDeps): Command => {
     .enablePositionalOptions()
   addGlobalFlags(program)
   registerAuthCommands(program, deps)
+  registerHookCommands(program, deps) // hand-written hook kit (context / capture / hooks install)
   registerGeneratedCommands(program, deps)
   return program
 }

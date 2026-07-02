@@ -57,6 +57,13 @@
       "when": 1782990012476,
       "tag": "0007_entities_merged_into",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783076412476,
+      "tag": "0008_snapshots_session_context",
+      "breakpoints": true
     }
   ]
 }

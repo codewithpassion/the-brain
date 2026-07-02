@@ -71,8 +71,10 @@ The distinction that matters most: **memory vs content vs facts.**
 - **recall** reads facts newest-first; filter by \`entitySlug\`, \`since\`, \`sessionId\`, or
   \`grep\`/\`query\`. Use it for "what do I know about X?".
 - **forget_fact** soft-expires a fact by \`factId\` (lineage preserved).
-- At the start of a task, **get_session_context** returns recent turns + visible facts (+ optional
-  memory by path) so you resume with the right context.
+- At the start of a task, **get_session_context** returns recent turns + visible facts + the tenant's
+  auto-refreshed **session-context snapshot** (\`contextSnapshot\`: standing instructions + latest
+  digest + notable facts) (+ optional memory by path) so you resume with the right context.
+  \`get_context_snapshot\` returns just that snapshot markdown (what the SessionStart hook injects).
 
 ## Conventions & gotchas
 

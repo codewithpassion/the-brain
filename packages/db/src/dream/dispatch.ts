@@ -22,6 +22,8 @@
 import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { BrainBindings } from "../env"
+import { createSessionServices } from "../sessions/services"
+import { refreshSessionContextSnapshot } from "../sessions/snapshot"
 import { createDreamDedupServices, runDreamDedup } from "./dedup"
 import { createDreamDigestServices, runDreamDigest } from "./digest"
 import { createDreamHygieneServices, runDreamHygiene } from "./hygiene"
@@ -139,6 +141,14 @@ export const dispatchDreamRun = async (
         } catch (err) {
           console.error("dream hygiene failed", step.runId, err)
           statuses.push("failure")
+        }
+        break
+      case "snapshot":
+        // W2.2 terminal: refresh the session-context snapshot (embeds tonight's digest). Non-fatal.
+        try {
+          await refreshSessionContextSnapshot(createSessionServices(env, principal))
+        } catch (err) {
+          console.error("session-context refresh failed", step.runId, err)
         }
         break
       default: {

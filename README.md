@@ -49,7 +49,6 @@ bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, ac
 ### Deferred (Phase-N / follow-ups)
 
 - D1 / Vectorize shard fan-out (`tenant_shards` columns present, resolve to one shard).
-- Frozen-snapshot injection (`get_session_context(snapshotId)` accepted but stubbed).
 - Dashboard Cloudflare build/co-location (`@cloudflare/vite-plugin`) + a few stubbed screens
   (graph/sessions/audit/jobs) + a `list_documents` op.
 - Cross-session semantic entity dedup; BYO/openai-compatible provider routing (seam only);
@@ -57,6 +56,28 @@ bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, ac
 - v2 verification safety net (per `docs/v2-implementation-plan.md`, deferred 2026-07-02):
   GitHub Actions CI (W0.1), the scheduled real-AI gate (W0.2), and the model-deprecation
   tripwire (W0.3) — `bun check` stays a local convention until these land.
+
+## Session context injection + Claude Code hooks (W2)
+
+The Dream engine keeps a per-tenant **session-context snapshot** — curated, world-visibility markdown
+(standing instructions + the latest daily digest + notable facts, capped ~4 KB) refreshed after each
+nightly run and on a cheap 5-minute staleness check. `get_session_context` returns it as
+`contextSnapshot`; `get_context_snapshot` returns just the markdown.
+
+Install the hook kit into a repo so every Claude session boots with that context and records its turns:
+
+```bash
+brain hooks install            # merge hooks into ./.claude/settings.local.json (personal, git-ignored)
+brain hooks install --shared   # instead write ./.claude/settings.json (committed — see warning)
+brain hooks install --dry-run  # print the resulting JSON without writing
+```
+
+Default target is **`.claude/settings.local.json`** (personal, auto-git-ignored) — these hooks depend
+on *your* private auth and a locally-installed `brain` CLI. `--shared` writes the committed
+`.claude/settings.json` and warns that teammates then need the CLI + their own auth. The install is a
+**non-destructive deep-merge** (every existing key and hook preserved; re-install idempotent; a
+malformed settings file is refused, never overwritten). It wires `SessionStart → brain context
+--snapshot` (injects the snapshot) and `Stop → brain capture --role assistant` (records the reply).
 
 ## Read this first
 

@@ -28,8 +28,17 @@ const fakeDeps = (over: Partial<CliDeps> = {}): CliDeps => ({
   ...over,
 })
 
-/** The CLI-local (non-generated) command names. */
-const LOCAL = new Set(["login", "logout", "whoami", "auth", "tenant"])
+/** The CLI-local (non-generated) command names — auth + the W2 hand-written hook kit. */
+const LOCAL = new Set([
+  "login",
+  "logout",
+  "whoami",
+  "auth",
+  "tenant",
+  "context",
+  "capture",
+  "hooks",
+])
 
 const generatedNames = (program: Command): string[] =>
   program.commands

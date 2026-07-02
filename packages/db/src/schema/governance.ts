@@ -23,6 +23,9 @@ export const memoryUsePolicy = sqliteTable(
     trustGrade: text("trust_grade").notNull().default("evidence"),
     scopes: text("scopes").notNull().default("[]"),
     expiresAt: text("expires_at"),
+    // W2: bumped on every policy write so the session-context snapshot staleness check detects
+    // instruction-promotion (a `trust_grade → 'instruction'` change) — see `snapshotInputWatermark`.
+    updatedAt: text("updated_at"),
   },
   () => [check("memory_use_policy_trust_grade_ck", enumCheck("trust_grade", TRUST_GRADES))],
 )

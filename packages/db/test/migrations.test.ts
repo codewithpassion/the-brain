@@ -91,6 +91,7 @@ describe("migrations apply cleanly", () => {
       "0005_dream_runs.sql",
       "0006_documents_origin.sql",
       "0007_entities_merged_into.sql",
+      "0008_snapshots_session_context.sql",
     ])
   })
 

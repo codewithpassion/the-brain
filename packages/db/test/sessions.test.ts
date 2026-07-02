@@ -337,7 +337,7 @@ describe("createSnapshot + resolveSnapshot (§8.5) — frozen-snapshot injection
     expect(snaps[1].label).toBe("first")
   })
 
-  test("getSessionContext non-snapshot path is unchanged (snapshotStubbed always false)", async () => {
+  test("session base reads (recentTurns + recall) return empty on a fresh session", async () => {
     const { db } = makeDb()
     const store = new SessionStore(withBatch(db), principal({ tenantId: "t1", userId: "userA" }))
     // No turns or facts inserted — just proves it returns the right shape.

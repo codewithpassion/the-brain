@@ -36,10 +36,12 @@ import {
   FORGET_FACT_OP,
   forgetFact,
   forgetMemory,
+  GET_CONTEXT_SNAPSHOT_OP,
   GET_DOCUMENT_OP,
   GET_SESSION_CONTEXT_OP,
   GRAPH_OPS,
   type GraphOpDeps,
+  getContextSnapshot,
   getMemory,
   getSessionContext,
   INGEST_DOCUMENT_OP,
@@ -255,14 +257,20 @@ const reviveFactSurfaceOp: SurfaceOp = {
 const createSnapshotSurfaceOp: SurfaceOp = {
   def: CREATE_SNAPSHOT_OP,
   invoke: async (ctx, input) => {
-    const { label, scope } = CREATE_SNAPSHOT_OP.input.parse(input)
+    const { label, scope, kind } = CREATE_SNAPSHOT_OP.input.parse(input)
     const snapshotId = await createSnapshot(
       sessionServices(ctx),
       label,
       scope !== undefined ? scope : null,
+      kind,
     )
     return { snapshotId }
   },
+}
+
+const getContextSnapshotSurfaceOp: SurfaceOp = {
+  def: GET_CONTEXT_SNAPSHOT_OP,
+  invoke: async (ctx) => getContextSnapshot(sessionServices(ctx)),
 }
 
 const listSnapshotsSurfaceOp: SurfaceOp = {
@@ -810,6 +818,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   forgetFactSurfaceOp,
   reviveFactSurfaceOp,
   createSnapshotSurfaceOp,
+  getContextSnapshotSurfaceOp,
   listSnapshotsSurfaceOp,
   dreamNowSurfaceOp,
   adminSurfaceOp(listDreamRunsOp as unknown as AdminBoundOp<unknown, unknown>),

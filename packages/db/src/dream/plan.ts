@@ -19,7 +19,7 @@ export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "hygiene", "
  * `agent/digest/daily`), so its `runId` is the base run id it summarizes.
  */
 export interface DreamStep {
-  group: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene"
+  group: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene" | "snapshot"
   runId: string
 }
 
@@ -54,6 +54,9 @@ export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] =
   if (kind === "all") {
     steps.push({ group: "hygiene", runId: hygieneRunId(baseRunId) })
     steps.push({ group: "digest", runId: baseRunId })
+    // Terminal: refresh the session-context snapshot AFTER the digest so it embeds tonight's digest
+    // (no run row of its own — like digest, keyed by the base run id). Iterated by both executors.
+    steps.push({ group: "snapshot", runId: baseRunId })
   }
   return steps
 }

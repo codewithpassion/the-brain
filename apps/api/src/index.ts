@@ -54,7 +54,7 @@ import {
 } from "./backfill"
 import type { ApiBindings } from "./bindings"
 import { isDeviceFlowPath, mountDeviceFlow } from "./device-flow/routes"
-import { type DreamBindings, runNightlyDreamSweep } from "./dream"
+import { type DreamBindings, runNightlyDreamSweep, runSessionContextRefreshSweep } from "./dream"
 import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
 import { mcpApiHandler } from "./mcp/oauth-handler"
@@ -671,6 +671,7 @@ const scheduled = async (
           await env.REEMBED_QUEUE?.send(message)
         },
       }),
+      runSessionContextRefreshSweep(env), // W2.2: cheap staleness-gated session-context refresh
     ]),
   )
 }

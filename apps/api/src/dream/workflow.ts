@@ -17,9 +17,11 @@ import {
   createDreamReflectServices,
   createDreamServices,
   createScopedServices,
+  createSessionServices,
   type DreamKind,
   type DreamRunStatus,
   dreamStepPlan,
+  refreshSessionContextSnapshot,
   runDreamConsolidation,
   runDreamDedup,
   runDreamDigest,
@@ -171,6 +173,22 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
             if (dd.stopReason !== "page") break // success / budget / failure → done looping
           }
           statuses.push(last.status)
+          break
+        }
+        case "snapshot": {
+          // W2.2 terminal: refresh the session-context snapshot (embeds tonight's digest) as its own
+          // durable step; a failure never fails the dream. Iterated via the plan (not a bolt-on).
+          await step.do("session-context-refresh", async () => {
+            try {
+              const r = await refreshSessionContextSnapshot(
+                createSessionServices(this.env, principal),
+              )
+              return { refreshed: r.refreshed }
+            } catch (err) {
+              console.error("session-context refresh failed", planStep.runId, err)
+              return { refreshed: false }
+            }
+          })
           break
         }
         default: {

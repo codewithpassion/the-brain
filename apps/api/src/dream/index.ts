@@ -3,5 +3,9 @@
  * the nightly cron sweep. The consolidation logic itself lives in `@brain/db` (`dream/**`).
  */
 export type { DreamBindings } from "./bindings"
-export { type DreamSweepResult, runNightlyDreamSweep } from "./cron"
+export {
+  type DreamSweepResult,
+  runNightlyDreamSweep,
+  runSessionContextRefreshSweep,
+} from "./cron"
 export { DreamWorkflow, type DreamWorkflowParams } from "./workflow"

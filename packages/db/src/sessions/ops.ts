@@ -8,6 +8,7 @@
 import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
 import type { SessionServices } from "./services"
+import { refreshSessionContextSnapshot } from "./snapshot"
 import {
   type CaptureTurnResult,
   type PinnedPage,
@@ -90,7 +91,8 @@ export const GET_SESSION_CONTEXT_OP = defineOp({
   output: z.object({
     turns: z.array(z.object({ idx: z.number(), role: z.string(), content: z.string().nullable() })),
     facts: z.array(z.object({ id: z.number(), fact: z.string(), kind: z.string() })),
-    snapshotStubbed: z.boolean(),
+    /** The tenant's auto-injected session-context snapshot markdown (W2), when one exists. */
+    contextSnapshot: z.string().nullable().optional(),
     pinnedPages: z
       .array(
         z.object({
@@ -127,18 +129,39 @@ export const CREATE_SNAPSHOT_OP = defineOp({
   input: z.object({
     label: z
       .string()
-      .min(1)
-      .describe("Human-readable name for this snapshot, e.g. 'pre-refactor-2026-06'."),
-    scope: z.string().optional(),
+      .optional()
+      .describe(
+        "Human-readable name (REQUIRED for kind='pinned'; MUST be omitted for 'session-context', which is a per-tenant singleton).",
+      ),
+    scope: z.string().optional().describe("Only meaningful for kind='pinned'."),
+    kind: z
+      .enum(["pinned", "session-context"])
+      .default("pinned")
+      .describe(
+        "'pinned' (default) freezes current page versions under a label; 'session-context' (re)assembles the tenant's SINGLE auto-injected curated context snapshot — no label/scope.",
+      ),
   }),
   output: z.object({ snapshotId: z.string() }),
+})
+
+/** `get_context_snapshot` — the tenant's current auto-injected session-context markdown (W2). */
+export const GET_CONTEXT_SNAPSHOT_OP = defineOp({
+  name: "get_context_snapshot",
+  description:
+    "Return the tenant's current session-context snapshot: curated world-visibility markdown " +
+    "(standing instructions + latest digest + notable facts) auto-refreshed by the Dream engine. " +
+    "Used by the SessionStart hook to inject brain context. Empty until the first refresh.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({}),
+  output: z.object({ content: z.string().nullable() }),
 })
 
 /** `list_snapshots` — list brain snapshots for the tenant, newest-first. */
 export const LIST_SNAPSHOTS_OP = defineOp({
   name: "list_snapshots",
   description:
-    "List saved memory snapshots newest-first. Each snapshotId can be passed to get_session_context to reload a pinned context.",
+    "List saved memory snapshots newest-first. `kind` is 'pinned' (a page-version freeze — pass its id to get_session_context to reload it) or 'session-context' (the tenant's auto-injected curated context singleton).",
   capability: "read",
   readOnly: true,
   input: z.object({
@@ -158,6 +181,7 @@ export const LIST_SNAPSHOTS_OP = defineOp({
         label: z.string(),
         createdBy: z.string(),
         createdAt: z.string(),
+        kind: z.string(),
       }),
     ),
   }),
@@ -267,6 +291,7 @@ export const SESSION_OPS: readonly AnyOpDef[] = [
   FORGET_FACT_OP,
   REVIVE_FACT_OP,
   CREATE_SNAPSHOT_OP,
+  GET_CONTEXT_SNAPSHOT_OP,
   LIST_SNAPSHOTS_OP,
 ]
 
@@ -331,7 +356,8 @@ export interface SessionContextMemory {
 export interface SessionContext {
   turns: { idx: number; role: string; content: string | null }[]
   facts: { id: number; fact: string; kind: string }[]
-  snapshotStubbed: boolean
+  /** The tenant's auto-injected session-context snapshot markdown (W2), or null if none yet. */
+  contextSnapshot?: string | null
   /** Pinned page_versions content when a snapshotId was resolved (§8.5); absent on live path. */
   pinnedPages?: PinnedPage[]
   /** OKF memory items under `memoryPath`, loaded in full (absent when no path was requested). */
@@ -362,10 +388,12 @@ export const getSessionContext = async (
 ): Promise<SessionContext> => {
   const turns = await services.sessions.recentTurns(brainSessionId)
   const facts = await services.sessions.recall({ sessionId: brainSessionId, limit: 50 })
+  // The auto-injected curated context (W2) lands in every session's context by default.
+  const contextSnapshot = await services.sessions.getSessionContextSnapshot()
   const result: SessionContext = {
     turns: turns.map((t) => ({ idx: t.idx, role: t.role, content: t.content })),
     facts: facts.map((f) => ({ id: f.id, fact: f.fact, kind: f.kind })),
-    snapshotStubbed: false,
+    contextSnapshot,
   }
   if (memory?.path !== undefined) {
     const items = await services.memory.listMemory({
@@ -388,13 +416,37 @@ export const getSessionContext = async (
 
 // ── Snapshot coordination fns (§8.5) ───────────────────────────────────────────────
 
-/** Pin the current page versions into an immutable brain snapshot. */
+/**
+ * Create a brain snapshot. `kind='pinned'` (default) pins the current page versions (§8.5);
+ * `kind='session-context'` (W2) assembles + upserts the tenant's singleton curated-context snapshot
+ * (the deterministic-id row auto-refreshed nightly). Returns the snapshot id either way.
+ */
 export const createSnapshot = async (
   services: SessionServices,
-  label: string,
-  scope?: string | null,
+  label: string | undefined,
+  scope: string | null | undefined,
+  kind: "pinned" | "session-context" = "pinned",
 ): Promise<string> => {
-  return services.sessions.createSnapshot(label, scope)
+  if (kind === "session-context") {
+    // The singleton has no name/scope — reject them with a teaching error rather than silently drop.
+    if (label !== undefined || (scope !== undefined && scope !== null)) {
+      throw new Error(
+        "create_snapshot: kind='session-context' is a per-tenant singleton — omit label and scope",
+      )
+    }
+    return (await refreshSessionContextSnapshot(services)).id
+  }
+  if (label === undefined || label.trim().length === 0) {
+    throw new Error("create_snapshot: kind='pinned' requires a non-empty label")
+  }
+  return services.sessions.createSnapshot(label, scope ?? null)
+}
+
+/** Read the tenant's current session-context snapshot markdown (W2 — the CLI hook + injection). */
+export const getContextSnapshot = async (
+  services: SessionServices,
+): Promise<{ content: string | null }> => {
+  return { content: await services.sessions.getSessionContextSnapshot() }
 }
 
 /** List brain snapshots for the tenant, newest-first. */

@@ -490,6 +490,7 @@ export interface SessionContextMemory {
 export interface SessionContextResult {
   turns: SessionContextTurn[]
   facts: FactItem[]
-  snapshotStubbed: boolean
+  /** The tenant's auto-injected session-context snapshot markdown (W2), when one exists. */
+  contextSnapshot?: string | null
   memories?: SessionContextMemory[]
 }

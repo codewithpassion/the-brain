@@ -23,7 +23,9 @@ export {
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
   forgetFact,
+  GET_CONTEXT_SNAPSHOT_OP,
   GET_SESSION_CONTEXT_OP,
+  getContextSnapshot,
   getSessionContext,
   LIST_SNAPSHOTS_OP,
   listSnapshots,
@@ -38,6 +40,12 @@ export type { SessionPromoteParams, SessionPromoteResult } from "./promote"
 export { runSessionPromote } from "./promote"
 export type { SessionServices, SessionServicesOptions } from "./services"
 export { createSessionServices } from "./services"
+export {
+  assembleSessionContext,
+  refreshSessionContextIfStale,
+  refreshSessionContextSnapshot,
+  SESSION_CONTEXT_MAX_CHARS,
+} from "./snapshot"
 export type {
   CaptureTurnInput,
   CaptureTurnResult,

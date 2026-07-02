@@ -127,7 +127,8 @@ export const facts = sqliteTable(
   ],
 )
 
-// brain_snapshots — frozen-snapshot storage (DEFERRED; DDL present).
+// brain_snapshots — two kinds (W2): 'pinned' = §8.5 page-version pins (manifest); 'session-context'
+// = the auto-injected curated markdown (content), one per tenant at a deterministic id.
 export const brainSnapshots = sqliteTable(
   "brain_snapshots",
   {
@@ -137,7 +138,9 @@ export const brainSnapshots = sqliteTable(
     label: text("label").notNull(),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull().default(isoNow),
-    manifest: text("manifest").notNull(), // JSON: pinned immutable version ids
+    manifest: text("manifest").notNull(), // JSON: pinned immutable version ids ('pinned' kind)
+    kind: text("kind").notNull().default("pinned"), // 'pinned' | 'session-context' (W2)
+    content: text("content"), // curated markdown for the 'session-context' kind (W2)
   },
   (t) => [index("idx_snapshots_tenant").on(t.tenantId, desc(t.createdAt))],
 )

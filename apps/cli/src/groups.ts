@@ -43,6 +43,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   list_sessions: "session",
   create_snapshot: "session",
   list_snapshots: "session",
+  get_context_snapshot: "session",
   // facts / governed memory
   recall: "facts",
   forget_fact: "facts",

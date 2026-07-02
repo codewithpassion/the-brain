@@ -10,14 +10,22 @@ import { DREAM_KINDS, dreamStepPlan, reflectionRunId, worstStatus } from "../src
 describe("dreamStepPlan — the shared kind→steps mapping", () => {
   test("'all' → consolidation, reflection, hygiene, digest in order, each with its derived run id", () => {
     const steps = dreamStepPlan("dream-t-20260702", "all")
-    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection", "hygiene", "digest"])
+    expect(steps.map((s) => s.group)).toEqual([
+      "consolidation",
+      "reflection",
+      "hygiene",
+      "digest",
+      "snapshot",
+    ])
     expect(steps[0]?.runId).toBe("dream-t-20260702")
     expect(steps[1]?.runId).toBe(reflectionRunId("dream-t-20260702"))
     expect(steps[1]?.runId).toBe("dream-t-20260702-reflection")
     // Hygiene (D5) runs after reflection, before digest, with its own `-hygiene` run row.
     expect(steps[2]?.runId).toBe("dream-t-20260702-hygiene")
-    // The digest is a terminal step keyed by the base run id (it has no run row of its own).
+    // The digest + the W2 session-context snapshot are terminal steps keyed by the base run id.
     expect(steps[3]?.runId).toBe("dream-t-20260702")
+    expect(steps[4]?.group).toBe("snapshot")
+    expect(steps[4]?.runId).toBe("dream-t-20260702")
   })
 
   test("digest is present only for 'all' (not consolidation-only / reflection-only)", () => {

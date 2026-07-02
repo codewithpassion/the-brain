@@ -179,6 +179,7 @@ export interface SnapshotRow {
   label: string
   createdBy: string
   createdAt: string
+  kind: string
 }
 
 export class SessionStore {
@@ -756,10 +757,90 @@ export class SessionStore {
         label: brainSnapshots.label,
         createdBy: brainSnapshots.createdBy,
         createdAt: brainSnapshots.createdAt,
+        kind: brainSnapshots.kind,
       })
       .from(brainSnapshots)
       .where(eq(brainSnapshots.tenantId, this.p.tenantId))
       .orderBy(desc(brainSnapshots.createdAt))
       .limit(limit)
+  }
+
+  // ── SESSION-CONTEXT SNAPSHOT (W2) — the auto-injected curated markdown, one per tenant ─────
+
+  /** The tenant's singleton session-context snapshot id (deterministic → idempotent upsert). */
+  private sessionContextId(): string {
+    return `session-context:${this.p.tenantId}`
+  }
+
+  /**
+   * Upsert the tenant's `session-context` snapshot (W2.2). IDEMPOTENT: if the stored content is
+   * byte-identical, it's a no-op (no write, no audit, no churn) so nightly + cron refreshes don't
+   * thrash. Otherwise insert-or-replace the single row (deterministic id) + audit, in one batch.
+   * `content` is pre-assembled world-visibility markdown (the assembler is the read chokepoint).
+   */
+  async upsertSessionContextSnapshot(
+    content: string,
+    scope: string | null = null,
+  ): Promise<{ id: string; refreshed: boolean }> {
+    if (this.p.readOnly) throw new Error("session-context refresh denied: read-only principal")
+    const id = this.sessionContextId()
+    const existing = await this.db
+      .select({ content: brainSnapshots.content })
+      .from(brainSnapshots)
+      .where(and(eq(brainSnapshots.id, id), eq(brainSnapshots.tenantId, this.p.tenantId)))
+      .limit(1)
+    if (existing[0]?.content === content) return { id, refreshed: false } // unchanged → no churn
+    const now = new Date().toISOString()
+    const upsert = this.db
+      .insert(brainSnapshots)
+      .values({
+        id,
+        tenantId: this.p.tenantId, // forced
+        scope,
+        label: "session-context",
+        createdBy: this.p.userId,
+        createdAt: now,
+        manifest: "{}", // session-context carries content, not a page-version manifest
+        kind: "session-context",
+        content,
+      })
+      .onConflictDoUpdate({
+        // Keep created_by STABLE across refreshes (the singleton's logical owner is whoever first
+        // created it — typically 'system'); only the content + timestamp move.
+        target: brainSnapshots.id,
+        set: { content, createdAt: now },
+      })
+    await this.commitBatch([upsert, this.auditStatement("snapshot.context.refresh", id)])
+    return { id, refreshed: true }
+  }
+
+  /** The tenant's session-context snapshot `created_at` (null if none) — cheap staleness check (W2.2). */
+  async sessionContextSnapshotAt(): Promise<string | null> {
+    const rows = await this.db
+      .select({ v: brainSnapshots.createdAt })
+      .from(brainSnapshots)
+      .where(
+        and(
+          eq(brainSnapshots.id, this.sessionContextId()),
+          eq(brainSnapshots.tenantId, this.p.tenantId),
+        ),
+      )
+      .limit(1)
+    return rows[0]?.v ?? null
+  }
+
+  /** Read the tenant's current session-context snapshot markdown (null if never assembled). */
+  async getSessionContextSnapshot(): Promise<string | null> {
+    const rows = await this.db
+      .select({ content: brainSnapshots.content })
+      .from(brainSnapshots)
+      .where(
+        and(
+          eq(brainSnapshots.id, this.sessionContextId()),
+          eq(brainSnapshots.tenantId, this.p.tenantId),
+        ),
+      )
+      .limit(1)
+    return rows[0]?.content ?? null
   }
 }

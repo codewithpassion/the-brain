@@ -220,7 +220,11 @@ describe("session-start context loads memory by path", () => {
     // Minimal SessionServices: a real MemoryStore + stubbed session reads.
     const services = {
       memory: store,
-      sessions: { recentTurns: async () => [], recall: async () => [] },
+      sessions: {
+        recentTurns: async () => [],
+        recall: async () => [],
+        getSessionContextSnapshot: async () => null,
+      },
     } as unknown as SessionServices
 
     const ctx = await getSessionContext(services, "sess", undefined, { path: "agent" })
