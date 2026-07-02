@@ -57,4 +57,25 @@ export interface BrainBindings {
    * `wrangler secret put CLERK_SECRET_KEY`; absent in the local test harness (tests stub the fetch).
    */
   CLERK_SECRET_KEY?: string
+  /**
+   * Notion OAuth public-integration client id (docs/notion-integration-plan.md §2). Non-secret,
+   * but declared here (not wrangler.jsonc vars) so it stays OPTIONAL — the connect flow degrades
+   * to a "not configured" state when unset. Registering the integration + redirect_uri is a
+   * human step (deferred-gates list). Set via `wrangler secret put NOTION_CLIENT_ID`.
+   */
+  NOTION_CLIENT_ID?: string
+  /** Notion OAuth client secret — the Basic-auth pair for the token exchange. Secret. */
+  NOTION_CLIENT_SECRET?: string
+  /**
+   * AES-GCM key for the stored Notion bot tokens (DEVICE_FLOW_SECRET-style Worker secret). Any
+   * string — it is SHA-256-hashed to a 256-bit key. When unset, the poller/webhook no-op (no
+   * usable token store), so the feature degrades gracefully. Set via `wrangler secret put`.
+   */
+  NOTION_TOKEN_ENC_KEY?: string
+  /**
+   * Notion webhook verification token (integration-level HMAC secret). Every event carries
+   * `X-Notion-Signature: sha256=HMAC-SHA256(verification_token, rawBody)`; captured via the
+   * one-time handshake and set here. When unset the webhook endpoint no-ops (fail-closed).
+   */
+  NOTION_WEBHOOK_TOKEN?: string
 }

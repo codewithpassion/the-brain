@@ -64,6 +64,13 @@
       "when": 1783076412476,
       "tag": "0008_snapshots_session_context",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783162812476,
+      "tag": "0009_notion_connections",
+      "breakpoints": true
     }
   ]
 }

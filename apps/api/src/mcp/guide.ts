@@ -84,6 +84,9 @@ The distinction that matters most: **memory vs content vs facts.**
 - Writes that fail validation return a structured error naming the field — fix and retry.
 - Read tools are always available; write/admin tools appear only when your credential holds the
   capability.
+- External sources sync IN automatically: an Obsidian vault (WebDAV) and a connected Notion
+  workspace (\`connect_notion\`) flow their pages through the same ingest pipeline — you \`search\`/
+  \`think\` over them like any other content; no per-source tool needed.
 
 ## A typical flow
 

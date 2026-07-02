@@ -45,8 +45,14 @@ export interface DocIngestParams {
   payloadRef: string
   contentType: string
   sourceId?: string
-  /** When true, stamps `sourceKind:"obsidian"` on a fresh insert (Phase-2 stable-slug docs). */
+  /** When true, stamps `sourceKind` on a fresh insert (Phase-2 stable-slug docs). */
   isPhase2?: boolean
+  /**
+   * Source-kind stamp for `isPhase2` fresh inserts (default `"obsidian"` for back-compat). This is
+   * a DELETE-SAFETY boundary, not just a label: the obsidian deletion-reconcile only touches
+   * `sourceKind='obsidian'` docs, so Notion docs MUST carry `"notion"` to stay outside it.
+   */
+  sourceKind?: string
   path?: string
   tags?: string[]
   /** Discriminates which consumer created the doc (default `"backfill-queue"`). */
@@ -79,6 +85,7 @@ export const runDocIngestCore = async (
     contentType,
     sourceId,
     isPhase2,
+    sourceKind,
     path,
     tags,
     ingestedVia,
@@ -106,10 +113,15 @@ export const runDocIngestCore = async (
         await services.vectors.deleteVectors(oldChunkIds)
       }
       // Reuse the same UUID so chunkIds stay cap-safe; clear deleted_at for resurrection.
+      // Re-apply path/tags WHEN PROVIDED so an edited page/note refreshes them (omitted ⇒
+      // unchanged). `ingested_via` is IMMUTABLE after insert — it records the ORIGINAL ingest
+      // provenance and must not change on a later edit (even if the caller passes a new value).
       await services.db.updateDocumentForSupersede(existing.id, {
         fingerprint,
         bodyR2Key: payloadRef,
         deletedAt: null,
+        ...(path !== undefined ? { path } : {}),
+        ...(tags !== undefined ? { tags } : {}),
       })
       docId = existing.id
     }
@@ -124,8 +136,9 @@ export const runDocIngestCore = async (
         bodyR2Key: payloadRef,
         status: "pending",
         ...(sourceId !== undefined ? { sourceId } : {}),
-        // Phase 2 obsidian docs get sourceKind="obsidian" so the cron reconcile can find them.
-        ...(isPhase2 ? { sourceKind: "obsidian" } : {}),
+        // Phase 2 stable-slug docs get a sourceKind stamp (default "obsidian" for back-compat;
+        // Notion passes "notion"). Gated by isPhase2 so Phase-1 legacy docs stay unstamped.
+        ...(isPhase2 ? { sourceKind: sourceKind ?? "obsidian" } : {}),
         ingestedVia: ingestedVia ?? "backfill-queue",
         ...(path !== undefined ? { path } : {}),
         ...(tags !== undefined ? { tags } : {}),
@@ -179,9 +192,11 @@ export const runBackfillMessage = async (
     contentType,
     sourceId: message.sourceId,
     isPhase2,
+    ...(message.sourceKind !== undefined ? { sourceKind: message.sourceKind } : {}),
     ...(message.path !== undefined ? { path: message.path } : {}),
     ...(message.tags !== undefined ? { tags: message.tags } : {}),
-    // ingestedVia defaults to "backfill-queue" in runDocIngestCore
+    ...(message.ingestedVia !== undefined ? { ingestedVia: message.ingestedVia } : {}),
+    // ingestedVia defaults to "backfill-queue" in runDocIngestCore when absent
   })
 }
 

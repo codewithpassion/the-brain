@@ -13,11 +13,14 @@ import type {
   AddMemberResult,
   BrainSessionInfo,
   BrainStats,
+  ConfirmNotionConnectionResult,
+  ConnectNotionResult,
   CreateApiKeyResult,
   CreateOrgResult,
   CreateVaultCredentialResult,
   DeleteDocumentResult,
   DerivedDocument,
+  DisconnectNotionResult,
   DocumentDetail,
   FactsBrowseResult,
   FindOrphansResult,
@@ -29,6 +32,7 @@ import type {
   ListDreamRunsResult,
   ListEntitiesResult,
   ListEntityEdgesResult,
+  ListNotionConnectionsResult,
   ListOrgsResult,
   ListSessionsResult,
   ListVaultCredentialsResult,
@@ -692,6 +696,60 @@ export const revokeVaultCredential = createServerFn({ method: "POST" })
         false,
         data,
       )
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Notion connection management ---
+
+/** `list_notion_connections` (admin) — list connected Notion workspaces (no token). */
+export const listNotionConnections = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<ListNotionConnectionsResult>> => {
+    try {
+      const out = await brainCall<ListNotionConnectionsResult>("list_notion_connections", true, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `connect_notion` (admin) — start the OAuth flow; returns an authorize URL (or configured:false). */
+export const connectNotion = createServerFn({ method: "POST" }).handler(
+  async (): Promise<Result<ConnectNotionResult>> => {
+    try {
+      const out = await brainCall<ConnectNotionResult>("connect_notion", false, {})
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `confirm_notion_connection` (admin) — same-principal confirm that persists a pending connection. */
+export const confirmNotion = createServerFn({ method: "POST" })
+  .validator((d: { confirmToken: string }) => d)
+  .handler(async ({ data }): Promise<Result<ConfirmNotionConnectionResult>> => {
+    try {
+      const out = await brainCall<ConfirmNotionConnectionResult>(
+        "confirm_notion_connection",
+        false,
+        data,
+      )
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `disconnect_notion` (admin) — revoke a Notion workspace connection (stops sync). */
+export const disconnectNotion = createServerFn({ method: "POST" })
+  .validator((d: { workspaceId: string }) => d)
+  .handler(async ({ data }): Promise<Result<DisconnectNotionResult>> => {
+    try {
+      const out = await brainCall<DisconnectNotionResult>("disconnect_notion", false, data)
       return { ok: true, data: out }
     } catch (error) {
       return fail(error)

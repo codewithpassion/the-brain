@@ -54,6 +54,7 @@ const ADMIN_NAV: readonly { to: string; label: string }[] = [
   { to: "/members", label: "Members" },
   { to: "/api-keys", label: "API Keys" },
   { to: "/vault-sync", label: "Vault Sync" },
+  { to: "/notion", label: "Notion" },
   { to: "/audit", label: "Audit" },
   { to: "/jobs", label: "Jobs" },
   { to: "/dreams", label: "Dreams" },

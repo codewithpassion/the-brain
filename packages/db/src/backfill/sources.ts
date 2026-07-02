@@ -13,15 +13,9 @@
  */
 import type { Principal } from "@brain/shared"
 import { and, eq } from "drizzle-orm"
-import type { BatchItem } from "drizzle-orm/batch"
+import { type BatchStatement, commitBatch } from "../batch"
 import { sources } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-
-type BatchStatement = BatchItem<"sqlite">
-
-interface BatchCapable {
-  batch(statements: [BatchStatement, ...BatchStatement[]]): Promise<unknown>
-}
 
 /** Default backoff base (1 minute); the window is `BASE · 2^sync_fail_count`. */
 export const BACKOFF_BASE_MS = 60_000
@@ -37,6 +31,8 @@ export interface SourceRow {
   lastAttemptAt: string | null
   syncFailCount: number
   archived: number
+  /** Opaque per-source JSON config (e.g. Notion `{workspaceId}`); `"{}"` when unset. */
+  config: string
 }
 
 /**
@@ -65,10 +61,8 @@ export class SourceStore {
     this.p = principal
   }
 
-  private async commitBatch(statements: BatchStatement[]): Promise<void> {
-    const [first, ...rest] = statements
-    if (first === undefined) return
-    await (this.db as unknown as BatchCapable).batch([first, ...rest])
+  private commit(statements: BatchStatement[]): Promise<void> {
+    return commitBatch(this.db, statements)
   }
 
   private project(row: typeof sources.$inferSelect): SourceRow {
@@ -82,7 +76,33 @@ export class SourceStore {
       lastAttemptAt: row.lastAttemptAt,
       syncFailCount: row.syncFailCount,
       archived: row.archived,
+      config: row.config,
     }
+  }
+
+  /**
+   * Insert (or refresh) a source by its deterministic id, forcing `tenant_id`. On conflict it
+   * updates `name`/`config` and UN-archives (a re-connect resurrects a previously disconnected
+   * source). Used by the Notion connect flow (`id = notion:<workspaceId>`).
+   */
+  async create(input: { id: string; name: string; kind: string; config?: string }): Promise<void> {
+    const insert = this.db
+      .insert(sources)
+      .values({
+        id: input.id,
+        tenantId: this.p.tenantId, // forced
+        name: input.name,
+        kind: input.kind,
+        config: input.config ?? "{}",
+      })
+      .onConflictDoUpdate({
+        target: sources.id,
+        set: { name: input.name, config: input.config ?? "{}", archived: 0, archivedAt: null },
+        // Tenant-guarded: a conflicting id owned by ANOTHER tenant is left untouched (the UPDATE
+        // predicate fails → no mutation, insert skipped by the conflict). Cross-tenant takeover-proof.
+        setWhere: eq(sources.tenantId, this.p.tenantId),
+      })
+    await this.commit([insert])
   }
 
   /** A tenant-scoped read of one source; `null` when absent or owned by another tenant. */
@@ -123,7 +143,7 @@ export class SourceStore {
       .update(sources)
       .set({ lastAttemptAt: now.toISOString() })
       .where(and(eq(sources.id, sourceId), eq(sources.tenantId, this.p.tenantId)))
-    await this.commitBatch([update])
+    await this.commit([update])
   }
 
   /**
@@ -137,7 +157,7 @@ export class SourceStore {
       .update(sources)
       .set({ syncFailCount: current.syncFailCount + 1, lastAttemptAt: now.toISOString() })
       .where(and(eq(sources.id, sourceId), eq(sources.tenantId, this.p.tenantId)))
-    await this.commitBatch([update])
+    await this.commit([update])
   }
 
   /**
@@ -158,7 +178,7 @@ export class SourceStore {
         ...(anchor.lastCommit !== undefined ? { lastCommit: anchor.lastCommit } : {}),
       })
       .where(and(eq(sources.id, sourceId), eq(sources.tenantId, this.p.tenantId)))
-    await this.commitBatch([update])
+    await this.commit([update])
   }
 
   /** Retire a dead source so the re-enqueue sweep skips it (`isBackoffReady` returns false). */
@@ -167,6 +187,6 @@ export class SourceStore {
       .update(sources)
       .set({ archived: 1, archivedAt: now.toISOString() })
       .where(and(eq(sources.id, sourceId), eq(sources.tenantId, this.p.tenantId)))
-    await this.commitBatch([update])
+    await this.commit([update])
   }
 }

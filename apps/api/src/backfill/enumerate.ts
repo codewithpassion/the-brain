@@ -249,6 +249,13 @@ export const runEnumerate = async (deps: EnumerateDeps): Promise<EnumerateResult
           ...(deps.kind === "doc" && (item as ImportedSession).sourceSessionId !== undefined
             ? { stableSlug: (item as ImportedSession).sourceSessionId }
             : {}),
+          // Stamp the source-kind (delete-safety boundary) + provenance for doc items from the
+          // importer. Notion docs → sourceKind:"notion" + ingestedVia:"notion-poll"; obsidian docs
+          // → "obsidian" (unchanged from the prior isPhase2 default).
+          ...(deps.kind === "doc" ? { sourceKind: deps.importer.source } : {}),
+          ...(deps.kind === "doc" && deps.importer.source === "notion"
+            ? { ingestedVia: "notion-poll" }
+            : {}),
         })
         stats.processed++
         stats.created++

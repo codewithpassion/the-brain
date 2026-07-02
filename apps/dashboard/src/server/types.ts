@@ -351,6 +351,35 @@ export interface RevokeVaultCredentialResult {
   revoked: boolean
 }
 
+// --- Notion connection management ---
+
+export interface NotionConnection {
+  workspaceId: string
+  workspaceName: string | null
+  botId: string | null
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface ListNotionConnectionsResult {
+  connections: NotionConnection[]
+}
+
+export interface ConnectNotionResult {
+  configured: boolean
+  authorizeUrl?: string
+}
+
+export interface DisconnectNotionResult {
+  revoked: boolean
+}
+
+export interface ConfirmNotionConnectionResult {
+  confirmed: boolean
+  workspaceId?: string
+  workspaceName?: string | null
+}
+
 // --- Aggregate stats ---
 
 export interface BrainStats {

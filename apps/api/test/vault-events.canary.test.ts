@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test"
 import { type BrainBindings, createBackfillServices } from "@brain/db"
+import type { Principal } from "@brain/shared"
 import { beforeAll, describe, expect, test } from "vitest"
-import type { BackfillBindings } from "../src/backfill"
+import { type BackfillBindings, runDocIngestCore } from "../src/backfill"
 import {
   isVaultNote,
   parseR2Key,
@@ -353,5 +354,52 @@ describe("vault-event consumer canary (real local D1 + R2)", () => {
       .first()
     // No phantom doc inserted when the R2 object is already gone.
     expect(doc).toBeNull()
+  })
+
+  test("supersede refreshes tags but ingested_via is IMMUTABLE after insert", async () => {
+    const principal: Principal = {
+      tenantId: VE_TENANT,
+      userId: "veUser",
+      teamIds: [],
+      role: "owner",
+      allowedScopes: "*",
+      capabilities: ["read", "write", "admin"],
+      readOnly: false,
+    }
+    const services = createBackfillServices(withMockAi(bfEnv), principal)
+
+    // Fresh insert: ingested_via="first", tags=["t1"].
+    await services.blobs.put("stage/immut.md", "# V1\n\nbody one")
+    await runDocIngestCore(services, {
+      slug: "immut-doc",
+      fingerprint: "immut:1",
+      payloadRef: "stage/immut.md",
+      contentType: "text/markdown",
+      isPhase2: true,
+      sourceKind: "notion",
+      tags: ["t1"],
+      ingestedVia: "first",
+    })
+
+    // Edit (new fingerprint) that ALSO passes a different ingested_via + new tags.
+    await services.blobs.put("stage/immut.md", "# V2\n\nbody two")
+    await runDocIngestCore(services, {
+      slug: "immut-doc",
+      fingerprint: "immut:2",
+      payloadRef: "stage/immut.md",
+      contentType: "text/markdown",
+      isPhase2: true,
+      sourceKind: "notion",
+      tags: ["t2"],
+      ingestedVia: "second",
+    })
+
+    const doc = await env_.DB.prepare(
+      "SELECT tags, ingested_via FROM documents WHERE tenant_id = ? AND slug = ?",
+    )
+      .bind(VE_TENANT, "immut-doc")
+      .first<{ tags: string | null; ingested_via: string | null }>()
+    expect(doc?.tags).toBe(JSON.stringify(["t2"])) // tags refreshed on edit
+    expect(doc?.ingested_via).toBe("first") // provenance immutable — NOT "second"
   })
 })

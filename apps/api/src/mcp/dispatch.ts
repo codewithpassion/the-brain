@@ -155,7 +155,7 @@ const purposeOf = (name: string): (typeof PURPOSE_ORDER)[number] => {
   if (FACTS_SESSION_OPS.has(name)) return "Facts & sessions"
   if (SEARCH_OPS.has(name)) return "Search & think"
   if (GRAPH_OPS.has(name)) return "Graph"
-  if (name.includes("vault")) return "Sync"
+  if (name.includes("vault") || name.includes("notion")) return "Sync"
   return "Admin & governance"
 }
 

@@ -935,6 +935,12 @@ export class ScopedDB {
       deletedAt: string | null
       /** New origin content-type. Set to clear a stale 'voice' marker when the body is replaced. */
       contentType?: string
+      /**
+       * Re-applied ONLY when provided (Notion/vault edits refresh these; omitted ⇒ unchanged).
+       * `ingested_via` is intentionally NOT here — it is immutable after the original insert.
+       */
+      path?: string | null
+      tags?: string[]
     },
   ): Promise<void> {
     const update = this.db
@@ -946,6 +952,8 @@ export class ScopedDB {
         status: "pending",
         updatedAt: new Date().toISOString(),
         ...(patch.contentType !== undefined ? { contentType: patch.contentType } : {}),
+        ...(patch.path !== undefined ? { path: patch.path } : {}),
+        ...(patch.tags !== undefined ? { tags: JSON.stringify(patch.tags) } : {}),
       })
       .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
     await this.batchWithAudit([update], {

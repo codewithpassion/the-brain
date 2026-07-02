@@ -76,6 +76,7 @@ const BASE_TABLES = [
   "token_spend",
   "mcp_request_log",
   "vault_credentials",
+  "notion_connections",
 ]
 
 describe("migrations apply cleanly", () => {
@@ -92,6 +93,7 @@ describe("migrations apply cleanly", () => {
       "0006_documents_origin.sql",
       "0007_entities_merged_into.sql",
       "0008_snapshots_session_context.sql",
+      "0009_notion_connections.sql",
     ])
   })
 

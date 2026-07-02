@@ -64,6 +64,9 @@ import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
 import { mcpApiHandler } from "./mcp/oauth-handler"
 import { isMcpPath, mountMcp } from "./mcp/routes"
+import { isNotionPublicPath, mountNotion } from "./notion/routes"
+import { runNotionPollSweep } from "./notion/sweep"
+import { handleNotionEventQueue, type NotionEventMessage } from "./notion-events/consume"
 import { mountOAuthHandlers } from "./oauth/authorize"
 import { makeBudgetPort, makeRecallSink, recordThinkSpend } from "./ports"
 import {
@@ -272,6 +275,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       c.req.path === "/callback" ||
       isMcpPath(c.req.path) ||
       isDeviceFlowPath(c.req.path) ||
+      // Notion OAuth callback is a browser redirect from Notion (no bearer); it verifies the
+      // one-time OAuth nonce itself (CSRF + tenant binding).
+      isNotionPublicPath(c.req.path) ||
       // WebDAV facade does its own Basic auth — exempt from Clerk/bearer principal resolution.
       c.req.path === "/dav" ||
       c.req.path.startsWith("/dav/")
@@ -305,6 +311,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   // ── WebDAV sync facade (/dav, /dav/*) — exempted from the main auth middleware above,
   //    performs its own HTTP Basic auth via per-tenant vault credentials.
   mountVaultDav(app)
+
+  // ── Notion OAuth callback (/notion/callback) — public browser redirect; verifies its own nonce.
+  mountNotion(app)
 
   // ── tRPC typed surface (dashboard + CLI) — the generated `appRouter` mounted under the SAME
   //    edge-resolved Principal (invariant 17). The router is built from the single op-registry
@@ -744,6 +753,12 @@ const scheduled = async (
         },
       }),
       runSessionContextRefreshSweep(env), // W2.2: cheap staleness-gated session-context refresh
+      // W3.1: Notion cron poll — enqueue changed pages onto the existing brain-backfill queue.
+      runNotionPollSweep(env, {
+        enqueue: async (message) => {
+          await env.BACKFILL_QUEUE?.send(message)
+        },
+      }),
     ]),
   )
 }
@@ -753,10 +768,11 @@ const scheduled = async (
  *   - `brain-backfill`     → `handleBackfillQueue` (enumerate→consume→capture)
  *   - `brain-reembed`      → `handleReembedQueue` (re-embed one chunk in place)
  *   - `brain-vault-events` → `handleVaultEventQueue` (R2 event notification → incremental ingest)
+ *   - `brain-notion-events`→ `handleNotionEventQueue` (Notion webhook → incremental ingest)
  * Each handler acks/retries per message and routes exhausted messages to its DLQ.
  */
 const queue = async (
-  batch: MessageBatch<BackfillMessage | ReembedMessage | R2EventMessage>,
+  batch: MessageBatch<BackfillMessage | ReembedMessage | R2EventMessage | NotionEventMessage>,
   env: WorkerBindings,
 ): Promise<void> => {
   if (batch.queue === "brain-backfill") {
@@ -765,6 +781,8 @@ const queue = async (
     await handleReembedQueue(batch as MessageBatch<ReembedMessage>, env)
   } else if (batch.queue === "brain-vault-events") {
     await handleVaultEventQueue(batch as MessageBatch<R2EventMessage>, env)
+  } else if (batch.queue === "brain-notion-events") {
+    await handleNotionEventQueue(batch as MessageBatch<NotionEventMessage>, env)
   }
 }
 

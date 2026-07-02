@@ -38,6 +38,14 @@ export interface BackfillMessage {
    * path minus extension (e.g. "Projects/Acme/notes"); absent for non-obsidian doc items.
    */
   stableSlug?: string
+  /**
+   * Source-kind stamp for `doc` items (e.g. "obsidian", "notion"). Set by `runEnumerate` from the
+   * importer's `source`. A DELETE-SAFETY boundary (the obsidian reconcile only touches
+   * `sourceKind='obsidian'`), so it must round-trip to `runDocIngestCore`. Absent ⇒ default stamp.
+   */
+  sourceKind?: string
+  /** `ingested_via` provenance for `doc` items (e.g. "notion-poll"); absent ⇒ "backfill-queue". */
+  ingestedVia?: string
   /** Optional authorship; absent ⇒ the consumer builds a SYSTEM principal for the tenant. */
   userId?: string
 }

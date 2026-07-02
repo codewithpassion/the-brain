@@ -64,6 +64,7 @@ import {
   makeBudgetPort,
   makeRecallSink,
   memoryHistory,
+  NOTION_OPS,
   normalizePath,
   OKF_EXPORT_OP,
   OKF_IMPORT_OP,
@@ -929,4 +930,5 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   vaultWritebackSurfaceOp,
   ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
   ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
+  ...(NOTION_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
 ]

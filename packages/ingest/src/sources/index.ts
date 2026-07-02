@@ -8,6 +8,26 @@
 export { createChatGptImporter } from "./chatgpt"
 export { createClaudeCodeImporter } from "./claude-code"
 export { runImporterContract } from "./contract"
+export {
+  createNotionImporter,
+  type NotionClient,
+  type NotionDoc,
+  type NotionPageContent,
+  type NotionPageRef,
+  notionFingerprint,
+  notionPageToDoc,
+  notionPath,
+  notionSlug,
+} from "./notion"
+export {
+  blocksToMarkdown,
+  extractPageTags,
+  type NotionAnnotations,
+  type NotionBlock,
+  type NotionRichText,
+  pageTitle,
+  richTextToMarkdown,
+} from "./notion-blocks"
 export { createObsidianImporter, extractTags, pathParts, type VaultR2 } from "./obsidian"
 export type {
   ImportBatch,

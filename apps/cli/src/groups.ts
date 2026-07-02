@@ -76,6 +76,10 @@ const GROUP_BY_OP: Record<string, Group> = {
   create_vault_credential: "admin",
   list_vault_credentials: "admin",
   revoke_vault_credential: "admin",
+  connect_notion: "admin",
+  confirm_notion_connection: "admin",
+  list_notion_connections: "admin",
+  disconnect_notion: "admin",
 }
 
 /** The help group an op belongs to, or `undefined` if unmapped (a new op — caught by the test). */

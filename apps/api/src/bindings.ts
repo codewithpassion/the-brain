@@ -67,4 +67,11 @@ export type ApiBindings = BrainBindings & {
    * (queue producers have no local emulation — the vault-dav handler guards with `if (env.VAULT_EVENTS_QUEUE)`).
    */
   VAULT_EVENTS_QUEUE?: Queue
+
+  /**
+   * Deploy-only `brain-notion-events` producer binding. The Notion webhook route enqueues changed
+   * pages on it; the consumer ingests them. Absent locally/in tests (queue producers have no local
+   * emulation — the webhook handler guards with `?.send`).
+   */
+  NOTION_EVENTS_QUEUE?: Queue
 }

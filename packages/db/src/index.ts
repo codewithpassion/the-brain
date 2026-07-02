@@ -27,6 +27,8 @@ export * from "./graph"
 export * from "./ingest"
 // ── OKF-compatible agent memory (path-keyed, versioned; on the pages layer) ───
 export * from "./memory"
+// ── Notion connection store + ops (notion-integration-plan.md) ────────────────
+export * from "./notion"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"

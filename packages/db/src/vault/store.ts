@@ -10,9 +10,9 @@
  */
 import type { Principal } from "@brain/shared"
 import { and, eq, isNull } from "drizzle-orm"
-import type { BatchItem } from "drizzle-orm/batch"
 import { drizzle } from "drizzle-orm/d1"
 import { randomToken, sha256Hex } from "../auth/tokens"
+import { commitBatch } from "../batch"
 import type { BrainBindings } from "../env"
 import { memoryAudit, vaultCredentials } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
@@ -45,18 +45,6 @@ export interface CreatedVaultCredential {
 }
 
 // ── Store methods ─────────────────────────────────────────────────────────────
-
-type BatchStatement = BatchItem<"sqlite">
-
-interface BatchCapable {
-  batch(statements: [BatchStatement, ...BatchStatement[]]): Promise<unknown>
-}
-
-const commitBatch = async (db: BrainDrizzle, statements: BatchStatement[]): Promise<void> => {
-  const [first, ...rest] = statements
-  if (first === undefined) return
-  await (db as unknown as BatchCapable).batch([first, ...rest])
-}
 
 /**
  * Create a vault credential for the caller's tenant. Generates a `vk_<16 hex>` username and a

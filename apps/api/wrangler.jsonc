@@ -114,7 +114,10 @@
       { "binding": "REEMBED_QUEUE", "queue": "brain-reembed" },
       // Producer for the vault WebDAV facade: PUT/DELETE events → existing brain-vault-events
       // consumer (apps/api/src/vault-events/consume.ts). Replaces the r2 bucket notification.
-      { "binding": "VAULT_EVENTS_QUEUE", "queue": "brain-vault-events" }
+      { "binding": "VAULT_EVENTS_QUEUE", "queue": "brain-vault-events" },
+      // Producer for the Notion webhook route (W3.1): verified events → brain-notion-events
+      // consumer (apps/api/src/notion-events/consume.ts).
+      { "binding": "NOTION_EVENTS_QUEUE", "queue": "brain-notion-events" }
     ],
     "consumers": [
       {
@@ -149,6 +152,21 @@
         "max_concurrency": 10,
         "retry_delay": 30,
         "dead_letter_queue": "brain-vault-events-dlq"
+      },
+      {
+        // brain-notion-events: verified Notion webhook events → near-real-time ingest (W3.1).
+        // The webhook route (src/notion/routes.ts) produces to it via NOTION_EVENTS_QUEUE.
+        // max_concurrency:1 — Notion caps at ~3 req/s and each message rebuilds its own client
+        // (throttle state does not survive across messages), so messages MUST be serialized to
+        // keep the per-workspace request rate bounded. Within one message the client's throttle
+        // spaces the page's block-children fan-out.
+        "queue": "brain-notion-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "max_concurrency": 1,
+        "retry_delay": 30,
+        "dead_letter_queue": "brain-notion-events-dlq"
       }
     ]
   },
