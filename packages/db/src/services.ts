@@ -12,6 +12,7 @@ import { embed, embedForIndex } from "./ai/embed"
 import type { AiDeps, OpenAiCompatConfig } from "./ai/gateway"
 import { gen, genExtract } from "./ai/gen"
 import { type RerankCandidate, type RerankHit, rerank } from "./ai/rerank"
+import { type Transcription, transcribe } from "./ai/transcribe"
 import type { BrainBindings } from "./env"
 import { ScopedGraph } from "./graph/scoped-graph"
 import { type BreakGlassAudit, ScopedDB } from "./scoped/db"
@@ -44,6 +45,8 @@ export interface ScopedServices {
      * and in test stubs that omit it. The `/documents` upload handler returns 415 when absent.
      */
     toMarkdown?: (name: string, buf: ArrayBuffer) => Promise<string>
+    /** WRITE/ingest path (voice memo, W3.2) — THROWS on failure so the audio doc fails visibly. */
+    transcribe: (audio: Uint8Array) => Promise<Transcription>
   }
 }
 
@@ -90,6 +93,7 @@ export const createScopedServices = (
         if (r.format === "error") throw new Error(r.error)
         return r.data
       },
+      transcribe: (audio) => transcribe(aiDeps, audio),
     },
   }
 }

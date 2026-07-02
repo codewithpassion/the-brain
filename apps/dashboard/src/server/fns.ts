@@ -408,6 +408,25 @@ export const ingestDocument = createServerFn({ method: "POST" })
     }
   })
 
+/**
+ * `add_thought` — capture a quick thought as a small note under `brain/thoughts/<yyyy-mm>`
+ * (tag `thought`). Runs through the same ingest spine as `ingest_document`, so the result
+ * shape is identical.
+ */
+export const addThought = createServerFn({ method: "POST" })
+  .validator((d: { thought: string; tags?: string[] }) => d)
+  .handler(async ({ data }): Promise<Result<IngestResult>> => {
+    try {
+      const out = await brainCall<IngestResult>("add_thought", true, {
+        thought: data.thought,
+        ...(data.tags && data.tags.length > 0 ? { tags: data.tags } : {}),
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
 // --- Org management ---
 
 /**

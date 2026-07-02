@@ -10,6 +10,8 @@ import {
 } from "../src/ai/gateway"
 import { gen, genExtract } from "../src/ai/gen"
 import { remapRerank, rerank } from "../src/ai/rerank"
+import { TranscriptionError, transcribe } from "../src/ai/transcribe"
+import { estimateWhisperNeurons, WHISPER_NEURONS_PER_SECOND } from "../src/search/ports"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -327,6 +329,107 @@ describe("gen() + genExtract() — openai-compatible routing", () => {
     expect(capturedModel).toBe("gpt-4o-mini")
   })
 })
+
+// ── transcribe() — WRITE/ingest path over whisper (W3.2, invariant 14) ────────
+
+describe("transcribe() (W3.2 — voice memos, whisper-large-v3-turbo)", () => {
+  const audio = new Uint8Array(32_000) // 32 KB → 2 s at the byte-rate fallback
+
+  test("sends BASE64 audio (turbo input shape), not the base model's number[]", async () => {
+    let capturedModel = ""
+    let capturedAudio: unknown
+    const d = deps((model, inputs) => {
+      capturedModel = model
+      capturedAudio = (inputs as { audio?: unknown }).audio
+      return Promise.resolve({ text: "ok", segments: [{ end: 1 }] })
+    })
+    await transcribe(d, audio)
+    expect(capturedModel).toBe("@cf/openai/whisper-large-v3-turbo")
+    // base64 of 32 KB of zeros is a non-empty string ("AAAA…"); the base model's shape was number[].
+    expect(typeof capturedAudio).toBe("string")
+    expect((capturedAudio as string).length).toBeGreaterThan(0)
+  })
+
+  test("returns the transcript + neuron estimate from segment timestamps (turbo output)", async () => {
+    const d = deps(() =>
+      Promise.resolve({ text: "  hello world  ", segments: [{ end: 1 }, { end: 5 }] }),
+    )
+    const out = await transcribe(d, audio)
+    expect(out.text).toBe("hello world") // trimmed
+    // Duration = last segment.end (5 s) → estimate ignores byteLength.
+    expect(out.neurons).toBe(estimateWhisperNeurons(5))
+    expect(out.neurons).toBe(5 * WHISPER_NEURONS_PER_SECOND)
+  })
+
+  test("falls back to words[].end when segments are absent (base-model defensive)", async () => {
+    const d = deps(() => Promise.resolve({ text: "hi", words: [{ end: 3 }] }))
+    const out = await transcribe(d, audio)
+    expect(out.neurons).toBe(estimateWhisperNeurons(3))
+  })
+
+  test("falls back to a byte-rate duration estimate when no timestamps at all", async () => {
+    const d = deps(() => Promise.resolve({ text: "no timestamps here" }))
+    const out = await transcribe(d, audio)
+    // 32_000 bytes / 16_000 B/s = 2 s.
+    expect(out.neurons).toBe(estimateWhisperNeurons(2))
+  })
+
+  test("THROWS TranscriptionError when the binding fails (ingest must fail visibly)", async () => {
+    const d = deps(() => Promise.reject(new Error("whisper down")))
+    await expect(transcribe(d, audio)).rejects.toBeInstanceOf(TranscriptionError)
+  })
+
+  test("RE-THROWS GatewayBudgetError (429 path), NOT a generic TranscriptionError", async () => {
+    const d = deps(() => Promise.reject(new Error("AI Gateway budget limit exceeded")))
+    await expect(transcribe(d, audio)).rejects.toBeInstanceOf(GatewayBudgetError)
+  })
+
+  test("THROWS TranscriptionError on an empty / whitespace-only transcript", async () => {
+    const empty = deps(() => Promise.resolve({ text: "   " }))
+    await expect(transcribe(empty, audio)).rejects.toBeInstanceOf(TranscriptionError)
+
+    const missing = deps(() => Promise.resolve({}))
+    await expect(transcribe(missing, audio)).rejects.toBeInstanceOf(TranscriptionError)
+  })
+})
+
+// ── whisper-large-v3-turbo live-shape gate (doc-verified, live-UNVERIFIED) ────
+
+/**
+ * Shape-lock gate for @cf/openai/whisper-large-v3-turbo (W3.2), mirroring the reranker gate above.
+ *
+ * ASSUMED (from rendered CF docs, NOT verified against the live model):
+ *   INPUT:  { audio: <base64 string>, language?: string }
+ *   OUTPUT: { text: string, word_count: number, segments: [{ end: number, ... }], vtt: string,
+ *             transcription_info: {...} }   — NOTE: no top-level `words[]` (the base model had that).
+ *
+ * `transcribe()` reads `text` (the body) + the last `segments[].end` (duration → neuron estimate),
+ * falling back to `words[].end` then a byte-rate. If the live model's field names differ, update
+ * `transcribe.ts` (encoding + estimateSeconds) and this gate together.
+ *
+ * To run against the live model (real AI call, in apps/api miniflare): RUN_AI_GATES=1.
+ */
+describe.skipIf(process.env.RUN_AI_GATES !== "1")(
+  "whisper turbo shape gate [RUN_AI_GATES=1 required]",
+  () => {
+    test("assumed { text, segments:[{end}] } output drives transcribe() correctly", async () => {
+      const d = deps(() =>
+        Promise.resolve({
+          text: "assumed live transcript",
+          word_count: 3,
+          segments: [
+            { end: 2.5, text: "assumed live" },
+            { end: 4.1, text: "transcript" },
+          ],
+          vtt: "WEBVTT\n\n00:00.000 --> 00:04.100\nassumed live transcript",
+        }),
+      )
+      const out = await transcribe(d, new Uint8Array(1000))
+      expect(out.text).toBe("assumed live transcript")
+      expect(out.neurons).toBe(estimateWhisperNeurons(4.1))
+    })
+  },
+)
 
 // ── Reranker live-shape gate ──────────────────────────────────────────────────
 

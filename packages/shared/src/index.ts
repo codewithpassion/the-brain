@@ -8,6 +8,7 @@
 
 // ── Model + algorithm + limit constants ──────────────────────────────────────
 export {
+  AUDIO_MAX_BYTES,
   CANDIDATE_TOP,
   CHUNK_DB_BATCH_SIZE,
   COSINE_FLOOR,
@@ -29,6 +30,7 @@ export {
   THINK_TOP_K,
   TITLE_BOOST,
   VECTORIZE_TOPK_MAX,
+  WHISPER_MODEL,
 } from "./constants"
 export type { Capability, EntityVisibility, Role, TrustGrade, Visibility } from "./enums"
 // ── Enums / unions (governance + identity axes) ──────────────────────────────

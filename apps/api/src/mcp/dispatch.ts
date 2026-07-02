@@ -134,7 +134,9 @@ const FACTS_SESSION_OPS = new Set([
   "list_snapshots",
   "list_sessions",
 ])
-const SEARCH_OPS = new Set(["search", "think", "query"])
+// The content family: retrieval (search/think/query) + capture (ingest_document/add_thought). Grouped
+// together so an agent scanning the catalog finds "how do I put content in / get it out" in one place.
+const SEARCH_OPS = new Set(["search", "think", "query", "ingest_document", "add_thought"])
 const GRAPH_OPS = new Set([
   "traverse_graph",
   "get_links",

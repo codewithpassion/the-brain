@@ -3,6 +3,8 @@
  * The server fn `ingestDocument` base64-encodes the body and POSTs to the API /documents
  * endpoint, which runs the standard fingerprint → R2 → chunk → embed → index pipeline.
  */
+
+import { AUDIO_MAX_BYTES, MAX_BODY_BYTES } from "@brain/shared"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ChangeEvent, type FormEvent, useRef, useState } from "react"
 import { RequireAuth } from "../components/RequireAuth"
@@ -10,10 +12,14 @@ import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input"
-import { EXT_TO_CONTENT_TYPE } from "../lib/content-types"
-import { ingestDocument } from "../server/fns"
+import { AUDIO_EXTS, EXT_TO_CONTENT_TYPE } from "../lib/content-types"
+import { addThought, ingestDocument } from "../server/fns"
 
 export { EXT_TO_CONTENT_TYPE }
+
+/** MiB for user-facing copy — derived from the shared byte caps so text can't drift from the limit. */
+const MAX_BODY_MIB = Math.round(MAX_BODY_BYTES / (1024 * 1024))
+const AUDIO_MAX_MIB = Math.round(AUDIO_MAX_BYTES / (1024 * 1024))
 
 export const Route = createFileRoute("/ingest")({
   component: () => (
@@ -22,9 +28,6 @@ export const Route = createFileRoute("/ingest")({
     </RequireAuth>
   ),
 })
-
-/** Maximum upload size (8 MiB) — mirrors MAX_BODY_BYTES from @brain/shared. */
-const MAX_BODY_BYTES = 8 * 1024 * 1024
 
 /** Base64-encode an ArrayBuffer for transmission via the server fn JSON transport. */
 const toBase64 = (buf: ArrayBuffer): string => {
@@ -66,9 +69,40 @@ function IngestPage() {
   const [success, setSuccess] = useState<SuccessResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Quick-thought box state (independent of the document form).
+  const [thought, setThought] = useState("")
+  const [thoughtLoading, setThoughtLoading] = useState(false)
+  const [thoughtSlug, setThoughtSlug] = useState<string | null>(null)
+  const [thoughtError, setThoughtError] = useState<string | null>(null)
+
   const reset = () => {
     setSuccess(null)
     setError(null)
+  }
+
+  const onThoughtSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setThoughtSlug(null)
+    setThoughtError(null)
+    const text = thought.trim()
+    if (!text) {
+      setThoughtError("Write a thought before capturing it.")
+      return
+    }
+    setThoughtLoading(true)
+    try {
+      const res = await addThought({ data: { thought: text } })
+      if (res.ok) {
+        setThought("")
+        setThoughtSlug(res.data.slug)
+      } else {
+        setThoughtError(res.error)
+      }
+    } catch (err) {
+      setThoughtError(err instanceof Error ? err.message : "capture failed")
+    } finally {
+      setThoughtLoading(false)
+    }
   }
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -102,12 +136,17 @@ function IngestPage() {
       const ct = EXT_TO_CONTENT_TYPE[ext]
       if (!ct) {
         setError(
-          `Unsupported file type ".${ext}". Accepted: .md .txt .html .pdf .docx .jpg .png .gif .webp`,
+          `Unsupported file type ".${ext}". Accepted: .md .txt .html .pdf .docx .jpg .png .gif .webp .m4a .mp3 .wav`,
         )
         return
       }
-      if (file.size > MAX_BODY_BYTES) {
-        setError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)} MiB). Max is 8 MiB.`)
+      const isAudio = AUDIO_EXTS.has(ext)
+      const cap = isAudio ? AUDIO_MAX_BYTES : MAX_BODY_BYTES
+      if (file.size > cap) {
+        const capMiB = isAudio ? AUDIO_MAX_MIB : MAX_BODY_MIB
+        setError(
+          `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MiB). Max is ${capMiB} MiB.`,
+        )
         return
       }
       buf = await file.arrayBuffer()
@@ -156,6 +195,36 @@ function IngestPage() {
           and become searchable via <code className="font-mono">think</code>.
         </p>
       </header>
+
+      {/* Quick thought — one-line capture into brain/thoughts/<yyyy-mm>. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick thought</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onThoughtSubmit} className="flex flex-col gap-2">
+            <textarea
+              id="quick-thought"
+              value={thought}
+              onChange={(e) => setThought(e.target.value)}
+              placeholder="Jot a quick thought… (stored under brain/thoughts, tagged 'thought')"
+              rows={3}
+              className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            />
+            <div className="flex items-center gap-3">
+              <Button type="submit" disabled={thoughtLoading} className="w-fit">
+                {thoughtLoading ? "Capturing…" : "Capture thought"}
+              </Button>
+              {thoughtSlug && (
+                <span className="text-neutral-500 text-sm">
+                  Captured · <span className="font-mono">{thoughtSlug}</span>
+                </span>
+              )}
+              {thoughtError && <span className="text-red-600 text-sm">{thoughtError}</span>}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -218,14 +287,15 @@ function IngestPage() {
                 <label htmlFor="file-input" className="font-medium text-sm text-neutral-700">
                   File{" "}
                   <span className="font-normal text-neutral-400">
-                    (.md .txt .html .pdf .docx .jpg .png .gif .webp — max 8 MiB)
+                    (.md .txt .html .pdf .docx .jpg .png .gif .webp — max {MAX_BODY_MIB} MiB; .m4a
+                    .mp3 .wav voice memos — max {AUDIO_MAX_MIB} MiB, transcribed automatically)
                   </span>
                 </label>
                 <input
                   id="file-input"
                   ref={fileRef}
                   type="file"
-                  accept=".md,.txt,.html,.htm,.pdf,.docx,.jpg,.jpeg,.png,.gif,.webp"
+                  accept=".md,.txt,.html,.htm,.pdf,.docx,.jpg,.jpeg,.png,.gif,.webp,.m4a,.mp3,.wav"
                   onChange={onFileChange}
                   className="block w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 file:mr-3 file:rounded file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-sm file:font-medium"
                 />

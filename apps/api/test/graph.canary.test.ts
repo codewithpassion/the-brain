@@ -213,6 +213,7 @@ const extractionServices = (tenantId: string): ScopedServices => {
     ai: {
       genExtract: async () => KG_JSON,
       embed: async (texts: string[]) => texts.map(() => new Array(1024).fill(0)),
+      transcribe: async () => ({ text: "stub transcript", neurons: 0 }),
     },
   }
   return stub as unknown as ScopedServices

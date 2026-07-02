@@ -69,6 +69,7 @@ const reflectServices = (
       genExtract: async () => null,
       rerank: async (_q: string, c: { text: string }[], k: number) =>
         c.map((_x, i) => ({ index: i, score: 0 })).slice(0, k),
+      transcribe: async () => ({ text: "stub transcript", neurons: 0 }),
     },
     raw: rawDb,
     runs: new DreamRunStore(rawDb, p),

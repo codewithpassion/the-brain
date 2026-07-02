@@ -22,6 +22,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   think: "search",
   list_documents: "search",
   ingest_document: "search",
+  add_thought: "search",
   get_document: "search",
   update_document: "search",
   delete_document: "search",

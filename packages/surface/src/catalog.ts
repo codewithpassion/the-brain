@@ -13,6 +13,7 @@
  * `@brain/db`.
  */
 import {
+  ADD_THOUGHT_OP,
   ADMIN_OPS,
   type AdminBoundOp,
   AUDIT_EXPORT_OP,
@@ -459,7 +460,76 @@ const adminSurfaceOp = (op: AdminBoundOp<unknown, unknown>): SurfaceOp => ({
     op.handler({ env: ctx.env, principal: ctx.principal }, op.def.input.parse(input)),
 })
 
-// ── Ingest family (ingest_document) ───────────────────────────────────────────
+// ── Ingest family (add_thought | ingest_document) ─────────────────────────────
+
+/**
+ * `add_thought` — capture a quick thought as a small note under `brain/thoughts/<yyyy-mm>`
+ * (tagged `thought`). fingerprint → R2 → insertDocument → BATCH_INGEST workflow (or inline),
+ * reusing the ingest spine. Uses a time-stamped fingerprint + slug so each capture is its OWN
+ * doc; a genuine unique-conflict still returns the promised `{status:'duplicate'}`.
+ */
+const addThoughtSurfaceOp: SurfaceOp = {
+  def: ADD_THOUGHT_OP,
+  invoke: async (ctx, input) => {
+    const parsed = ADD_THOUGHT_OP.input.parse(input) as { thought: string; tags?: string[] }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const markdown = toMarkdown(parsed.thought, "text/markdown")
+    if (markdown.trim().length === 0) throw new Error("add_thought: empty thought")
+    const now = new Date()
+    const month = now.toISOString().slice(0, 7) // yyyy-mm
+    const path = normalizePath(`brain/thoughts/${month}`)
+    const tags = ["thought", ...(parsed.tags ?? [])]
+    // A time-stamped fingerprint (+ time-based slug) so each capture is its OWN doc — a repeated
+    // identical thought is kept, not deduped away.
+    const stamp = now.toISOString()
+    const fp = await fingerprint(`${markdown}\n@${stamp}`)
+    const slug = `thought-${stamp.replace(/[:.]/g, "-")}-${fp.slice(0, 6)}`
+    const documentId = crypto.randomUUID()
+    const r2Key = `documents/${documentId}`
+    // Durable dedup backstop: catch the UNIQUE conflict → duplicate response (mirrors ingest_document).
+    let docId: string
+    try {
+      docId = await services.db.insertDocument({
+        id: documentId,
+        slug,
+        fingerprint: fp,
+        contentType: "text/markdown",
+        bodyR2Key: r2Key,
+        status: "pending",
+        tags,
+        ...(path !== null ? { path } : {}),
+      })
+    } catch {
+      const existing = (await services.db.listDocuments()).find(
+        (doc) => doc.fingerprint === fp || doc.slug === slug,
+      )
+      return {
+        documentId: existing?.id ?? null,
+        slug: existing?.slug ?? slug,
+        status: "duplicate" as const,
+        chunkCount: 0,
+      }
+    }
+    await services.blobs.put(r2Key, markdown)
+    const ingestParams = {
+      documentId: docId,
+      r2Key,
+      contentType: "text/markdown",
+      scope: null,
+      ...(path !== null ? { path } : {}),
+    }
+    const workflow = ctx.env.BATCH_INGEST
+    if (workflow) {
+      await workflow.create({
+        id: await workflowInstanceId(`ingest-${ctx.principal.tenantId}-${fp}`),
+        params: { principal: ctx.principal, ingest: ingestParams },
+      })
+      return { documentId: docId, slug, status: "accepted", chunkCount: 0 }
+    }
+    const result = await runBatchIngestCore(services, ingestParams)
+    return { documentId: docId, slug, status: "indexed" as const, chunkCount: result.chunkCount }
+  },
+}
 
 /**
  * `ingest_document` — fingerprint → R2 → insertDocument → BATCH_INGEST workflow (or inline).
@@ -598,6 +668,14 @@ const deleteDocumentSurfaceOp: SurfaceOp = {
       return { documentId: null, deleted: false }
     }
 
+    // A voice doc keeps its raw audio at `documents/audio/<id>` for provenance — remove it on delete
+    // (it is large and provenance-only; the transcript body blob follows the existing soft-delete
+    // retention policy). Best-effort + idempotent: a missing key is a no-op.
+    const row = await services.db.getDocumentById(docId)
+    if (row?.contentType === "voice") {
+      await services.blobs.delete(`documents/audio/${docId}`)
+    }
+
     const { chunkIds } = await services.db.softDeleteDocument(docId)
     if (chunkIds.length > 0) {
       await services.vectors.deleteVectors(chunkIds)
@@ -676,7 +754,11 @@ const reprocessDocumentSurfaceOp: SurfaceOp = {
     const ingestParams = {
       documentId,
       r2Key: doc.bodyR2Key ?? `documents/${documentId}`,
-      contentType: doc.contentType ?? "text/markdown",
+      // The stored body is ALWAYS extracted markdown (a 'voice' doc's body is its transcript, not
+      // audio) — re-ingest it as text/markdown; never re-transcribe. Any non-text origin marker maps
+      // to text/markdown for chunking.
+      contentType:
+        doc.contentType === "voice" ? "text/markdown" : (doc.contentType ?? "text/markdown"),
       scope: doc.scope ?? null,
       ...(doc.path !== null ? { path: doc.path } : {}),
     }
@@ -737,11 +819,14 @@ const updateDocumentSurfaceOp: SurfaceOp = {
       await services.vectors.deleteVectors(oldChunkIds)
     }
 
-    // Supersede the document row: new fingerprint + status → pending + clear deletedAt.
+    // Supersede the document row: new fingerprint + status → pending + clear deletedAt. The new body
+    // sets content_type from the replacement content — clearing any stale 'voice' origin marker
+    // (the body is no longer a transcript once the caller replaces it with text).
     await services.db.updateDocumentForSupersede(documentId, {
       fingerprint: fp,
       bodyR2Key: r2Key,
       deletedAt: null,
+      contentType: parsed.contentType,
     })
 
     const ingestParams = {
@@ -836,6 +921,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   listPendingReviewsSurfaceOp,
   resolveContradictionSurfaceOp,
   ingestDocumentSurfaceOp,
+  addThoughtSurfaceOp,
   deleteDocumentSurfaceOp,
   getDocumentSurfaceOp,
   reprocessDocumentSurfaceOp,

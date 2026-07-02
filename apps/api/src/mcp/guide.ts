@@ -21,6 +21,7 @@ FIVE MEMORY LAYERS, addressed differently:
 CHOOSING A TOOL:
 - Remember a preference/decision/instruction verbatim → memory_set (NOT ingest_document).
 - Store reference content to find later → ingest_document.
+- Quick one-liner capture (a passing thought, no title/path) → add_thought.
 - "What do I know about X?" → recall and/or traverse_graph.
 - "What do the documents say about X?" → think (answer) or search (passages).
 - Beginning a task → get_session_context.

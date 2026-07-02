@@ -26,6 +26,7 @@ export type {
 } from "./ops"
 export {
   ADD_MEMBER_OP,
+  ADD_THOUGHT_OP,
   ADMIN_OPS,
   addMemberCore,
   addMemberOp,

@@ -1454,6 +1454,39 @@ export const INGEST_DOCUMENT_OP = defineOp({
   }),
 })
 
+// ── ADD_THOUGHT_OP (W3.3 — quick thoughts) ────────────────────────────────────
+/**
+ * `add_thought` — capture one quick thought as a small document through the NORMAL ingest spine,
+ * filed under `brain/thoughts/<yyyy-mm>` with the `thought` tag. It is ordinary searchable content
+ * (search/think retrieve it), NOT durable agent memory (memory_set) or a transient fact. Each capture
+ * is its own document (time-based slug + timestamped fingerprint → repeated thoughts aren't deduped).
+ *
+ * NOTE: `extractFacts` is deliberately NOT offered — there is no cheap synchronous fact-extraction
+ * path (session promotion runs the extractor inside an async workflow), and the brief says not to
+ * build new extraction machinery here.
+ */
+export const ADD_THOUGHT_OP = defineOp({
+  name: "add_thought",
+  description:
+    "Capture a quick thought as a small searchable document (filed under brain/thoughts/<month>, tagged 'thought'). " +
+    "Use for a passing note/idea you want to find later by meaning; use memory_set for durable preferences/decisions.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    thought: z.string().min(1).describe("The thought text."),
+    tags: z
+      .array(z.string())
+      .optional()
+      .describe("Extra tags to attach (the 'thought' tag is always added)."),
+  }),
+  output: z.object({
+    documentId: z.string().nullable(),
+    slug: z.string(),
+    status: z.enum(["accepted", "indexed", "duplicate"]),
+    chunkCount: z.number().int(),
+  }),
+})
+
 // ── DELETE_DOCUMENT_OP ────────────────────────────────────────────────────────
 
 /**
@@ -1625,6 +1658,7 @@ export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   // update_document: registered separately; handlers live in the surface catalog (need
   // ScopedServices for blobs/vectors/db/workflow).
   registry.register(INGEST_DOCUMENT_OP)
+  registry.register(ADD_THOUGHT_OP)
   registry.register(DELETE_DOCUMENT_OP)
   registry.register(VAULT_WRITEBACK_OP)
   registry.register(GET_DOCUMENT_OP)

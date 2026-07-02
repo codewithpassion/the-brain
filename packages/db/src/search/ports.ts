@@ -47,6 +47,16 @@ export const estimateGenNeurons = (chars: number): number =>
  */
 export const estimateEmbedNeurons = (chars: number): number => Math.ceil(chars / CHARS_PER_TOKEN)
 
+/**
+ * Coarse WHISPER-neuron estimate from audio DURATION (whisper is priced per audio-second, not by
+ * token). This is a v1 attribution approximation to keep the window total meaningful — refine
+ * `WHISPER_NEURONS_PER_SECOND` against live Workers-AI pricing. `transcribe()` derives the seconds
+ * from the model's word timestamps when present, else a byte-rate fallback.
+ */
+export const WHISPER_NEURONS_PER_SECOND = 12
+export const estimateWhisperNeurons = (audioSeconds: number): number =>
+  Math.ceil(Math.max(0, audioSeconds)) * WHISPER_NEURONS_PER_SECOND
+
 /** Current monthly spend window key, e.g. `'2026-06'` (UTC). */
 export const monthlyWindow = (now: Date = new Date()): string =>
   `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`

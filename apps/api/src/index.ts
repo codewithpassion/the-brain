@@ -19,9 +19,11 @@ import {
   createAuditExportCursorStore,
   createBreakGlassAuditSink,
   createScopedServices,
+  GatewayBudgetError,
   GRAPH_OPS,
   type GraphOpDeps,
   MEMORY_REVIEW_OP,
+  monthlyWindow,
   normalizePath,
   type OpenAiCompatConfig,
   RECALL_OP,
@@ -29,16 +31,19 @@ import {
   type ScopedServices,
   type SearchDeps,
   searchOp,
+  TranscriptionError,
   thinkOp,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import {
   type AnyOpDef,
+  AUDIO_MAX_BYTES,
   INGEST_WEBHOOK_MAX_BYTES,
   MAX_BODY_BYTES,
   type Principal,
   SEARCH_OP,
   THINK_OP,
+  WHISPER_MODEL,
 } from "@brain/shared"
 import { appRouter, createTrpcContext, type SurfaceEnv } from "@brain/surface"
 import OAuthProvider from "@cloudflare/workers-oauth-provider"
@@ -107,6 +112,18 @@ const AI_MARKDOWN_TYPES = new Set([
   "image/png",
   "image/gif",
   "image/webp",
+])
+
+/** Audio content types accepted for voice-memo transcription (W3.2, behind `transcribe()`). */
+const AUDIO_CONTENT_TYPES = new Set([
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/webm",
 ])
 
 /** Map a content-type to a short extension for the `env.AI.toMarkdown` `name` field. */
@@ -397,27 +414,76 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   //    the same fingerprint → documents row → BatchIngest pipeline. The raw /ingest webhook
   //    (256 KiB cap) is left unchanged for programmatic callers.
   //
-  //    NOTE: Raw bytes are NOT stored in R2 — the extracted markdown is stored instead.
-  //    This is intentional: ai.toMarkdown for images uses LLM-generated descriptions that
-  //    are non-deterministic. Storing the extraction output deduplicates correctly and
-  //    avoids calling ai.toMarkdown twice (once for fingerprint + once in runBatchIngest).
+  //    NOTE: For text/image/HTML, raw bytes are NOT stored in R2 — the extracted markdown is stored
+  //    instead (ai.toMarkdown for images is non-deterministic, so storing the extraction output
+  //    deduplicates correctly and avoids a double conversion). AUDIO is the exception: the raw audio
+  //    IS kept in R2 at `documents/audio/<id>` for provenance (a transcript is lossy), written ONLY
+  //    after a successful transcription AND a committed document row (never on a dedup).
   app.post("/documents", async (c) => {
     const principal = c.get("principal")
     const services = makeServices(c.env, principal)
 
-    const buf = await c.req.arrayBuffer()
-    if (buf.byteLength > MAX_BODY_BYTES) {
-      throw new HttpError(413, `body exceeds the ${MAX_BODY_BYTES}-byte /documents cap`)
-    }
     const contentType = baseContentType(c.req.header("content-type"))
+    const isAudio = AUDIO_CONTENT_TYPES.has(contentType)
+    const cap = isAudio ? AUDIO_MAX_BYTES : MAX_BODY_BYTES
+    const capMiB = Math.round(cap / (1024 * 1024))
+
+    // Reject oversized uploads from the Content-Length header BEFORE buffering the body — an audio
+    // memo can be tens of MB, so don't pull it into memory just to reject it. The post-buffer check
+    // below stays as a backstop (Content-Length may be absent or understated on chunked bodies).
+    const declaredLength = Number(c.req.header("content-length"))
+    if (Number.isFinite(declaredLength) && declaredLength > cap) {
+      throw new HttpError(
+        413,
+        `body is ${Math.round(declaredLength / (1024 * 1024))} MiB — exceeds the ${capMiB} MiB /documents cap for ${isAudio ? "audio" : "this content type"}`,
+      )
+    }
+
+    const buf = await c.req.arrayBuffer()
+    if (buf.byteLength > cap) {
+      throw new HttpError(413, `body exceeds the ${cap}-byte /documents cap`)
+    }
     const scope = c.req.query("scope") ?? undefined
     const title = c.req.query("title") ?? undefined
     const tags = parseTags(c.req.query("tags") ?? undefined)
     const path = normalizePath(c.req.query("path") ?? undefined)
 
-    // Extract to markdown. Text types → passthrough normalize; binary/HTML → ai.toMarkdown.
+    // Document id is minted up-front so the raw audio can be stored at a DERIVABLE key
+    // (`documents/audio/<id>`) alongside the transcript body (`documents/<id>`).
+    const documentId = crypto.randomUUID()
+
+    // Extract to markdown. Text → passthrough; binary/HTML → ai.toMarkdown; audio → transcribe().
+    // `docContentType` marks the documents row's origin ('voice' for audio); the body is always the
+    // extracted markdown/transcript, chunked as text/markdown.
     let markdown: string
-    if (ALLOWED_CONTENT_TYPES.has(contentType)) {
+    let docContentType = "text/markdown"
+    if (isAudio) {
+      // Voice memo (W3.2). Whisper is billed ingest spend, so gate on the monthly ceiling BEFORE the
+      // call (429 pre-check, same as think). The raw audio is NOT stored yet — only after the doc row
+      // commits — so a failed/duplicate transcription leaves no orphan blob.
+      await makeBudgetPort(services).check()
+      let t: { text: string; neurons: number }
+      try {
+        t = await services.ai.transcribe(new Uint8Array(buf))
+      } catch (err) {
+        // A budget rejection from the gateway must still surface as 429 (defense-in-depth behind the
+        // pre-check); a transcription failure is a 422 (the audio doc fails visibly, no row created).
+        if (err instanceof GatewayBudgetError) {
+          throw new CostCeilingError(`monthly cost ceiling reached; try again next window`)
+        }
+        if (err instanceof TranscriptionError) throw new HttpError(422, err.message)
+        throw err
+      }
+      markdown = t.text
+      docContentType = "voice"
+      // Whisper is priced in audio-seconds → attribute the estimated neurons as ingest spend.
+      await services.db.recordSpend({
+        window: monthlyWindow(),
+        model: WHISPER_MODEL,
+        surface: "ingest",
+        neurons: t.neurons,
+      })
+    } else if (ALLOWED_CONTENT_TYPES.has(contentType)) {
       const raw = new TextDecoder().decode(buf)
       markdown = toMarkdown(raw, contentType)
     } else if (AI_MARKDOWN_TYPES.has(contentType)) {
@@ -433,7 +499,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     } else {
       throw new HttpError(
         415,
-        `unsupported content type "${contentType}" — accepted: text/markdown, text/plain, text/html, application/pdf, DOCX, image/*`,
+        `unsupported content type "${contentType}" — accepted: text/markdown, text/plain, text/html, application/pdf, DOCX, image/*, audio (m4a/mp3/wav)`,
       )
     }
 
@@ -444,7 +510,6 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
     // Fingerprint + slug over the extracted markdown (formatting-insensitive dedup, invariant 15).
     const fp = await fingerprint(markdown)
     const slug = c.req.query("slug") ?? `doc-${fp.slice(0, 12)}`
-    const documentId = crypto.randomUUID()
     const r2Key = `documents/${documentId}`
 
     // Durable dedup: UNIQUE index on (tenant,scope,fingerprint)/(tenant,slug) → catch conflict.
@@ -454,8 +519,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
         id: documentId,
         slug,
         fingerprint: fp,
-        // Always store as text/markdown — binary bodies are already extracted above.
-        contentType: "text/markdown",
+        // Origin marker: 'voice' for transcribed audio, else 'text/markdown' — the body itself is
+        // always extracted markdown (binary/audio bodies are converted above).
+        contentType: docContentType,
         bodyR2Key: r2Key,
         status: "pending",
         ...(scope !== undefined ? { scope } : {}),
@@ -478,6 +544,12 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
 
     // Body (extracted markdown) lives in R2; the pipeline reads it from there (invariant 13).
     await services.blobs.put(r2Key, markdown)
+
+    // Voice memo: keep the RAW audio for provenance at a key derivable from the doc id. Written here
+    // — after the insert resolved (not on the duplicate path above) — so no orphan blob is left.
+    if (isAudio) {
+      await services.blobs.put(`documents/audio/${documentId}`, buf)
+    }
 
     const ingestParams: BatchIngestParams = {
       documentId: docId,

@@ -929,7 +929,13 @@ export class ScopedDB {
    */
   async updateDocumentForSupersede(
     documentId: string,
-    patch: { fingerprint: string; bodyR2Key: string; deletedAt: string | null },
+    patch: {
+      fingerprint: string
+      bodyR2Key: string
+      deletedAt: string | null
+      /** New origin content-type. Set to clear a stale 'voice' marker when the body is replaced. */
+      contentType?: string
+    },
   ): Promise<void> {
     const update = this.db
       .update(documents)
@@ -939,6 +945,7 @@ export class ScopedDB {
         deletedAt: patch.deletedAt,
         status: "pending",
         updatedAt: new Date().toISOString(),
+        ...(patch.contentType !== undefined ? { contentType: patch.contentType } : {}),
       })
       .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
     await this.batchWithAudit([update], {

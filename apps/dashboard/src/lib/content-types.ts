@@ -17,4 +17,11 @@ export const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   png: "image/png",
   gif: "image/gif",
   webp: "image/webp",
+  // Voice memos (W3.2) — transcribed server-side via Whisper.
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
 }
+
+/** Content types that are transcribed (audio) — larger upload cap than text/binary docs. */
+export const AUDIO_EXTS = new Set(["m4a", "mp3", "wav"])

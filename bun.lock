@@ -58,6 +58,7 @@
       "name": "@brain/dashboard",
       "version": "0.0.0",
       "dependencies": {
+        "@brain/shared": "workspace:*",
         "@clerk/tanstack-react-start": "^1.2.5",
         "@radix-ui/react-slot": "^1.1.2",
         "@tanstack/react-router": "^1.132.0",

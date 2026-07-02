@@ -13,13 +13,15 @@ import {
   type BrainBindings,
   type ClerkIdentity,
   type ClerkVerifier,
+  GatewayBudgetError,
   ScopedDB,
   ScopedGraph,
   ScopedR2,
   type ScopedServices,
   ScopedVectorize,
+  TranscriptionError,
 } from "@brain/db"
-import { MAX_BODY_BYTES, type Principal } from "@brain/shared"
+import { AUDIO_MAX_BYTES, MAX_BODY_BYTES, type Principal, WHISPER_MODEL } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import { beforeAll, describe, expect, test } from "vitest"
 import { createApp } from "../src/index"
@@ -56,6 +58,14 @@ const fakeVectorize = makeFakeVectorize()
 let toMarkdownCallCount = 0
 let toMarkdownLastName = ""
 
+/** Canned voice transcript + a toggle to exercise the fail-visibly (throw) path. */
+const CANNED_TRANSCRIPT = "This is the transcribed voice memo. needle-voice"
+let transcribeShouldThrow = false
+/** Toggle: make transcribe() reject with a GatewayBudgetError (exercises the route's 429 mapping). */
+let transcribeThrowBudget = false
+/** Per-test transcript override so a test can produce a UNIQUE fingerprint (default: the canned one). */
+let transcriptOverride: string | null = null
+
 const makeServices = (e: BrainBindings, principal: Principal): ScopedServices => ({
   db: new ScopedDB(drizzle(e.DB), principal),
   vectors: new ScopedVectorize(fakeVectorize, principal),
@@ -73,6 +83,13 @@ const makeServices = (e: BrainBindings, principal: Principal): ScopedServices =>
       toMarkdownCallCount++
       toMarkdownLastName = name
       return `# Converted\n\nThis is the extracted markdown from ${name}.`
+    },
+    transcribe: async (_audio) => {
+      // Model the real chokepoint's contract: it rethrows GatewayBudgetError (route → 429) and throws
+      // TranscriptionError on other failures (route → 422); a plain Error would misrepresent the taxonomy.
+      if (transcribeThrowBudget) throw new GatewayBudgetError()
+      if (transcribeShouldThrow) throw new TranscriptionError("whisper down")
+      return { text: transcriptOverride ?? CANNED_TRANSCRIPT, neurons: 60 }
     },
   },
 })
@@ -216,6 +233,183 @@ describe("POST /documents — binary/HTML path (env.AI.toMarkdown chokepoint)", 
     expect(toMarkdownCallCount).toBe(before + 1)
     // No x-filename header → fallback filename is "upload.pdf"
     expect(toMarkdownLastName).toBe("upload.pdf")
+  })
+})
+
+describe("POST /documents — audio/voice path (W3.2, transcribe chokepoint)", () => {
+  test("audio body: transcript becomes the body, content_type='voice', pipeline runs", async () => {
+    transcribeShouldThrow = false
+    const audio = new Uint8Array([0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70]) // ftyp-ish
+    const { ctx, flush } = makeCtx()
+    const res = await app.request(
+      "/documents?slug=upload-voice-test",
+      { method: "POST", headers: headers("audio/mp4"), body: audio },
+      env_,
+      ctx,
+    )
+    await flush()
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as { status: string; chunkCount: number; documentId: string }
+    expect(out.status).toBe("indexed")
+    expect(out.chunkCount).toBeGreaterThan(0)
+
+    // documents row is marked as voice origin.
+    const doc = await env.DB.prepare("SELECT status, content_type FROM documents WHERE id = ?")
+      .bind(out.documentId)
+      .first<{ status: string; content_type: string }>()
+    expect(doc?.status).toBe("indexed")
+    expect(doc?.content_type).toBe("voice")
+
+    // Body in R2 is the TRANSCRIPT (not the raw audio).
+    const body = await env.BODIES.get(`${TENANT}/documents/${out.documentId}`)
+    expect(await body?.text()).toContain("needle-voice")
+
+    // Raw audio staged at the derivable provenance key.
+    const rawAudio = await env.BODIES.get(`${TENANT}/documents/audio/${out.documentId}`)
+    expect(rawAudio).not.toBeNull()
+
+    // Whisper spend attributed with surface='ingest'.
+    const spend = await env.DB.prepare(
+      "SELECT surface, neurons FROM token_spend WHERE tenant_id = ? AND model = ?",
+    )
+      .bind(TENANT, WHISPER_MODEL)
+      .first<{ surface: string; neurons: number }>()
+    expect(spend?.surface).toBe("ingest")
+    expect(spend?.neurons).toBeGreaterThan(0)
+  })
+
+  test("failed transcription fails visibly: no document row AND no audio blob (422)", async () => {
+    transcribeShouldThrow = true
+    const countDocs = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM documents WHERE content_type = 'voice'",
+        ).first<{ n: number }>()
+      )?.n ?? 0
+    const countAudio = async () =>
+      (await env.BODIES.list({ prefix: `${TENANT}/documents/audio/` })).objects.length
+
+    const docsBefore = await countDocs()
+    const audioBefore = await countAudio()
+    const { ctx, flush } = makeCtx()
+    const res = await app.request(
+      "/documents?slug=upload-voice-fail",
+      { method: "POST", headers: headers("audio/mp4"), body: new Uint8Array([1, 2, 3, 4]) },
+      env_,
+      ctx,
+    )
+    await flush()
+    // A transcription failure is a 422 (fails visibly), not a silent empty doc.
+    expect(res.status).toBe(422)
+    expect(await countDocs()).toBe(docsBefore)
+    // No orphan audio blob (audio is stored only AFTER a committed doc row).
+    expect(await countAudio()).toBe(audioBefore)
+    transcribeShouldThrow = false
+  })
+
+  test("duplicate voice upload: first creates audio, second dedups with no NEW blob", async () => {
+    transcribeShouldThrow = false
+    // Unique transcript → first upload is a genuine create (not a dup of the earlier success test).
+    transcriptOverride = "a unique dedup-test transcript qwerty-dup-marker"
+    const countAudio = async () =>
+      (await env.BODIES.list({ prefix: `${TENANT}/documents/audio/` })).objects.length
+    const audioBody = new Uint8Array([0x64, 0x75, 0x70, 0x65])
+    const post = async () => {
+      const { ctx, flush } = makeCtx()
+      const res = await app.request(
+        "/documents?slug=upload-voice-dup",
+        { method: "POST", headers: headers("audio/mp4"), body: audioBody },
+        env_,
+        ctx,
+      )
+      await flush()
+      return res
+    }
+    try {
+      const audioBefore = await countAudio()
+      const first = await post()
+      expect(first.status).toBe(200)
+      expect(((await first.json()) as { status: string }).status).toBe("indexed")
+      // Non-vacuity: the create DID write a new audio blob.
+      const audioAfterFirst = await countAudio()
+      expect(audioAfterFirst).toBe(audioBefore + 1)
+
+      const second = await post()
+      expect(second.status).toBe(200)
+      expect(((await second.json()) as { status: string }).status).toBe("duplicate")
+      // The dedup path returns BEFORE storing audio → count unchanged.
+      expect(await countAudio()).toBe(audioAfterFirst)
+    } finally {
+      transcriptOverride = null
+    }
+  })
+
+  test("whisper is gated on the monthly cost ceiling (429 before the AI call)", async () => {
+    transcribeShouldThrow = false
+    // Seed spend over the ceiling for the current window, then expect the pre-check to 429.
+    const window = new Date().toISOString().slice(0, 7)
+    await env.DB.prepare(
+      "INSERT INTO token_spend (id, tenant_id, window, model, surface, neurons) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind(`ceiling-${window}`, TENANT, window, "@cf/test/over", "ingest", 1e12)
+      .run()
+    try {
+      const { ctx } = makeCtx()
+      const res = await app.request(
+        "/documents?slug=upload-voice-ceiling",
+        { method: "POST", headers: headers("audio/mp4"), body: new Uint8Array([1, 2, 3, 4]) },
+        env_,
+        ctx,
+      )
+      expect(res.status).toBe(429)
+    } finally {
+      // Clean up so later tests (which share TENANT) are not gated.
+      await env.DB.prepare("DELETE FROM token_spend WHERE id = ?").bind(`ceiling-${window}`).run()
+    }
+  })
+
+  test("a GatewayBudgetError from transcribe() maps to 429 (defense-in-depth behind the pre-check)", async () => {
+    transcribeThrowBudget = true
+    try {
+      const { ctx } = makeCtx()
+      const res = await app.request(
+        "/documents?slug=upload-voice-budget",
+        { method: "POST", headers: headers("audio/mp4"), body: new Uint8Array([1, 2, 3, 4]) },
+        env_,
+        ctx,
+      )
+      expect(res.status).toBe(429)
+    } finally {
+      transcribeThrowBudget = false
+    }
+  })
+
+  test("oversize audio (> AUDIO_MAX_BYTES) returns 413", async () => {
+    const { ctx } = makeCtx()
+    const big = new Uint8Array(AUDIO_MAX_BYTES + 1)
+    const res = await app.request(
+      "/documents",
+      { method: "POST", headers: headers("audio/mp4"), body: big },
+      env_,
+      ctx,
+    )
+    expect(res.status).toBe(413)
+  })
+
+  test("oversized Content-Length header is rejected 413 BEFORE buffering (tiny body)", async () => {
+    const { ctx } = makeCtx()
+    // A truthful body is tiny, but the declared Content-Length exceeds the audio cap → reject early.
+    const res = await app.request(
+      "/documents",
+      {
+        method: "POST",
+        headers: { ...headers("audio/mp4"), "content-length": String(AUDIO_MAX_BYTES + 1) },
+        body: new Uint8Array([1, 2, 3, 4]),
+      },
+      env_,
+      ctx,
+    )
+    expect(res.status).toBe(413)
   })
 })
 

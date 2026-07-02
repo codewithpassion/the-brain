@@ -92,6 +92,7 @@ const aiStub: ScopedServices["ai"] = {
   genExtract: async () => null,
   rerank: async (_q, candidates, topK) =>
     candidates.map((_c, index) => ({ index, score: 0 })).slice(0, topK),
+  transcribe: async () => ({ text: "stub transcript", neurons: 0 }),
 }
 
 const fakeVerifier = (identity: ClerkIdentity): ClerkVerifier => ({ verify: async () => identity })

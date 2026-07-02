@@ -17,6 +17,13 @@ export const RERANK_MODEL = "@cf/baai/bge-reranker-base" as const
  * on 2026-05-30 (AiError 5028), which silently broke KG extraction → an empty entity graph. Use the
  * current model that GENERATION_MODEL already proves working on Workers AI. */
 export const EXTRACT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as const
+/**
+ * Speech-to-text (voice memo transcription, W3.2) — behind the `transcribe()` chokepoint.
+ * `whisper-large-v3-turbo` takes a BASE64 audio string (not the base model's `number[]` shape, which
+ * builds a multi-million-element JS array and OOMs the 128 MB isolate on a real memo). Output shape:
+ * `{ text, word_count, segments[], vtt, transcription_info }` (NO top-level `words[]`).
+ */
+export const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo" as const
 
 // ── Hybrid-search / ranking algorithm constants (PRD §5) ─────────────────────
 /** Reciprocal Rank Fusion constant. */
@@ -43,6 +50,16 @@ export const KG_BATCH_SIZE = 5 as const
 export const MAX_CHUNKS_PER_DOC = 4000 as const
 /** Max body size accepted for ingestion (8 MiB). */
 export const MAX_BODY_BYTES = 8 * 1024 * 1024
+/**
+ * Max audio body accepted by `POST /documents` for voice-memo transcription (W3.2). SEPARATE from
+ * MAX_BODY_BYTES because audio is transcribed via base64 → whisper. Cap is memory-bound, not
+ * request-bound: a base64 string is ~1.33× the bytes, and the AI Gateway serialization adds another
+ * copy, so transient peak ≈ 3.7× the raw size on top of a ~20 MB worker baseline. At 12 MiB that is
+ * ~64 MB — safe under the 128 MB isolate limit even with limited concurrency. This is a
+ * conservative-pending-a-real-load-test value; the ONE place the cap is defined (api route, dashboard
+ * guard, and copy all import it), so it can be raised toward 16 MiB (~79 MB) in a single edit.
+ */
+export const AUDIO_MAX_BYTES = 12 * 1024 * 1024
 /** Max raw body accepted by the `/ingest` webhook (256 KiB). */
 export const INGEST_WEBHOOK_MAX_BYTES = 256 * 1024
 /** Max length of the `markdown_preview` stored in D1 (bodies live in R2). */
