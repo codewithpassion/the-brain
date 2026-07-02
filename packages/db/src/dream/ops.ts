@@ -12,6 +12,7 @@ import { drizzle } from "drizzle-orm/d1"
 import { z } from "zod"
 import type { AdminBoundOp } from "../admin"
 import type { BrainDrizzle } from "../scoped/db"
+import { DREAM_KINDS } from "./plan"
 import { DreamRunStore } from "./runs"
 
 // ── Op contracts (handler-free; registered into the shared registry) ──────────────
@@ -20,11 +21,17 @@ import { DreamRunStore } from "./runs"
 export const DREAM_NOW_OP = defineOp({
   name: "dream_now",
   description:
-    "Trigger the nightly Dream engine now: consolidate duplicate hot-memory facts, supersede " +
-    "outdated ones, and file genuine contradictions for review. Admin only. Returns the run id.",
+    "Trigger the nightly Dream engine now: consolidate duplicate hot-memory facts, reflect over " +
+    "recent memory into cited insight documents, and file contradictions for review. Admin only. " +
+    "Returns the run id.",
   capability: "admin",
   readOnly: false,
-  input: z.object({}),
+  input: z.object({
+    kind: z
+      .enum(DREAM_KINDS)
+      .default("all")
+      .describe("Which dream step groups to run (default 'all')."),
+  }),
   output: z.object({ runId: z.string(), status: z.string() }),
 })
 

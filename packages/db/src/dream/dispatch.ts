@@ -1,23 +1,40 @@
 /**
- * `dispatchDreamRun` — the SINGLE workflow-or-inline dispatch path for a consolidation dream,
- * shared by the `dream_now` op (surface catalog) and the nightly cron so the two cannot drift.
+ * `dispatchDreamRun` — the SINGLE workflow-or-inline dispatch path for a dream, shared by the
+ * `dream_now` op (surface catalog) and the nightly cron so the two cannot drift.
  *
- * The run id is `dreamRunId(tenantId)` — the SAME id the `dream_runs` row uses (threaded into the
- * workflow params so the workflow's row id equals what `dream_now` returns). When the `DREAM`
- * Workflow binding is present it dispatches the durable workflow (instance id = the hashed run id,
- * for CF's charset/length cap); a same-day re-dispatch throws "instance already exists", which is
- * the ONE benign error we swallow (returning the existing run). Any OTHER create() error is
- * rethrown — a real dispatch failure must not be silently dropped. With no binding (local/test) it
- * runs `runDreamConsolidation` inline.
+ * `kind` selects the step groups via the shared `dreamStepPlan` (the SAME plan the `DreamWorkflow`
+ * iterates — #20). The dispatch (consolidation) run id is `dreamRunId(tenantId)`; reflection's row
+ * is derived from it (`${runId}-reflection`) INSIDE the plan, so the id a run creates always equals
+ * the one dispatch returns and the one the workflow drives (no wall-clock re-derivation — #1).
+ *
+ * The workflow INSTANCE id includes `kind` (`dream-${tenant}-${day}-${kind}`) so a morning
+ * `reflection` dispatch cannot block the nightly `all` (#2). Duplicate actual WORK is deduped by
+ * each per-kind `dream_runs` row's FSM (e.g. `all` then `consolidation` same day → the
+ * consolidation row is already `success` → no-op). A same-day re-dispatch of the SAME kind throws
+ * "instance already exists" — the ONE benign error swallowed here; any other create() error is
+ * rethrown.
+ *
+ * Inline (local/test): runs the plan's groups in order, aggregating step statuses worst-of (#3);
+ * reflection is SKIPPED when consolidation returned `paused` (budget exhausted — #9). NOTE: the
+ * inline path does NOT run KG-extraction over insight docs (that lives in apps/api's workflow
+ * step); insights are still ingested (searchable/cited), just not graph-linked here.
  */
 import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { BrainBindings } from "../env"
+import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
+import { createDreamReflectServices, runDreamReflection } from "./reflect"
 import { createDreamServices, dreamRunId, runDreamConsolidation } from "./run"
+import type { DreamRunStatus } from "./runs"
+
+export type { DreamKind } from "./plan"
 
 /** The deploy-only Dream Workflow binding as the dispatcher needs it. */
 export interface DreamWorkflowLike {
-  create(options: { id: string; params: { principal: Principal; runId: string } }): Promise<unknown>
+  create(options: {
+    id: string
+    params: { principal: Principal; runId: string; kind: DreamKind }
+  }): Promise<unknown>
 }
 
 /** The binding env the dispatcher reads: the frozen bindings + the optional `DREAM` workflow. */
@@ -34,22 +51,44 @@ export const isDuplicateInstanceError = (err: unknown): boolean => {
   return msg.includes("already exists") || (msg.includes("instance") && msg.includes("exist"))
 }
 
-/** Dispatch (or run inline) a consolidation dream for one principal's tenant. */
+/** Dispatch (or run inline) a dream for one principal's tenant. */
 export const dispatchDreamRun = async (
   env: DreamDispatchEnv,
   principal: Principal,
+  kind: DreamKind = "all",
 ): Promise<DreamDispatchResult> => {
   const runId = dreamRunId(principal.tenantId)
   const workflow = env.DREAM
   if (workflow) {
     try {
-      await workflow.create({ id: await workflowInstanceId(runId), params: { principal, runId } })
+      await workflow.create({
+        id: await workflowInstanceId(`${runId}-${kind}`),
+        params: { principal, runId, kind },
+      })
       return { runId, status: "queued" }
     } catch (err) {
       if (isDuplicateInstanceError(err)) return { runId, status: "running" }
       throw err // a real dispatch failure — never swallowed
     }
   }
-  const result = await runDreamConsolidation(createDreamServices(env, principal), { runId })
-  return { runId, status: result.status }
+
+  // Inline (local/test): run the plan's groups in order, worst-of status.
+  const statuses: DreamRunStatus[] = []
+  let consolidationPaused = false
+  for (const step of dreamStepPlan(runId, kind)) {
+    if (step.group === "consolidation") {
+      const r = await runDreamConsolidation(createDreamServices(env, principal), {
+        runId: step.runId,
+      })
+      statuses.push(r.status)
+      if (r.status === "paused") consolidationPaused = true
+    } else {
+      if (consolidationPaused) continue // budget exhausted by consolidation → skip reflection (#9)
+      const r = await runDreamReflection(createDreamReflectServices(env, principal), {
+        runId: step.runId,
+      })
+      statuses.push(r.status)
+    }
+  }
+  return { runId, status: worstStatus(statuses) }
 }

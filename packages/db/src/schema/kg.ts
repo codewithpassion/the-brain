@@ -85,5 +85,7 @@ export const entityMentions = sqliteTable(
   (t) => [
     uniqueIndex("idx_entity_mentions_uniq").on(t.tenantId, t.entityId, t.sourceKind, t.sourceId),
     index("idx_entity_mentions_by_source").on(t.tenantId, t.sourceKind, t.sourceId),
+    // Dream reflection's mention-growth scan filters (tenant_id, created_at >= since).
+    index("idx_entity_mentions_created").on(t.tenantId, t.createdAt),
   ],
 )

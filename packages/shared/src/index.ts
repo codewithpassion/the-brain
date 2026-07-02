@@ -72,3 +72,5 @@ export {
 } from "./principal"
 // ── Capability-authorization gate (admin ⊃ write ⊃ read) ─────────────────────
 export { scopeSatisfied } from "./scope"
+// ── Deterministic slugify (shared by entity / org / Dream insight slugs) ─────
+export { slugify } from "./slug"

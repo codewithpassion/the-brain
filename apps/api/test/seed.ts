@@ -46,11 +46,27 @@ export const seedDoc = async (opts: {
   tenantId: string
   slug: string
   scope?: string | null
+  /** Namespace path (e.g. "/brain/topics/pricing") — used by reflection target selection. */
+  path?: string | null
+  /** Provenance marker; pass 'dream' to seed an insight doc (D2 anti-loop exclusion). */
+  origin?: string | null
+  /** ISO created_at — reflection's "new since" queries filter on this (defaults to STAMP). */
+  createdAt?: string | null
 }): Promise<void> => {
   await env.DB.prepare(
-    "INSERT INTO documents (id, tenant_id, user_id, slug, scope, status, fingerprint) VALUES (?, ?, ?, ?, ?, 'indexed', ?)",
+    "INSERT INTO documents (id, tenant_id, user_id, slug, scope, path, origin, status, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'indexed', ?, ?)",
   )
-    .bind(opts.id, opts.tenantId, "seed-author", opts.slug, opts.scope ?? null, `fp-${opts.id}`)
+    .bind(
+      opts.id,
+      opts.tenantId,
+      "seed-author",
+      opts.slug,
+      opts.scope ?? null,
+      opts.path ?? null,
+      opts.origin ?? null,
+      `fp-${opts.id}`,
+      opts.createdAt ?? STAMP,
+    )
     .run()
 }
 

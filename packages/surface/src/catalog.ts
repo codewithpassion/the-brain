@@ -221,7 +221,10 @@ const recallSurfaceOp: SurfaceOp = {
  */
 const dreamNowSurfaceOp: SurfaceOp = {
   def: DREAM_NOW_OP,
-  invoke: (ctx) => dispatchDreamRun(ctx.env, ctx.principal),
+  invoke: (ctx, input) => {
+    const { kind } = DREAM_NOW_OP.input.parse(input)
+    return dispatchDreamRun(ctx.env, ctx.principal, kind)
+  },
 }
 
 const forgetFactSurfaceOp: SurfaceOp = {

@@ -21,6 +21,7 @@ import {
   type OpRegistry,
   type Principal,
   scopeSatisfied,
+  slugify,
 } from "@brain/shared"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
@@ -686,16 +687,8 @@ export interface CreateOrgInput {
   slug?: string
 }
 
-/** Derive a URL-safe slug from a name. */
-const slugifyName = (name: string): string => {
-  const s = name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-  return s.length > 0 ? s : "org"
-}
+/** Derive a URL-safe org slug from a name (shared slugify, org fallback). */
+const slugifyName = (name: string): string => slugify(name, "org")
 
 /** Membership id for a new org: same deterministic pattern as auto-provision. */
 const newMembershipId = (tenantId: string, userId: string): string => `mem_${tenantId}_${userId}`

@@ -1,19 +1,9 @@
 /**
- * `runDreamConsolidation` (v2 W1/D1) — the orchestrator that ties select → judge → apply together
- * under a resumable, budgeted, idempotent-per-day run row (D-i3).
- *
- * BUDGET SLICE (D-i3): before judging each cluster the run checks its OWN spend against a threshold
- * = min(10% of the remaining monthly neuron ceiling, `opts.maxNeurons`); when it trips, the run
- * stops CLEANLY leaving `cursor` at the last-processed cluster key so the next run resumes there.
- * Every judge call records `surface='dream'` spend into `token_spend`.
- *
- * RUN FSM: `success` is TERMINAL and always has `cursor=null` (nothing left). A budget stop sets
- * `status='paused'` with the resume `cursor` (which may itself be null when the stop happened before
- * the first cluster — the status, not the cursor, marks it resumable). The run id is
- * `dream-${tenantId}-${yyyymmdd}` (see `dreamRunId`). A same-day re-run keys the no-op off
- * `status==='success'` ONLY; a `paused`/`failure`/`queued` row is (re-)claimed and resumed, while a
- * `running` (another worker) or `cancelled` row no-ops without claiming. The claim itself is decided
- * by the conditional UPDATE's changed-row count, so two racing workers cannot both proceed.
+ * `runDreamConsolidation` (v2 W1/D1) — consolidation over the shared `runDreamJob` FSM driver.
+ * The driver owns the lifecycle (same-day no-op on `success`, claim-by-changed-rows, resume from a
+ * `paused`/`failure` cursor, the budget slice = min(10% remaining ceiling, `maxNeurons`), the
+ * paused/success/failure flips). This module supplies only the consolidation-specific work:
+ * `selectClusters` → `judgeCluster` → `applyCluster`, recording `surface='dream'` spend per cluster.
  *
  * SCOPING (D-i4): every read/write goes through the tenant-forced select/apply/runs helpers built
  * from the Principal — one tenant's dream never touches another's memory.
@@ -24,17 +14,12 @@ import { EXTRACT_MODEL } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import type { BrainDrizzle, ScopedDB } from "../scoped/db"
-import { MONTHLY_NEURON_CEILING, monthlyWindow } from "../search/ports"
+import { monthlyWindow } from "../search/ports"
 import { createScopedServices, type ScopedServices } from "../services"
 import { applyCluster } from "./apply"
+import { runDreamJob } from "./job"
 import { judgeCluster } from "./judge"
-import {
-  CLAIMABLE_FROM,
-  type DreamRunStats,
-  type DreamRunStatus,
-  DreamRunStore,
-  ZERO_DREAM_STATS,
-} from "./runs"
+import { type DreamRunStats, type DreamRunStatus, DreamRunStore } from "./runs"
 import { selectClusters } from "./select"
 
 /** Coarse neuron accounting for a judge call (v1 attribution, mirrors `recordThinkSpend`). */
@@ -85,7 +70,7 @@ export interface DreamConsolidationResult {
 const estimateClusterNeurons = (chars: number): number =>
   Math.ceil((chars + 200) / CHARS_PER_TOKEN) * GEN_NEURONS_PER_TOKEN
 
-/** Run one fact-consolidation dream. See the module doc for the budget/resume/idempotency model. */
+/** Run one fact-consolidation dream over the shared FSM driver. */
 export const runDreamConsolidation = async (
   services: DreamServices,
   opts?: DreamConsolidationOptions,
@@ -94,114 +79,41 @@ export const runDreamConsolidation = async (
   const runId = opts?.runId ?? dreamRunId(services.principal.tenantId, new Date(now))
   const window = monthlyWindow(new Date(now))
 
-  const existing = await services.runs.get(runId)
-  // The DB column is a free `string`; the CHECK constraint guarantees it is a DreamRunStatus.
-  const existingStatus = (existing?.status ?? null) as DreamRunStatus | null
-
-  // Same-day no-op keys off `success` ONLY (success is terminal, cursor always null there).
-  if (existingStatus === "success") {
-    return {
-      runId,
-      status: "success",
-      noop: true,
-      resumed: false,
-      stats: existing?.stats ?? { ...ZERO_DREAM_STATS },
-      clustersRemaining: 0,
-    }
-  }
-  // A `running` (another worker) or `cancelled` row is not claimable → no-op without claiming.
-  if (existingStatus !== null && !CLAIMABLE_FROM.includes(existingStatus)) {
-    return {
-      runId,
-      status: existingStatus,
-      noop: true,
-      resumed: false,
-      stats: existing?.stats ?? { ...ZERO_DREAM_STATS },
-      clustersRemaining: 0,
-    }
-  }
-
-  if (existing === null) {
-    await services.runs.createRun({ id: runId, kind: "consolidation" })
-  }
-  const fromStatus: DreamRunStatus = existingStatus ?? "queued"
-  const claimed = await services.runs.claim(runId, fromStatus)
-  if (!claimed) {
-    // Lost the claim race (another worker flipped it to running first) → no-op (drop-don't-error).
-    const current = await services.runs.get(runId)
-    return {
-      runId,
-      status: (current?.status ?? "running") as DreamRunStatus,
-      noop: true,
-      resumed: false,
-      stats: current?.stats ?? { ...ZERO_DREAM_STATS },
-      clustersRemaining: 0,
-    }
-  }
-
-  const resumeCursor = existing?.cursor ?? null
-  const resumed = existingStatus === "paused" || existingStatus === "failure"
-  const stats: DreamRunStats = { ...(existing?.stats ?? ZERO_DREAM_STATS) }
-
-  try {
-    const spent = await services.db.readWindowSpendNeurons(window)
-    const remaining = Math.max(0, MONTHLY_NEURON_CEILING - spent)
-    const threshold = Math.min(remaining * 0.1, opts?.maxNeurons ?? Number.POSITIVE_INFINITY)
-
-    const clusters = await selectClusters(services.raw, services.principal, services.ai)
-    const pending = resumeCursor === null ? clusters : clusters.filter((c) => c.key > resumeCursor)
-
-    let runNeurons = 0
-    let lastKey = resumeCursor
-    let processed = 0
-    let stoppedOnBudget = false
-
-    for (const cluster of pending) {
-      if (runNeurons >= threshold) {
-        stoppedOnBudget = true
-        break
-      }
+  const result = await runDreamJob(services.runs, {
+    runId,
+    kind: "consolidation",
+    ...(opts?.maxNeurons !== undefined ? { maxNeurons: opts.maxNeurons } : {}),
+    windowSpentNeurons: () => services.db.readWindowSpendNeurons(window),
+    selectItems: () => selectClusters(services.raw, services.principal, services.ai),
+    itemKey: (cluster) => cluster.key,
+    processItem: async (cluster) => {
       const verdict = await judgeCluster(services.ai, cluster)
       const neurons = estimateClusterNeurons(cluster.facts.reduce((s, f) => s + f.fact.length, 0))
-      runNeurons += neurons
-      await services.db.recordSpend({
-        window,
-        model: EXTRACT_MODEL,
-        surface: "dream",
-        neurons,
-      })
+      await services.db.recordSpend({ window, model: EXTRACT_MODEL, surface: "dream", neurons })
       const outcome = await applyCluster(services.raw, services.principal, cluster, verdict, now)
-      stats.clustersJudged += 1
-      stats.merged += outcome.merged
-      stats.superseded += outcome.superseded
-      stats.contradictions += outcome.contradictions
-      stats.kept += outcome.kept
-      stats.skipped += verdict.skipped ? 1 : 0
-      stats.neurons += neurons
-      lastKey = cluster.key
-      processed += 1
-      await services.runs.persistProgress(runId, lastKey, stats)
-    }
+      return {
+        neurons,
+        statsDelta: {
+          clustersJudged: 1,
+          merged: outcome.merged,
+          superseded: outcome.superseded,
+          contradictions: outcome.contradictions,
+          kept: outcome.kept,
+          skipped: verdict.skipped ? 1 : 0,
+          neurons,
+        },
+        payload: null,
+      }
+    },
+  })
 
-    const clustersRemaining = pending.length - processed
-    if (stoppedOnBudget) {
-      // Budget stop → PAUSED with the resume cursor (which may be null if we stopped before the
-      // first cluster; the `paused` status — not the cursor — is what marks it resumable).
-      await services.runs.persistProgress(runId, lastKey, stats)
-      await services.runs.finishRun(runId, "paused")
-      return { runId, status: "paused", noop: false, resumed, stats, clustersRemaining }
-    }
-    // Clean completion → SUCCESS with cursor cleared (a same-day re-run then no-ops).
-    await services.runs.persistProgress(runId, null, stats)
-    await services.runs.finishRun(runId, "success")
-    return { runId, status: "success", noop: false, resumed, stats, clustersRemaining: 0 }
-  } catch (err) {
-    await services.runs.finishRun(
-      runId,
-      "failure",
-      err instanceof Error ? err.message : String(err),
-    )
-    throw err
+  return {
+    runId: result.runId,
+    status: result.status,
+    noop: result.noop,
+    resumed: result.resumed,
+    stats: result.stats,
+    clustersRemaining: result.itemsRemaining,
   }
 }
 

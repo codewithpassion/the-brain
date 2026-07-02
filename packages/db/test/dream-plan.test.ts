@@ -1,0 +1,48 @@
+import { describe, expect, test } from "bun:test"
+import { DREAM_KINDS, dreamStepPlan, reflectionRunId, worstStatus } from "../src/dream/plan"
+
+/**
+ * Pure-function coverage for the dream step-plan layer (v2 W1) — the SINGLE source both the
+ * `DreamWorkflow` and the inline `dispatchDreamRun` iterate. Proves the kind→steps ordering, the
+ * per-step run-id derivation (#1/#20), and the worst-of status aggregation (#3).
+ */
+
+describe("dreamStepPlan — the shared kind→steps mapping", () => {
+  test("'all' → consolidation FIRST then reflection, each with its derived run id", () => {
+    const steps = dreamStepPlan("dream-t-20260702", "all")
+    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection"])
+    expect(steps[0]?.runId).toBe("dream-t-20260702")
+    expect(steps[1]?.runId).toBe(reflectionRunId("dream-t-20260702"))
+    expect(steps[1]?.runId).toBe("dream-t-20260702-reflection")
+  })
+
+  test("'consolidation' → only the consolidation step (base run id)", () => {
+    const steps = dreamStepPlan("base", "consolidation")
+    expect(steps).toEqual([{ group: "consolidation", runId: "base" }])
+  })
+
+  test("'reflection' → only the reflection step (suffixed run id)", () => {
+    const steps = dreamStepPlan("base", "reflection")
+    expect(steps).toEqual([{ group: "reflection", runId: "base-reflection" }])
+  })
+
+  test("DREAM_KINDS is the single kind set", () => {
+    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "all"])
+  })
+})
+
+describe("worstStatus — worst-of aggregation across step groups", () => {
+  test("failure dominates everything", () => {
+    expect(worstStatus(["success", "paused", "failure"])).toBe("failure")
+  })
+
+  test("paused dominates success/running (a paused consolidation stays visible)", () => {
+    expect(worstStatus(["success", "paused"])).toBe("paused")
+    expect(worstStatus(["running", "paused"])).toBe("paused")
+  })
+
+  test("all-success → success; empty → success", () => {
+    expect(worstStatus(["success", "success"])).toBe("success")
+    expect(worstStatus([])).toBe("success")
+  })
+})

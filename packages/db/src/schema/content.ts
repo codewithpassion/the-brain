@@ -39,6 +39,7 @@ export const documents = sqliteTable(
     ingestedAt: text("ingested_at"),
     tags: text("tags").default("[]"),
     path: text("path"), // optional namespace prefix, e.g. "/project/x"
+    origin: text("origin"), // NULL for normal docs; 'dream' for reflection insights (D2 anti-loop D-i2)
     metadata: text("metadata"),
     createdAt: text("created_at"),
     updatedAt: text("updated_at"),
@@ -48,6 +49,8 @@ export const documents = sqliteTable(
     uniqueIndex("ux_documents_tenant_fp").on(t.tenantId, t.scope, t.fingerprint), // dedup backstop
     uniqueIndex("ux_documents_tenant_slug").on(t.tenantId, t.slug),
     index("ix_documents_tenant_source").on(t.tenantId, t.sourceId, t.status),
+    // Dream reflection's namespace-growth scan filters (tenant_id, created_at >= since).
+    index("idx_documents_created").on(t.tenantId, t.createdAt),
   ],
 )
 

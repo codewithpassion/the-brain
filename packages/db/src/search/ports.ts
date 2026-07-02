@@ -80,19 +80,26 @@ export const makeRecallSink = (
   },
 })
 
-/** Record a coarse synthesis spend estimate (attribution, off the read path). */
-export const recordThinkSpend = (
+/**
+ * Record a coarse synthesis spend estimate (attribution, off the read path). Returns the neurons
+ * recorded so a caller (e.g. the Dream reflection loop) can charge them against its own budget
+ * slice. `surface` attributes the spend (`'think'` for user reads, `'dream'` for reflection).
+ */
+export const recordThinkSpend = async (
   services: ScopedServices,
   out: ThinkResult,
   window: string = monthlyWindow(),
-): Promise<void> => {
+  surface = "think",
+): Promise<number> => {
   const chars = out.answer.length + out.evidence.reduce((sum, hit) => sum + hit.snippet.length, 0)
   const tokens = Math.ceil(chars / CHARS_PER_TOKEN)
-  return services.db.recordSpend({
+  const neurons = tokens * GEN_NEURONS_PER_TOKEN
+  await services.db.recordSpend({
     window,
     model: GENERATION_MODEL,
-    surface: "think",
+    surface,
     outputTokens: tokens,
-    neurons: tokens * GEN_NEURONS_PER_TOKEN,
+    neurons,
   })
+  return neurons
 }

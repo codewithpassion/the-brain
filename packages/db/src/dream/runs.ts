@@ -25,11 +25,16 @@ interface BatchCapable {
 
 /** The run's mutable stats roll-up (JSON-encoded in `dream_runs.stats`). */
 export interface DreamRunStats {
+  // consolidation (D1) counters
   clustersJudged: number
   merged: number
   superseded: number
   contradictions: number
   kept: number
+  // reflection (D2) counters
+  targets: number
+  insights: number
+  // shared
   skipped: number
   /** Neurons attributed to THIS run (the dream cost ledger, D-i3). */
   neurons: number
@@ -68,22 +73,30 @@ export const ZERO_DREAM_STATS: DreamRunStats = {
   superseded: 0,
   contradictions: 0,
   kept: 0,
+  targets: 0,
+  insights: 0,
   skipped: 0,
   neurons: 0,
 }
 
+/** Coerce ONE known numeric stat key (drops null/string/garbage; never re-persists junk). */
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
 const parseStats = (json: string | null): DreamRunStats => {
   if (json === null) return { ...ZERO_DREAM_STATS }
   try {
-    const parsed = JSON.parse(json) as Partial<DreamRunStats>
+    const p = JSON.parse(json) as Record<string, unknown>
+    if (!p || typeof p !== "object") return { ...ZERO_DREAM_STATS }
     return {
-      clustersJudged: parsed.clustersJudged ?? 0,
-      merged: parsed.merged ?? 0,
-      superseded: parsed.superseded ?? 0,
-      contradictions: parsed.contradictions ?? 0,
-      kept: parsed.kept ?? 0,
-      skipped: parsed.skipped ?? 0,
-      neurons: parsed.neurons ?? 0,
+      clustersJudged: num(p.clustersJudged),
+      merged: num(p.merged),
+      superseded: num(p.superseded),
+      contradictions: num(p.contradictions),
+      kept: num(p.kept),
+      targets: num(p.targets),
+      insights: num(p.insights),
+      skipped: num(p.skipped),
+      neurons: num(p.neurons),
     }
   } catch {
     return { ...ZERO_DREAM_STATS }

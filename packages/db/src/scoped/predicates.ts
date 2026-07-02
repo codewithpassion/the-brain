@@ -67,3 +67,14 @@ export const activeFactPredicate = (
   includeSuperseded?: boolean,
 ): SQL | undefined =>
   includeSuperseded ? undefined : and(isNull(cols.supersededBy), isNull(cols.consolidatedInto))
+
+/** The `documents.origin` marker for Dream-generated insight documents (D2 anti-loop D-i2). */
+export const DOC_ORIGIN_DREAM = "dream" as const
+
+/**
+ * Anti-loop gate (D-i2, depth ≤ 1): a document that is NOT Dream-generated (`origin` null or not
+ * `'dream'`). The single definition for the reflection target queries — an insight is never a
+ * reflection target. Use `notDreamOriginSql` for the raw-SQL entity arm (same semantics).
+ */
+export const notDreamOrigin = (originColumn: AnySQLiteColumn): SQL =>
+  sql`(${originColumn} IS NULL OR ${originColumn} <> ${DOC_ORIGIN_DREAM})`

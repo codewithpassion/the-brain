@@ -105,6 +105,8 @@ export interface InsertDocumentInput {
   ingestedVia?: string | null
   tags?: string[] | null
   path?: string | null
+  /** Provenance marker; `'dream'` flags a reflection insight (D2 anti-loop D-i2). Default NULL. */
+  origin?: string | null
 }
 
 /** `insertChunks` per-row input — `tenantId` is NEVER accepted; the chokepoint forces it. */
@@ -672,6 +674,7 @@ export class ScopedDB {
       ingestedVia: doc.ingestedVia ?? null,
       tags: doc.tags !== null && doc.tags !== undefined ? JSON.stringify(doc.tags) : "[]",
       path: doc.path ?? null,
+      origin: doc.origin ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -976,7 +979,14 @@ export class ScopedDB {
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [tokenSpend.tenantId, tokenSpend.window, tokenSpend.model],
+        // Matches the surface-scoped unique index (COALESCE null→'') so dream/think/ingest spend
+        // on the same model increment SEPARATE rows instead of colliding.
+        target: [
+          tokenSpend.tenantId,
+          tokenSpend.window,
+          tokenSpend.model,
+          sql`coalesce(${tokenSpend.surface}, '')`,
+        ],
         set: {
           inputTokens: sql`${tokenSpend.inputTokens} + ${inputTokens}`,
           outputTokens: sql`${tokenSpend.outputTokens} + ${outputTokens}`,

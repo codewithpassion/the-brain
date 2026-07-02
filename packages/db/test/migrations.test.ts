@@ -89,6 +89,7 @@ describe("migrations apply cleanly", () => {
       "0003_smooth_leper_queen.sql",
       "0004_huge_harpoon.sql",
       "0005_dream_runs.sql",
+      "0006_documents_origin.sql",
     ])
   })
 

@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm"
+import { desc, sql } from "drizzle-orm"
 import {
   check,
   index,
@@ -135,7 +135,14 @@ export const tokenSpend = sqliteTable(
     updatedAt: text("updated_at").notNull().default(isoNow),
   },
   (t) => [
-    uniqueIndex("ux_token_spend_window").on(t.tenantId, t.window, t.model),
+    // Surface is part of the key (COALESCE null→'') so dream/think/ingest spend on the SAME model
+    // do NOT collide into one row (they share GENERATION_MODEL). Legacy null-surface rows stay unique.
+    uniqueIndex("ux_token_spend_window").on(
+      t.tenantId,
+      t.window,
+      t.model,
+      sql`coalesce(${t.surface}, '')`,
+    ),
     index("ix_token_spend_tenant").on(t.tenantId, desc(t.updatedAt)),
   ],
 )
