@@ -1,5 +1,5 @@
 import { TRUST_GRADES } from "@brain/shared"
-import { desc } from "drizzle-orm"
+import { desc, sql } from "drizzle-orm"
 import { check, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { enumCheck } from "./helpers"
 
@@ -57,11 +57,15 @@ export const memoryReview = sqliteTable(
     reviewedAt: text("reviewed_at").notNull(),
     note: text("note"),
   },
-  () => [
+  (t) => [
     check(
       "memory_review_status_ck",
       enumCheck("status", ["unreviewed", "confirmed", "rejected", "needs_revision"]),
     ),
+    // Partial index for the Dreams-screen pending-contradiction scan (list_pending_reviews).
+    index("idx_memory_review_pending")
+      .on(t.tenantId, t.reviewer, desc(t.reviewedAt))
+      .where(sql`status = 'unreviewed'`),
   ],
 )
 

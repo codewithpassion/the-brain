@@ -36,6 +36,10 @@ export const MONTHLY_NEURON_CEILING = MONTHLY_COST_CEILING_USD / USD_PER_NEURON
 const CHARS_PER_TOKEN = 4
 const GEN_NEURONS_PER_TOKEN = 0.4
 
+/** Coarse generation-neuron estimate from a char count (the ONE v1 attribution formula for gen). */
+export const estimateGenNeurons = (chars: number): number =>
+  Math.ceil(chars / CHARS_PER_TOKEN) * GEN_NEURONS_PER_TOKEN
+
 /** Current monthly spend window key, e.g. `'2026-06'` (UTC). */
 export const monthlyWindow = (now: Date = new Date()): string =>
   `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`
@@ -93,7 +97,7 @@ export const recordThinkSpend = async (
 ): Promise<number> => {
   const chars = out.answer.length + out.evidence.reduce((sum, hit) => sum + hit.snippet.length, 0)
   const tokens = Math.ceil(chars / CHARS_PER_TOKEN)
-  const neurons = tokens * GEN_NEURONS_PER_TOKEN
+  const neurons = estimateGenNeurons(chars)
   await services.db.recordSpend({
     window,
     model: GENERATION_MODEL,

@@ -22,6 +22,7 @@
 import { workflowInstanceId } from "@brain/ingest"
 import type { Principal } from "@brain/shared"
 import type { BrainBindings } from "../env"
+import { createDreamDigestServices, runDreamDigest } from "./digest"
 import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
 import { createDreamReflectServices, runDreamReflection } from "./reflect"
 import { createDreamServices, dreamRunId, runDreamConsolidation } from "./run"
@@ -72,22 +73,51 @@ export const dispatchDreamRun = async (
     }
   }
 
-  // Inline (local/test): run the plan's groups in order, worst-of status.
+  // Inline (local/test): run the plan's groups in order, worst-of status. A group that throws
+  // records 'failure' but never aborts the sweep — so the digest still runs (must ALWAYS be written).
   const statuses: DreamRunStatus[] = []
   let consolidationPaused = false
   for (const step of dreamStepPlan(runId, kind)) {
-    if (step.group === "consolidation") {
-      const r = await runDreamConsolidation(createDreamServices(env, principal), {
-        runId: step.runId,
-      })
-      statuses.push(r.status)
-      if (r.status === "paused") consolidationPaused = true
-    } else {
-      if (consolidationPaused) continue // budget exhausted by consolidation → skip reflection (#9)
-      const r = await runDreamReflection(createDreamReflectServices(env, principal), {
-        runId: step.runId,
-      })
-      statuses.push(r.status)
+    switch (step.group) {
+      case "consolidation":
+        try {
+          const r = await runDreamConsolidation(createDreamServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+          if (r.status === "paused") consolidationPaused = true
+        } catch (err) {
+          console.error("dream consolidation failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "reflection":
+        if (consolidationPaused) break // budget exhausted by consolidation → skip reflection (#9)
+        try {
+          const r = await runDreamReflection(createDreamReflectServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream reflection failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "digest":
+        try {
+          const r = await runDreamDigest(createDreamDigestServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream digest failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      default: {
+        const _exhaustive: never = step.group
+        throw new Error(`unknown dream step group: ${String(_exhaustive)}`)
+      }
     }
   }
   return { runId, status: worstStatus(statuses) }

@@ -64,7 +64,7 @@ export const CLAIMABLE_FROM: readonly DreamRunStatus[] = ["queued", "paused", "f
 /** `createRun` input — `tenantId` is NEVER accepted; the store forces it. */
 export interface CreateDreamRunInput {
   id: string
-  kind: "consolidation" | "reflection" | "dedup" | "hygiene"
+  kind: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene"
 }
 
 export const ZERO_DREAM_STATS: DreamRunStats = {
@@ -143,20 +143,33 @@ export class DreamRunStore {
     }
   }
 
-  /** Insert a fresh `queued` run with `tenant_id` forced; returns the run id. */
+  /** Insert a fresh `queued` run with `tenant_id` forced (idempotent on id); returns the run id. */
   async createRun(input: CreateDreamRunInput): Promise<string> {
     const now = new Date().toISOString()
-    const insert = this.db.insert(dreamRuns).values({
-      id: input.id,
-      tenantId: this.p.tenantId, // forced
-      kind: input.kind,
-      status: "queued",
-      stats: JSON.stringify(ZERO_DREAM_STATS),
-      createdAt: now,
-      updatedAt: now,
-    })
+    const insert = this.db
+      .insert(dreamRuns)
+      .values({
+        id: input.id,
+        tenantId: this.p.tenantId, // forced
+        kind: input.kind,
+        status: "queued",
+        stats: JSON.stringify(ZERO_DREAM_STATS),
+        createdAt: now,
+        updatedAt: now,
+      })
+      // A same-day re-dispatch re-uses the row id (esp. the digest one-shot); keep the existing row.
+      .onConflictDoNothing()
     await this.commitBatch([insert])
     return input.id
+  }
+
+  /** Overwrite the raw `stats` JSON (the digest step stores a bespoke stats shape here). */
+  async setStats(runId: string, statsJson: string): Promise<void> {
+    const update = this.db
+      .update(dreamRuns)
+      .set({ stats: statsJson, updatedAt: new Date().toISOString() })
+      .where(and(eq(dreamRuns.id, runId), eq(dreamRuns.tenantId, this.p.tenantId)))
+    await this.commitBatch([update])
   }
 
   /**

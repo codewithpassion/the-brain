@@ -14,17 +14,13 @@ import { EXTRACT_MODEL } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import type { BrainDrizzle, ScopedDB } from "../scoped/db"
-import { monthlyWindow } from "../search/ports"
+import { estimateGenNeurons, monthlyWindow } from "../search/ports"
 import { createScopedServices, type ScopedServices } from "../services"
 import { applyCluster } from "./apply"
 import { runDreamJob } from "./job"
 import { judgeCluster } from "./judge"
 import { type DreamRunStats, type DreamRunStatus, DreamRunStore } from "./runs"
 import { selectClusters } from "./select"
-
-/** Coarse neuron accounting for a judge call (v1 attribution, mirrors `recordThinkSpend`). */
-const CHARS_PER_TOKEN = 4
-const GEN_NEURONS_PER_TOKEN = 0.4
 
 /** The deterministic dream run id — the SINGLE source used by the workflow, cron, and op. */
 export const dreamRunId = (tenantId: string, now: Date = new Date()): string =>
@@ -67,8 +63,8 @@ export interface DreamConsolidationResult {
   clustersRemaining: number
 }
 
-const estimateClusterNeurons = (chars: number): number =>
-  Math.ceil((chars + 200) / CHARS_PER_TOKEN) * GEN_NEURONS_PER_TOKEN
+/** ~200 chars of prompt overhead on top of the cluster's fact text. */
+const estimateClusterNeurons = (chars: number): number => estimateGenNeurons(chars + 200)
 
 /** Run one fact-consolidation dream over the shared FSM driver. */
 export const runDreamConsolidation = async (

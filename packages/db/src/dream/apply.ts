@@ -24,6 +24,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
 import { facts, memoryAudit, memoryReview } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
+import type { ContradictionNote } from "./contradiction"
 import type { DreamVerdict } from "./judge"
 import type { DreamCluster } from "./select"
 
@@ -173,11 +174,12 @@ export const applyCluster = async (
       reviewer: "dream",
       reviewedAt: now, // NOT NULL — "filed at" for an unreviewed row
       note: JSON.stringify({
+        kind: "contradiction", // discriminator — the shared ContradictionNote contract
         factIds: inputIds,
         rationale: verdict.rationale,
         originalAction: verdict.action,
         downgraded: belowFloor,
-      }),
+      } satisfies ContradictionNote),
     })
     await runBatch([
       review,

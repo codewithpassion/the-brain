@@ -8,12 +8,20 @@ import { DREAM_KINDS, dreamStepPlan, reflectionRunId, worstStatus } from "../src
  */
 
 describe("dreamStepPlan — the shared kind→steps mapping", () => {
-  test("'all' → consolidation FIRST then reflection, each with its derived run id", () => {
+  test("'all' → consolidation, reflection, digest in order, each with its derived run id", () => {
     const steps = dreamStepPlan("dream-t-20260702", "all")
-    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection"])
+    expect(steps.map((s) => s.group)).toEqual(["consolidation", "reflection", "digest"])
     expect(steps[0]?.runId).toBe("dream-t-20260702")
     expect(steps[1]?.runId).toBe(reflectionRunId("dream-t-20260702"))
     expect(steps[1]?.runId).toBe("dream-t-20260702-reflection")
+    // The digest is a terminal step keyed by the base run id (it has no run row of its own).
+    expect(steps[2]?.runId).toBe("dream-t-20260702")
+  })
+
+  test("digest is present only for 'all' (not consolidation-only / reflection-only)", () => {
+    expect(dreamStepPlan("b", "consolidation").some((s) => s.group === "digest")).toBe(false)
+    expect(dreamStepPlan("b", "reflection").some((s) => s.group === "digest")).toBe(false)
+    expect(dreamStepPlan("b", "all").some((s) => s.group === "digest")).toBe(true)
   })
 
   test("'consolidation' → only the consolidation step (base run id)", () => {

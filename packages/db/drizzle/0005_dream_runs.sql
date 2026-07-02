@@ -10,7 +10,7 @@ CREATE TABLE `dream_runs` (
 	`error` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL,
-	CONSTRAINT "dream_runs_kind_ck" CHECK(kind IN ('consolidation', 'reflection', 'dedup', 'hygiene')),
+	CONSTRAINT "dream_runs_kind_ck" CHECK(kind IN ('consolidation', 'reflection', 'digest', 'dedup', 'hygiene')),
 	CONSTRAINT "dream_runs_status_ck" CHECK(status IN ('queued', 'running', 'paused', 'success', 'failure', 'cancelled'))
 );
 --> statement-breakpoint

@@ -9,7 +9,7 @@ import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
 import type { ScopedChunk } from "../scoped/db"
 import type { SessionServices } from "../sessions/services"
-import type { BreakGlassFact } from "./store"
+import type { BreakGlassFact, PendingDreamReview } from "./store"
 
 // ── Op contracts ──────────────────────────────────────────────────────────────────
 
@@ -78,11 +78,62 @@ export const AUDIT_EXPORT_OP = defineOp({
   output: z.object({ r2Key: z.string().nullable(), exported: z.number(), cursor: z.number() }),
 })
 
+/** `list_pending_reviews` — the Dream engine's pending contradictions for the Dreams screen. */
+export const LIST_PENDING_REVIEWS_OP = defineOp({
+  name: "list_pending_reviews",
+  description:
+    "List Dream-engine contradictions awaiting human review, each with its two conflicting facts. " +
+    "Use to populate a review queue and resolve them with resolve_contradiction.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    limit: z.number().int().min(1).max(200).default(50).describe("Max reviews to return (1–200)."),
+  }),
+  output: z.object({
+    reviews: z.array(
+      z.object({
+        reviewId: z.string(),
+        rationale: z.string(),
+        reviewedAt: z.string(),
+        facts: z.array(z.object({ id: z.number(), fact: z.string() })),
+        redactedCount: z.number().int(),
+      }),
+    ),
+  }),
+})
+
+/** `resolve_contradiction` — keep one fact (expiring the rest) or dismiss a Dream contradiction. */
+export const RESOLVE_CONTRADICTION_OP = defineOp({
+  name: "resolve_contradiction",
+  description:
+    "Resolve a Dream contradiction: action 'keep' expires every OTHER fact in the contradiction " +
+    "(keepFactId survives); action 'dismiss' rejects the review without changing facts. Requires " +
+    "owner/admin (or a member within the facts' scopes).",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    reviewId: z.string().min(1).describe("The review id from list_pending_reviews."),
+    action: z
+      .enum(["keep", "dismiss"])
+      .describe("'keep' one fact (expire the rest), or 'dismiss'."),
+    keepFactId: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Required for action='keep': the fact to KEEP (must be one of the contradiction's).",
+      ),
+  }),
+  output: z.object({ reviewId: z.string(), status: z.string() }),
+})
+
 /** Every governance op CONTRACT. */
 export const GOVERNANCE_OPS: readonly AnyOpDef[] = [
   MEMORY_REVIEW_OP,
   BREAK_GLASS_READ_OP,
   AUDIT_EXPORT_OP,
+  LIST_PENDING_REVIEWS_OP,
+  RESOLVE_CONTRADICTION_OP,
 ]
 
 /** Register the governance op contracts into a shared `OpRegistry`. */
@@ -100,6 +151,31 @@ export const submitMemoryReview = async (
   review: { status?: "confirmed" | "rejected" | "needs_revision"; note?: string },
 ): Promise<void> => {
   await services.governance.memoryReview(factId, review)
+}
+
+/** List the Dream engine's pending contradictions (with hydrated conflicting facts). */
+export const listPendingReviews = (
+  services: SessionServices,
+  limit?: number,
+): Promise<PendingDreamReview[]> => services.governance.listPendingDreamReviews(limit)
+
+/** Keep one fact (expiring the rest) or dismiss a Dream contradiction. */
+export const resolveContradiction = async (
+  services: SessionServices,
+  req: { reviewId: string; action: "keep" | "dismiss"; keepFactId?: number },
+): Promise<{ reviewId: string; status: "confirmed" | "rejected" }> => {
+  if (req.action === "keep") {
+    if (req.keepFactId === undefined) {
+      throw new Error("resolve_contradiction: keepFactId is required for action 'keep'")
+    }
+    await services.governance.resolveContradiction(req.reviewId, {
+      action: "keep",
+      keepFactId: req.keepFactId,
+    })
+    return { reviewId: req.reviewId, status: "confirmed" }
+  }
+  await services.governance.resolveContradiction(req.reviewId, { action: "dismiss" })
+  return { reviewId: req.reviewId, status: "rejected" }
 }
 
 /** A break-glass read result (private chunks AND facts the actor would not normally see). */

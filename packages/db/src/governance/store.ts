@@ -14,11 +14,22 @@
  * tenant-global / null-scope target a restricted member cannot reach) is rejected `403`-style.
  */
 import type { Principal } from "@brain/shared"
-import { and, eq, gt, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
+import { type ContradictionNote, parseContradictionNote } from "../dream/contradiction"
 import { facts, memoryAudit, memoryReview, memoryUsePolicy } from "../schema"
 import type { BrainDrizzle, BreakGlassAudit } from "../scoped/db"
-import { scopePredicate } from "../scoped/predicates"
+import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+
+/** Ids per `inArray` UPDATE statement — under D1's ~100 bound-param cap (invariant 11). */
+const EXPIRE_CHUNK = 90
+
+/** The fact visibility columns for the shared intra-tenant gate. */
+const factVisibilityCols = {
+  visibility: facts.visibility,
+  teamId: facts.teamId,
+  userId: facts.userId,
+} as const
 
 type BatchStatement = BatchItem<"sqlite">
 
@@ -43,6 +54,17 @@ export interface AuditRow {
   targetId: string | null
   at: number
   diff: string | null
+}
+
+/** One pending Dream contradiction with its VISIBLE conflicting facts hydrated (Dreams screen). */
+export interface PendingDreamReview {
+  reviewId: string
+  rationale: string
+  reviewedAt: string
+  /** Only the facts the caller may see (scope + visibility gated). */
+  facts: { id: number; fact: string }[]
+  /** How many of the note's facts were redacted (not visible to the caller). */
+  redactedCount: number
 }
 
 /** The result of one audit export sweep. */
@@ -158,6 +180,160 @@ export class GovernanceStore {
     if (!this.p.allowedScopes.includes(targetScope)) {
       throw new Error(`promotion denied: scope '${targetScope}' not in this member's allowedScopes`)
     }
+  }
+
+  // ── DREAM CONTRADICTIONS (v2 W1/D3 — the Dreams-screen review flow) ───────────────
+
+  /**
+   * List the Dream engine's pending contradictions (`memory_review` status `unreviewed`, reviewer
+   * `dream`), newest-first, with the two conflicting facts hydrated from the row's `note.factIds`.
+   * Tenant-scoped read; the hydration is tenant-scoped too (a stale/cross-tenant id simply drops).
+   */
+  async listPendingDreamReviews(limit = 50): Promise<PendingDreamReview[]> {
+    const rows = await this.db
+      .select({ id: memoryReview.id, note: memoryReview.note, reviewedAt: memoryReview.reviewedAt })
+      .from(memoryReview)
+      .where(
+        and(
+          eq(memoryReview.tenantId, this.p.tenantId),
+          eq(memoryReview.status, "unreviewed"),
+          eq(memoryReview.reviewer, "dream"),
+        ),
+      )
+      .orderBy(desc(memoryReview.reviewedAt))
+      .limit(limit)
+
+    // Parse notes (skip non-contradiction rows) and collect ALL fact ids for ONE scoped read.
+    const parsed = rows
+      .map((row) => ({ row, note: parseContradictionNote(row.note) }))
+      .filter((p): p is { row: (typeof rows)[number]; note: ContradictionNote } => p.note !== null)
+    const allIds = [...new Set(parsed.flatMap((p) => p.note.factIds))]
+    // Single hydration, tenant + scope + VISIBILITY gated — a caller never sees fact text they
+    // could not otherwise read (a private fact of another user is redacted, not leaked).
+    const visible =
+      allIds.length > 0
+        ? await this.db
+            .select({ id: facts.id, fact: facts.fact })
+            .from(facts)
+            .where(
+              and(
+                eq(facts.tenantId, this.p.tenantId),
+                inArray(facts.id, allIds),
+                scopePredicate(this.p, facts.scope),
+                visibilityPredicate(this.p, factVisibilityCols),
+              ),
+            )
+        : []
+    const byId = new Map(visible.map((f) => [f.id, f.fact]))
+
+    return parsed.map(({ row, note }) => {
+      const facts = note.factIds
+        .filter((id) => byId.has(id))
+        .map((id) => ({ id, fact: byId.get(id) ?? "" }))
+      return {
+        reviewId: row.id,
+        rationale: note.rationale,
+        reviewedAt: row.reviewedAt,
+        facts,
+        redactedCount: note.factIds.length - facts.length,
+      }
+    })
+  }
+
+  /**
+   * Resolve a Dream contradiction (v2 W1/D3). `keep` expires ALL the losing facts (every
+   * `note.factIds` except `keepFactId`); `dismiss` marks the review `rejected` and changes no facts.
+   * Guards (teaching errors): the review MUST exist, be `unreviewed`, and be reviewer `dream`
+   * (human-promotion rows are untouchable); a `keep` `keepFactId` MUST be one of the note's facts.
+   * BOTH actions are role-gated via `assertMayPromote` against the involved facts' scopes (expiring
+   * a cross-author fact is a governance privilege). The review UPDATE carries the same guards, so a
+   * racing flip lands nothing. `reviewer='dream'` is PRESERVED (provenance); the resolution is
+   * recorded inside the note JSON. Fact expiries are chunked ≤ ID_CHUNK/statement, all in ONE batch.
+   */
+  async resolveContradiction(
+    reviewId: string,
+    input: { action: "keep"; keepFactId: number } | { action: "dismiss" },
+  ): Promise<void> {
+    if (this.p.readOnly) throw new Error("resolve denied: read-only principal")
+
+    // 1. The review must exist, be pending, and be a Dream contradiction (never a human row).
+    const reviewRows = await this.db
+      .select({
+        status: memoryReview.status,
+        reviewer: memoryReview.reviewer,
+        note: memoryReview.note,
+      })
+      .from(memoryReview)
+      .where(and(eq(memoryReview.id, reviewId), eq(memoryReview.tenantId, this.p.tenantId)))
+      .limit(1)
+    const reviewRow = reviewRows[0]
+    if (reviewRow === undefined) throw new Error(`resolve denied: review '${reviewId}' not found`)
+    if (reviewRow.status !== "unreviewed") {
+      throw new Error(`resolve denied: review '${reviewId}' is already ${reviewRow.status}`)
+    }
+    if (reviewRow.reviewer !== "dream") {
+      throw new Error("resolve denied: only Dream-filed contradictions are resolvable here")
+    }
+    const note = parseContradictionNote(reviewRow.note)
+    if (note === null) throw new Error("resolve denied: review note is not a contradiction")
+    if (input.action === "keep" && !note.factIds.includes(input.keepFactId)) {
+      throw new Error("resolve denied: keepFactId is not one of this contradiction's facts")
+    }
+
+    // 2. Role-gate against the involved facts' scopes (BOTH actions).
+    const scopeRows = await this.db
+      .select({ scope: facts.scope })
+      .from(facts)
+      .where(and(eq(facts.tenantId, this.p.tenantId), inArray(facts.id, note.factIds)))
+    for (const scope of new Set(scopeRows.map((r) => r.scope))) this.assertMayPromote(scope)
+
+    // 3. Compute the outcome.
+    const now = new Date().toISOString()
+    const expiredFactIds =
+      input.action === "keep" ? note.factIds.filter((id) => id !== input.keepFactId) : []
+    const status = input.action === "keep" ? "confirmed" : "rejected"
+    const resolvedNote: ContradictionNote = {
+      ...note,
+      resolution: {
+        resolvedBy: this.p.userId,
+        action: input.action,
+        keptFactId: input.action === "keep" ? input.keepFactId : null,
+        expiredFactIds,
+        resolvedAt: now,
+      },
+    }
+
+    // 4. ONE batch: guarded review UPDATE (reviewer PRESERVED) + chunked expiries + audit.
+    const stmts: BatchStatement[] = [
+      this.db
+        .update(memoryReview)
+        .set({ status, note: JSON.stringify(resolvedNote), reviewedAt: now })
+        .where(
+          and(
+            eq(memoryReview.id, reviewId),
+            eq(memoryReview.tenantId, this.p.tenantId),
+            eq(memoryReview.status, "unreviewed"),
+            eq(memoryReview.reviewer, "dream"),
+          ),
+        ),
+    ]
+    for (let i = 0; i < expiredFactIds.length; i += EXPIRE_CHUNK) {
+      const ids = expiredFactIds.slice(i, i + EXPIRE_CHUNK)
+      stmts.push(
+        this.db
+          .update(facts)
+          .set({ expiredAt: now })
+          .where(and(eq(facts.tenantId, this.p.tenantId), inArray(facts.id, ids))),
+      )
+    }
+    stmts.push(
+      this.auditStatement(
+        "dream.contradiction.resolve",
+        reviewId,
+        JSON.stringify({ action: input.action, expiredFactIds }),
+      ),
+    )
+    await this.commitBatch(stmts)
   }
 
   // ── BREAK-GLASS (the audited exception to visibility, §7.6) ───────────────────────

@@ -13,9 +13,13 @@ export type DreamKind = "consolidation" | "reflection" | "all"
 /** The `kind` enum values — one source (op zod + dispatch default read from here). */
 export const DREAM_KINDS = ["consolidation", "reflection", "all"] as const
 
-/** One step group in a dream run, with the `dream_runs` row id it drives. */
+/**
+ * One step group in a dream run. `consolidation`/`reflection` drive a `dream_runs` row keyed by
+ * `runId`; `digest` is a terminal one-shot step (no run row — it writes `agent/digest/daily`), so
+ * its `runId` is the base run id it summarizes.
+ */
 export interface DreamStep {
-  group: "consolidation" | "reflection"
+  group: "consolidation" | "reflection" | "digest"
   runId: string
 }
 
@@ -24,13 +28,15 @@ export const reflectionRunId = (baseRunId: string): string => `${baseRunId}-refl
 
 /**
  * The ordered step groups for a `kind`, each with its run id derived from the SINGLE dispatch
- * `baseRunId`. Consolidation first (reflection reads consolidated facts), then reflection.
+ * `baseRunId`. Consolidation first (reflection reads consolidated facts), then reflection, then —
+ * for the full daily run (`kind='all'`) only — the digest that summarizes both.
  */
 export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] => {
   const steps: DreamStep[] = []
   if (kind !== "reflection") steps.push({ group: "consolidation", runId: baseRunId })
   if (kind !== "consolidation")
     steps.push({ group: "reflection", runId: reflectionRunId(baseRunId) })
+  if (kind === "all") steps.push({ group: "digest", runId: baseRunId })
   return steps
 }
 

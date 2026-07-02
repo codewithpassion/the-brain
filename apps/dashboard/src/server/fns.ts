@@ -43,9 +43,11 @@ import type {
   OkfExportResult,
   OkfFile,
   OkfImportResult,
+  PendingReviewsResult,
   RecallResult,
   RemoveMemberResult,
   ReprocessDocumentResult,
+  ResolveContradictionResult,
   RevokeApiKeyResult,
   RevokeVaultCredentialResult,
   SearchResult,
@@ -298,6 +300,34 @@ export const getDreamRuns = createServerFn({ method: "GET" }).handler(
     }
   },
 )
+
+/** `list_pending_reviews` — Dream contradictions awaiting human review (with hydrated facts). */
+export const getPendingReviews = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Result<PendingReviewsResult>> => {
+    try {
+      const out = await brainCall<PendingReviewsResult>("list_pending_reviews", true, { limit: 50 })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  },
+)
+
+/** `resolve_contradiction` — keep one fact (expire the rest) or dismiss a Dream contradiction. */
+export const resolveContradiction = createServerFn({ method: "POST" })
+  .validator((d: { reviewId: string; action: "keep" | "dismiss"; keepFactId?: number }) => d)
+  .handler(async ({ data }): Promise<Result<ResolveContradictionResult>> => {
+    try {
+      const out = await brainCall<ResolveContradictionResult>("resolve_contradiction", false, {
+        reviewId: data.reviewId,
+        action: data.action,
+        ...(data.keepFactId !== undefined ? { keepFactId: data.keepFactId } : {}),
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
 
 // --- Aggregate stats ---
 

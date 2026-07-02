@@ -11,6 +11,7 @@
  */
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import {
+  createDreamDigestServices,
   createDreamReflectServices,
   createDreamServices,
   createScopedServices,
@@ -18,6 +19,7 @@ import {
   type DreamRunStatus,
   dreamStepPlan,
   runDreamConsolidation,
+  runDreamDigest,
   runDreamReflection,
   worstStatus,
 } from "@brain/db"
@@ -50,43 +52,78 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
     let consolidationPaused = false
 
     for (const planStep of dreamStepPlan(runId, kind)) {
-      if (planStep.group === "consolidation") {
-        const r = await step.do("dream-consolidation", async () => {
-          const res = await runDreamConsolidation(createDreamServices(this.env, principal), {
-            runId: planStep.runId,
+      switch (planStep.group) {
+        case "consolidation": {
+          // A group failure returns 'failure' (recorded in its run row by runDreamJob) WITHOUT
+          // throwing out of the step, so the workflow proceeds to the digest.
+          const r = await step.do("dream-consolidation", async () => {
+            try {
+              const res = await runDreamConsolidation(createDreamServices(this.env, principal), {
+                runId: planStep.runId,
+              })
+              return { status: res.status }
+            } catch (err) {
+              console.error("dream consolidation failed", planStep.runId, err)
+              return { status: "failure" as DreamRunStatus }
+            }
           })
-          return {
-            status: res.status,
-            merged: res.stats.merged,
-            contradictions: res.stats.contradictions,
+          statuses.push(r.status)
+          if (r.status === "paused") consolidationPaused = true
+          break
+        }
+        case "reflection": {
+          if (consolidationPaused) break // budget exhausted → skip reflection (#9)
+          const reflect = await step.do("dream-reflection", async () => {
+            try {
+              const res = await runDreamReflection(
+                createDreamReflectServices(this.env, principal),
+                {
+                  runId: planStep.runId,
+                },
+              )
+              return { status: res.status, insightIds: res.insightDocumentIds }
+            } catch (err) {
+              console.error("dream reflection failed", planStep.runId, err)
+              return { status: "failure" as DreamRunStatus, insightIds: [] as string[] }
+            }
+          })
+          statuses.push(reflect.status)
+          insights = reflect.insightIds.length
+          // One durable step per insight → a retry re-pays only the incomplete extractions (#10).
+          for (const id of reflect.insightIds) {
+            await step.do(`dream-reflection-kg-${id}`, async () => {
+              const services = createScopedServices(this.env, principal)
+              try {
+                await runEntityExtraction(services, id)
+                return { documentId: id, extracted: 1 }
+              } catch (err) {
+                console.error("dream reflection KG extraction failed", id, err)
+                return { documentId: id, extracted: 0 } // non-fatal: insight stays searchable/cited
+              }
+            })
           }
-        })
-        statuses.push(r.status)
-        if (r.status === "paused") consolidationPaused = true
-        continue
-      }
-      // reflection group — skip when consolidation exhausted the budget (#9).
-      if (consolidationPaused) continue
-      const reflect = await step.do("dream-reflection", async () => {
-        const res = await runDreamReflection(createDreamReflectServices(this.env, principal), {
-          runId: planStep.runId,
-        })
-        return { status: res.status, insightIds: res.insightDocumentIds }
-      })
-      statuses.push(reflect.status)
-      insights = reflect.insightIds.length
-      // One durable step per insight → a retry re-pays only the incomplete extractions (#10).
-      for (const id of reflect.insightIds) {
-        await step.do(`dream-reflection-kg-${id}`, async () => {
-          const services = createScopedServices(this.env, principal)
-          try {
-            await runEntityExtraction(services, id)
-            return { documentId: id, extracted: 1 }
-          } catch (err) {
-            console.error("dream reflection KG extraction failed", id, err)
-            return { documentId: id, extracted: 0 } // non-fatal: insight stays searchable/cited
-          }
-        })
+          break
+        }
+        case "digest": {
+          // Digest runs even when consolidation paused — the digest must ALWAYS be written.
+          const d = await step.do("dream-digest", async () => {
+            try {
+              const res = await runDreamDigest(createDreamDigestServices(this.env, principal), {
+                runId: planStep.runId,
+              })
+              return { status: res.status }
+            } catch (err) {
+              console.error("dream digest failed", planStep.runId, err)
+              return { status: "failure" as DreamRunStatus }
+            }
+          })
+          statuses.push(d.status)
+          break
+        }
+        default: {
+          const _exhaustive: never = planStep.group
+          throw new Error(`unknown dream step group: ${String(_exhaustive)}`)
+        }
       }
     }
 

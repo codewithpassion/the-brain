@@ -156,6 +156,25 @@ export interface DocumentRow {
   path: string | null
 }
 
+/** A pending Dream contradiction with its VISIBLE conflicting facts (list_pending_reviews). */
+export interface PendingReview {
+  reviewId: string
+  rationale: string
+  reviewedAt: string
+  facts: { id: number; fact: string }[]
+  /** How many facts were redacted (not visible to the caller). */
+  redactedCount: number
+}
+
+export interface PendingReviewsResult {
+  reviews: PendingReview[]
+}
+
+export interface ResolveContradictionResult {
+  reviewId: string
+  status: string
+}
+
 export interface ListDocumentsResult {
   documents: DocumentRow[]
 }

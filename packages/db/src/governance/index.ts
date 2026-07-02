@@ -11,9 +11,13 @@ export {
   BREAK_GLASS_READ_OP,
   breakGlassRead,
   GOVERNANCE_OPS,
+  LIST_PENDING_REVIEWS_OP,
+  listPendingReviews,
   MEMORY_REVIEW_OP,
+  RESOLVE_CONTRADICTION_OP,
   registerGovernanceOps,
+  resolveContradiction,
   submitMemoryReview,
 } from "./ops"
-export type { AuditExportResult, AuditRow, BreakGlassFact } from "./store"
+export type { AuditExportResult, AuditRow, BreakGlassFact, PendingDreamReview } from "./store"
 export { GovernanceStore } from "./store"

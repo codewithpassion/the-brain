@@ -73,7 +73,7 @@ export const dreamRuns = sqliteTable(
   (t) => [
     check(
       "dream_runs_kind_ck",
-      enumCheck("kind", ["consolidation", "reflection", "dedup", "hygiene"]),
+      enumCheck("kind", ["consolidation", "reflection", "digest", "dedup", "hygiene"]),
     ),
     check(
       "dream_runs_status_ck",

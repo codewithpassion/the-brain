@@ -5,6 +5,14 @@
  */
 export { type ApplyOutcome, AUTO_MERGE_FLOOR, applyCluster, ID_CHUNK } from "./apply"
 export {
+  createDreamDigestServices,
+  DIGEST_SLUG,
+  type DreamDigestOptions,
+  type DreamDigestResult,
+  type DreamDigestServices,
+  runDreamDigest,
+} from "./digest"
+export {
   type DreamDispatchEnv,
   type DreamDispatchResult,
   type DreamWorkflowLike,

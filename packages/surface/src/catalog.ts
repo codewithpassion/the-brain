@@ -44,9 +44,11 @@ import {
   getSessionContext,
   INGEST_DOCUMENT_OP,
   importOkfBundle,
+  LIST_PENDING_REVIEWS_OP,
   LIST_SNAPSHOTS_OP,
   listDreamRunsOp,
   listMemory,
+  listPendingReviews,
   listSnapshots,
   MEMORY_FORGET_OP,
   MEMORY_GET_OP,
@@ -65,10 +67,12 @@ import {
   queryOp,
   RECALL_OP,
   REPROCESS_DOCUMENT_OP,
+  RESOLVE_CONTRADICTION_OP,
   type RecallRequest,
   type RetrievalInput,
   recall,
   recordThinkSpend,
+  resolveContradiction,
   rollbackMemory,
   runBatchIngestCore,
   runSessionPromote,
@@ -406,6 +410,26 @@ const auditExportSurfaceOp: SurfaceOp = {
   def: AUDIT_EXPORT_OP,
   invoke: (ctx, input) =>
     auditExport(governanceServices(ctx), AUDIT_EXPORT_OP.input.parse(input).cursor),
+}
+
+const listPendingReviewsSurfaceOp: SurfaceOp = {
+  def: LIST_PENDING_REVIEWS_OP,
+  invoke: async (ctx, input) => {
+    const { limit } = LIST_PENDING_REVIEWS_OP.input.parse(input)
+    return { reviews: await listPendingReviews(governanceServices(ctx), limit) }
+  },
+}
+
+const resolveContradictionSurfaceOp: SurfaceOp = {
+  def: RESOLVE_CONTRADICTION_OP,
+  invoke: (ctx, input) => {
+    const parsed = RESOLVE_CONTRADICTION_OP.input.parse(input)
+    return resolveContradiction(governanceServices(ctx), {
+      reviewId: parsed.reviewId,
+      action: parsed.action,
+      ...(parsed.keepFactId !== undefined ? { keepFactId: parsed.keepFactId } : {}),
+    })
+  },
 }
 
 // ── Admin family (mint_api_key / get_token_spend / memberships) ───────────────
@@ -787,6 +811,8 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   memoryReviewSurfaceOp,
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,
+  listPendingReviewsSurfaceOp,
+  resolveContradictionSurfaceOp,
   ingestDocumentSurfaceOp,
   deleteDocumentSurfaceOp,
   getDocumentSurfaceOp,
