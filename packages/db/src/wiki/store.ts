@@ -17,7 +17,7 @@ import { and, asc, eq, inArray, isNull, like, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import type { DocLinkRow, TimelineRow } from "../graph/scoped-graph"
 import { ScopedGraph } from "../graph/scoped-graph"
-import type { OkfExportResult } from "../memory/okf"
+import type { OkfExportResult, OkfFile, OkfImportItem, OkfImportResult } from "../memory/okf"
 import {
   contentHash,
   type ExistingPageRow,
@@ -30,7 +30,14 @@ import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
 import { EntityPageStore, type EntitySections } from "./entity-pages"
 import { INDEX_INGESTED_VIA } from "./index-pages"
-import { type BundlePage, type BundleRevision, buildWikiBundle } from "./okf-bundle"
+import {
+  type BundlePage,
+  type BundleRevision,
+  buildWikiBundle,
+  prepareWikiBundle,
+} from "./okf-bundle"
+
+const IMPORT_INGESTED_VIA = "import"
 
 const WIKI_INGESTED_VIA = "wiki"
 
@@ -525,6 +532,82 @@ export class WikiStore {
       }
     })
     return buildWikiBundle(bundlePages, revisionsBySlug)
+  }
+
+  /**
+   * Import an OKF bundle as UNTRUSTED foreign content (W5/2b). Security posture (all enforced here):
+   *  1. UNCONDITIONAL floor — every page written `private` + frontmatter `draft:true`; the bundle's
+   *     own `visibility`/`draft` are DROPPED by `prepareWikiBundle`, never read.
+   *  2. Non-reflection — `ingested_via='import'` (in `AGENT_PAGE_PROVENANCE`), so it never feeds the dream.
+   *  3. NO backing doc — we never call `syncBackingDoc`, so untrusted content stays out of
+   *     search/recall/think until a human reviews + promotes it.
+   *  4. Confinement — pages land under `imported/<namespace>/…` and their links were rewritten to that
+   *     prefix by `prepareWikiBundle`; the reserved-lane `authorize` refuses to overwrite a non-import
+   *     page (so a collision can never silently merge).
+   *  5. Caps — `prepareWikiBundle` throws (rejecting the whole bundle) before any write on over-size.
+   * Resilient: one bad file is `failed`/`skipped`, never aborting the rest.
+   */
+  async importBundle(files: OkfFile[], namespace: string): Promise<OkfImportResult> {
+    const { okfVersion, prepared } = prepareWikiBundle(files, namespace) // throws on caps
+    const items: OkfImportItem[] = []
+    for (const p of prepared) {
+      if (p.kind === "skip") {
+        items.push(p.item)
+        continue
+      }
+      const frontmatter = { type: p.type, title: p.title, tags: p.tags, draft: true }
+      try {
+        await this.pages.upsert({
+          slug: p.slug,
+          type: p.type,
+          title: p.title,
+          visibility: "private", // control 1: UNCONDITIONAL floor (bundle visibility ignored)
+          teamId: null,
+          scope: null,
+          frontmatter,
+          frontmatterJson: JSON.stringify(frontmatter),
+          hashFrontmatter: JSON.stringify(frontmatter),
+          body: p.body,
+          entityId: null,
+          ingestedVia: IMPORT_INGESTED_VIA,
+          sourceKind: IMPORT_INGESTED_VIA,
+          linkSource: IMPORT_INGESTED_VIA,
+          recordPending: true, // intra-bundle links resolve; out-of-bundle → red (never a merge)
+          writeTeamIdOnUpdate: false,
+          auditAction: "wiki.import",
+          reason: "import",
+          readOnlyDenyMessage: "wiki import denied: read-only principal",
+          authorize: (row) => {
+            if (row === undefined) return
+            // Reserved lane (defense-in-depth): never overwrite a non-import page at an import slug.
+            if (row.ingestedVia !== IMPORT_INGESTED_VIA) {
+              throw new Error(`import: slug '${p.slug}' is owned by a non-import page`)
+            }
+            // Ownership: imported pages are private to their importer (userId). A re-import may only
+            // update the SAME user's draft — else one tenant member could silently overwrite another's
+            // private import draft (poisoning their review queue). `findBySlug` is tenant-wide, so this
+            // is the gate that makes an import slug collision across users fail closed, not merge.
+            if (row.userId !== this.p.userId) {
+              throw new Error(`import: slug '${p.slug}' is owned by another user`)
+            }
+          },
+        })
+        items.push({ path: p.path, status: "imported", slug: p.slug })
+      } catch (err) {
+        items.push({
+          path: p.path,
+          status: "failed",
+          reason: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    return {
+      imported: items.filter((i) => i.status === "imported").length,
+      skipped: items.filter((i) => i.status === "skipped").length,
+      failed: items.filter((i) => i.status === "failed").length,
+      okfVersion,
+      items,
+    }
   }
 
   /**

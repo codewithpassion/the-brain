@@ -1145,6 +1145,36 @@ export const wikiExportBundle = createServerFn({ method: "POST" })
     },
   )
 
+/** `wiki_import_bundle` — import OKF files as UNTRUSTED content (private+draft, confined, no search). */
+export const wikiImportBundle = createServerFn({ method: "POST" })
+  .validator((d: { files: { path: string; content: string }[]; namespace: string }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<
+      Result<{
+        imported: number
+        skipped: number
+        failed: number
+        okfVersion: string | null
+        items: { path: string; status: string; reason?: string; slug?: string }[]
+      }>
+    > => {
+      try {
+        const out = await brainCall<{
+          imported: number
+          skipped: number
+          failed: number
+          okfVersion: string | null
+          items: { path: string; status: string; reason?: string; slug?: string }[]
+        }>("wiki_import_bundle", false, { files: data.files, namespace: data.namespace })
+        return { ok: true, data: out }
+      } catch (error) {
+        return fail(error)
+      }
+    },
+  )
+
 /** `wiki_list_pages` — tree-shaped sidebar listing (namespaces + memory + entities). */
 export const wikiListPages = createServerFn({ method: "POST" })
   .validator((d: { namespacePrefix?: string; type?: string; tag?: string; limit?: number }) => d)

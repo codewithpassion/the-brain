@@ -3,6 +3,7 @@
  * -loaded sidebar listing (no extra fetch). The sidebar tree is the primary navigator.
  */
 import { createFileRoute, Link, useLoaderData } from "@tanstack/react-router"
+import { ImportBundle } from "../components/ImportBundle"
 import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 
@@ -55,6 +56,8 @@ function WikiHome() {
           )}
         </CardContent>
       </Card>
+
+      <ImportBundle />
     </div>
   )
 }

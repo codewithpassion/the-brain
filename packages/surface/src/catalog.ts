@@ -53,6 +53,7 @@ import {
   getWikiPageHistory,
   INGEST_DOCUMENT_OP,
   importOkfBundle,
+  importWikiBundle,
   LIST_PENDING_REVIEWS_OP,
   LIST_SNAPSHOTS_OP,
   listDreamRunsOp,
@@ -105,6 +106,7 @@ import {
   WIKI_DELETE_PAGE_OP,
   WIKI_EXPORT_BUNDLE_OP,
   WIKI_GET_PAGE_OP,
+  WIKI_IMPORT_BUNDLE_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_PAGE_HISTORY_OP,
@@ -500,6 +502,14 @@ const wikiExportBundleSurfaceOp: SurfaceOp = {
       prefix,
       ...(namespace !== undefined ? { namespace } : {}),
     })
+  },
+}
+
+const wikiImportBundleSurfaceOp: SurfaceOp = {
+  def: WIKI_IMPORT_BUNDLE_OP,
+  invoke: async (ctx, input) => {
+    const { files, namespace } = WIKI_IMPORT_BUNDLE_OP.input.parse(input)
+    return importWikiBundle(wikiStore(ctx), files, namespace)
   },
 }
 
@@ -1072,6 +1082,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   wikiGetPageSurfaceOp,
   wikiPageHistorySurfaceOp,
   wikiExportBundleSurfaceOp,
+  wikiImportBundleSurfaceOp,
   wikiListPagesSurfaceOp,
   wikiMovePageSurfaceOp,
   wikiDeletePageSurfaceOp,

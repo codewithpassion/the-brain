@@ -9,7 +9,8 @@
  */
 import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
-import type { OkfExportResult } from "../memory/okf"
+import type { OkfExportResult, OkfImportResult } from "../memory/okf"
+import { IMPORT_CAPS } from "./okf-bundle"
 import type {
   WikiListEntry,
   WikiMoveResult,
@@ -252,6 +253,47 @@ export const WIKI_EXPORT_BUNDLE_OP = defineOp({
   }),
 })
 
+/** `wiki_import_bundle` — import an OKF bundle as UNTRUSTED content: private + draft, confined, no search. */
+export const WIKI_IMPORT_BUNDLE_OP = defineOp({
+  name: "wiki_import_bundle",
+  description:
+    "Import an OKF bundle (files[]) into the wiki under 'imported/<namespace>/…'. UNTRUSTED-INGRESS " +
+    "posture: every page is forced PRIVATE + draft (bundle visibility is ignored), gets NO search " +
+    "backing doc, is excluded from the dream engine, and its links are confined to the imported " +
+    "subtree (never merges into your existing pages). Resilient: bad files are skipped/failed without " +
+    "aborting the bundle. Promotion to searchable/world is a separate explicit human edit later.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    // Defense-in-depth: bound the array (and coarse per-file length) at the schema so an oversized
+    // bundle is rejected before it fully materializes — the authoritative UTF-8 byte caps live in
+    // `prepareWikiBundle`. (String .length is UTF-16 code units ≤ byte length, so this never wrongly
+    // rejects a within-budget file; it only trips egregious inputs early.)
+    files: z
+      .array(z.object({ path: z.string(), content: z.string().max(IMPORT_CAPS.maxFileBytes) }))
+      .max(IMPORT_CAPS.maxFiles)
+      .describe("The bundle files (path + markdown content)."),
+    namespace: z
+      .string()
+      .min(1)
+      .describe("Confinement namespace — pages land under 'imported/<namespace>/…'."),
+  }),
+  output: z.object({
+    imported: z.number().int(),
+    skipped: z.number().int(),
+    failed: z.number().int(),
+    okfVersion: z.string().nullable(),
+    items: z.array(
+      z.object({
+        path: z.string(),
+        status: z.enum(["imported", "skipped", "failed"]),
+        reason: z.string().optional(),
+        slug: z.string().optional(),
+      }),
+    ),
+  }),
+})
+
 /** `wiki_move_page` — rename a wiki page, re-pointing links + leaving a redirect stub (wiki-only). */
 export const WIKI_MOVE_PAGE_OP = defineOp({
   name: "wiki_move_page",
@@ -285,6 +327,7 @@ export const WIKI_OPS: readonly AnyOpDef[] = [
   WIKI_PAGE_HISTORY_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_EXPORT_BUNDLE_OP,
+  WIKI_IMPORT_BUNDLE_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_DELETE_PAGE_OP,
 ]
@@ -315,6 +358,12 @@ export const exportWikiBundle = (
   store: WikiStore,
   opts: { namespace?: string; prefix?: boolean },
 ): Promise<OkfExportResult> => store.exportBundle(opts)
+
+export const importWikiBundle = (
+  store: WikiStore,
+  files: { path: string; content: string }[],
+  namespace: string,
+): Promise<OkfImportResult> => store.importBundle(files, namespace)
 
 export const listWikiPages = (
   store: WikiStore,

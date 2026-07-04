@@ -133,9 +133,10 @@ export const notAgentOrigin = (originColumn: AnySQLiteColumn): SQL =>
     sql`, `,
   )}))`
 
-/** The `pages.ingested_via` provenance values that are AGENT-authored (W2/W5 anti-loop, W-i4).
- *  `index` (W5): auto-maintained navigation pages — never a reflection input. */
-export const AGENT_PAGE_PROVENANCE = ["entity", "insight", "index"] as const
+/** The `pages.ingested_via` provenance values EXCLUDED from reflection (W2/W5 anti-loop, W-i4).
+ *  `index` (W5): auto-maintained navigation pages. `import` (W5/2b): UNTRUSTED foreign content —
+ *  imported bundle pages must NEVER feed the dream engine (anti-poisoning). */
+export const AGENT_PAGE_PROVENANCE = ["entity", "insight", "index", "import"] as const
 
 /**
  * Anti-loop gate (W-i4): a page whose provenance is NOT agent-authored (`entity`/`insight`), or the

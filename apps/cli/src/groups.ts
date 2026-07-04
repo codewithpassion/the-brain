@@ -46,6 +46,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   wiki_page_history: "wiki",
   wiki_list_pages: "wiki",
   wiki_export_bundle: "wiki",
+  wiki_import_bundle: "wiki",
   wiki_move_page: "wiki",
   wiki_delete_page: "wiki",
   // session

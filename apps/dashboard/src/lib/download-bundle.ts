@@ -2,7 +2,19 @@
  * Client-side OKF bundle zip + download (W5/2a). The Worker returns `files[]`; the browser packages
  * them into a `.zip` with fflate (pure-JS, no server-side zip, no URL fetch) and triggers a download.
  */
-import { strToU8, zipSync } from "fflate"
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate"
+
+/** Read a `.zip` File into OKF `{path,content}[]` in the browser (unzip client-side; only .md/.markdown). */
+export const readZipToFiles = async (file: File): Promise<{ path: string; content: string }[]> => {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  const entries = unzipSync(buf)
+  const files: { path: string; content: string }[] = []
+  for (const [path, bytes] of Object.entries(entries)) {
+    if (path.endsWith("/")) continue // directory entry
+    files.push({ path, content: strFromU8(bytes) })
+  }
+  return files
+}
 
 /** Zip `files[]` and download as `<name>.okf.zip`. Browser-only (uses Blob + a temp anchor). */
 export const downloadBundle = (files: { path: string; content: string }[], name: string): void => {

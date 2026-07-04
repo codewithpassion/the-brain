@@ -43,6 +43,11 @@ export interface SyncBackingDocResult {
 /** True for a page type/provenance that gets a searchable backing document (wiki + entity). */
 const isBackable = (ingestedVia: string | null, type: string): boolean => {
   if (type === REDIRECT_TYPE) return false
+  // ALLOWLIST (deliberate): only `wiki`/`entity` get a searchable backing doc. Everything else —
+  // `memory` (v1 invisible-to-search), `index` (W5 navigation-not-knowledge), and CRITICALLY
+  // `import` (W5/2b UNTRUSTED foreign content) — is non-backable, so even the read-path self-heal
+  // (`wiki_get_page` → `syncBackingDoc`) never puts untrusted/nav content into search. Do NOT flip
+  // this to a denylist: a new provenance must OPT IN, not accidentally become searchable.
   return ingestedVia === WIKI_VIA || ingestedVia === ENTITY_VIA
 }
 

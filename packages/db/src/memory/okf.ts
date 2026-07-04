@@ -147,15 +147,16 @@ export const serializeConcept = (fm: Record<string, unknown>, body: string): str
   `${serializeFrontmatter(fm)}\n${body}`
 
 /** Normalize a bundle file path to a forward-slash relative path (no `./` or leading `/`). */
-const normalizePath = (path: string): string =>
+export const normalizePath = (path: string): string =>
   path
     .replace(/\\/g, "/")
     .replace(/^\.?\//, "")
     .trim()
 
-const basename = (path: string): string => path.split("/").pop() ?? path
-const RESERVED = new Set(["index.md", "log.md"])
-const MD_EXT_RE = /\.(md|markdown)$/i
+export const basename = (path: string): string => path.split("/").pop() ?? path
+/** Reserved bundle file names — STRUCTURAL (never concepts): `index.md`/`log.md`. */
+export const RESERVED = new Set(["index.md", "log.md"])
+export const MD_EXT_RE = /\.(md|markdown)$/i
 
 /**
  * Export memory items under `path` (or all) as an OKF bundle: one `<slug>.md` per live concept,
@@ -199,7 +200,7 @@ export const exportOkfBundle = async (
 }
 
 /** Read `okf_version` from a bundle's `index.md` frontmatter, if present. */
-const bundleOkfVersion = (files: OkfFile[]): string | null => {
+export const bundleOkfVersion = (files: OkfFile[]): string | null => {
   const index = files.find((f) => basename(normalizePath(f.path)).toLowerCase() === "index.md")
   if (index === undefined) return null
   const v = parseDocument(index.content).frontmatter.okf_version
