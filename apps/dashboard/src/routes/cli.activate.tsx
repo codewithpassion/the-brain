@@ -52,14 +52,14 @@ function CliActivatePage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Authorize CLI</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Enter the code shown in your terminal to authorize the Brain CLI.
         </p>
       </header>
 
       {status === "success" ? (
         <Card>
-          <CardContent className="py-6 text-green-700 text-sm">
+          <CardContent className="py-6 text-ok text-sm">
             CLI authorized successfully. You may close this tab and return to your terminal.
           </CardContent>
         </Card>
@@ -82,7 +82,7 @@ function CliActivatePage() {
               </Button>
             </form>
             {status === "error" && error !== null && (
-              <p className="mt-3 text-red-600 text-sm">Authorization failed: {error}</p>
+              <p className="mt-3 text-danger text-sm">Authorization failed: {error}</p>
             )}
           </CardContent>
         </Card>

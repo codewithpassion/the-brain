@@ -54,6 +54,17 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
   // Ref — mutation does not need to trigger a re-render.
   const expandedIds = useRef(new Set<string>())
 
+  // Canvas colors are read from the active theme's CSS vars once at mount (SSR-safe
+  // defaults until then). The canvas paints with these captured values, so switching
+  // themes won't re-color an already-rendered graph until the page reloads — acceptable
+  // for a data-viz surface; the categorical node hues (colorForKind) are theme-agnostic.
+  const [canvas, setCanvas] = useState({ label: "#e2e8f0", link: "#94a3b8" })
+  useEffect(() => {
+    const cs = getComputedStyle(document.documentElement)
+    const read = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback
+    setCanvas({ label: read("--t-ink", "#e2e8f0"), link: read("--t-muted", "#94a3b8") })
+  }, [])
+
   // --- SSR-safe dynamic import --------------------------------------------------
   // import() is only called after hydration (inside useEffect); the server never
   // reaches this code path, so react-force-graph-2d is never bundled server-side.
@@ -150,13 +161,13 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
       ctx.font = `${fontSize}px Sans-Serif`
       ctx.textAlign = "center"
       ctx.textBaseline = "top"
-      ctx.fillStyle = "#e2e8f0" // slate-100 — readable on the dark canvas background
+      ctx.fillStyle = canvas.label // --t-ink — readable on any theme's canvas background
       // The default node radius = nodeRelSize(4) * sqrt(nodeVal) where nodeVal = Math.max(2, mentionCount).
       const r = 4 * Math.sqrt(Math.max(2, node.mentionCount)) + 2
       ctx.fillText(node.label, node.x ?? 0, (node.y ?? 0) + r)
       ctx.restore()
     },
-    [],
+    [canvas.label],
   )
 
   const kinds = useMemo(() => {
@@ -167,7 +178,7 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
   // --- Empty state --------------------------------------------------------------
   if (entities.length === 0) {
     return (
-      <p className="text-neutral-500 text-sm">
+      <p className="text-muted text-sm">
         No entities yet — ingest some documents to populate the graph.
       </p>
     )
@@ -177,10 +188,10 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
   return (
     <div className="space-y-3">
       <Legend kinds={kinds} />
-      {expanding && <p className="text-neutral-400 text-xs">Expanding neighbors…</p>}
-      <div ref={containerRef} className="overflow-hidden rounded-md border">
+      {expanding && <p className="text-faint text-xs">Expanding neighbors…</p>}
+      <div ref={containerRef} className="overflow-hidden rounded-ui border border-border">
         {Graph === null ? (
-          <div className="flex h-[520px] items-center justify-center text-neutral-400 text-sm">
+          <div className="flex h-[520px] items-center justify-center text-faint text-sm">
             Loading graph…
           </div>
         ) : (
@@ -196,7 +207,7 @@ export function EntityGraph({ entities, edges, onNodeSelect }: EntityGraphProps)
             nodeVal={(n: unknown) => Math.min(10, 1 + Math.sqrt((n as MutableNode).mentionCount))}
             nodeCanvasObject={paintNodeLabel}
             nodeCanvasObjectMode={() => "after"}
-            linkColor={() => "#94a3b8"}
+            linkColor={() => canvas.link}
             linkLabel={(l: unknown) => (l as GraphLink).label}
             linkDirectionalArrowLength={4}
             linkDirectionalArrowRelPos={1}
@@ -220,7 +231,7 @@ function Legend({ kinds }: { kinds: readonly string[] }) {
             className="inline-block size-3 rounded-full"
             style={{ backgroundColor: colorForKind(k) }}
           />
-          <span className="text-neutral-500">{k}</span>
+          <span className="text-muted">{k}</span>
         </li>
       ))}
     </ul>

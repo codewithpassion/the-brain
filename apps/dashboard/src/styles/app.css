@@ -1,17 +1,219 @@
+/**
+ * The Brain — design system (UI v2).
+ *
+ * ONE component system, THREE complete visual identities, switched by `data-theme` on <html>
+ * (persisted in localStorage("brain-theme"); a pre-paint inline script in __root.tsx prevents FOUC):
+ *
+ *   carbon   — the Linear homage: near-black layered surfaces, hairline borders, iris accent,
+ *              Instrument Sans, compact 6px radii.
+ *   paper    — light editorial: warm paper ground, ink text, oxblood accent, Newsreader serif
+ *              display, soft diffuse shadows, faint grain.
+ *   terminal — industrial phosphor: green-black CRT ground, phosphor accent, IBM Plex Mono
+ *              display, square corners, scanline texture.
+ *
+ * Components consume ONLY the semantic tokens below (via the Tailwind utilities generated from
+ * `@theme inline`): bg / surface / raised, border / edge, ink / muted / faint, accent / accent-ink,
+ * ok / warn / danger, rounded-ui, font-body / font-display / font-mono, shadow-card / shadow-pop.
+ * Never hardcode a palette color in a component.
+ */
+
+/* Self-hosted fonts (bundled woff2 — no CDN, Workers-friendly). */
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/newsreader/opsz.css";
+@import "@fontsource-variable/newsreader/opsz-italic.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 @import "tailwindcss";
 
-:root {
-  color-scheme: light dark;
+/* ── Theme identities ─────────────────────────────────────────────────────────────────── */
+
+/* Carbon (default) — Linear-esque dark. */
+:root,
+[data-theme="carbon"] {
+  color-scheme: dark;
+  --t-bg: #0d0e13;
+  --t-surface: #13141b;
+  --t-raised: #1b1d26;
+  --t-border: rgba(255, 255, 255, 0.07);
+  --t-edge: rgba(255, 255, 255, 0.15);
+  --t-ink: #e8eaf2;
+  --t-muted: #9aa1b5;
+  --t-faint: #616880;
+  --t-accent: #7c86ee;
+  --t-accent-ink: #ffffff;
+  --t-ok: #46c28e;
+  --t-warn: #d9a13c;
+  --t-danger: #e5646c;
+  --t-radius-ui: 6px;
+  --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --t-font-display: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --t-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.02);
+  --t-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --hl-comment: #6b7289;
+  --hl-kw: #b58ef0;
+  --hl-str: #8fc7a6;
+  --hl-num: #6ea8f7;
+  --hl-title: #93a5f5;
+  --hl-type: #dba46a;
+  --hl-tag: #7fc9a0;
 }
 
+/* Paper — light editorial. */
+[data-theme="paper"] {
+  color-scheme: light;
+  --t-bg: #f5f3ec;
+  --t-surface: #fdfcf8;
+  --t-raised: #edeade;
+  --t-border: #e2ddce;
+  --t-edge: #cbc4af;
+  --t-ink: #23201a;
+  --t-muted: #6e675a;
+  --t-faint: #a49c8a;
+  --t-accent: #a63d2f;
+  --t-accent-ink: #fdfcf8;
+  --t-ok: #3e7a4f;
+  --t-warn: #9c6410;
+  --t-danger: #b3362c;
+  --t-radius-ui: 10px;
+  --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --t-font-display: "Newsreader Variable", ui-serif, Georgia, serif;
+  --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --t-shadow-card: 0 1px 2px rgba(35, 32, 26, 0.05), 0 4px 18px rgba(35, 32, 26, 0.05);
+  --t-shadow-pop: 0 8px 40px rgba(35, 32, 26, 0.16), 0 0 0 1px rgba(35, 32, 26, 0.05);
+  --hl-comment: #8d8574;
+  --hl-kw: #8f3b93;
+  --hl-str: #34605c;
+  --hl-num: #1d5aa7;
+  --hl-title: #7a3aa2;
+  --hl-type: #a05413;
+  --hl-tag: #2f6b3f;
+}
+
+/* Terminal — industrial phosphor. */
+[data-theme="terminal"] {
+  color-scheme: dark;
+  --t-bg: #080c09;
+  --t-surface: #0d130e;
+  --t-raised: #141d15;
+  --t-border: rgba(142, 220, 170, 0.13);
+  --t-edge: rgba(142, 220, 170, 0.3);
+  --t-ink: #cfe8d4;
+  --t-muted: #7ea88a;
+  --t-faint: #4d6a55;
+  --t-accent: #3ecf7e;
+  --t-accent-ink: #06130a;
+  --t-ok: #3ecf7e;
+  --t-warn: #d7b043;
+  --t-danger: #e0584f;
+  --t-radius-ui: 2px;
+  --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --t-font-display: "IBM Plex Mono", ui-monospace, monospace;
+  --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --t-shadow-card: 0 0 0 1px rgba(62, 207, 126, 0.04);
+  --t-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(142, 220, 170, 0.16);
+  --hl-comment: #567a61;
+  --hl-kw: #6fd9a0;
+  --hl-str: #b7d98a;
+  --hl-num: #67c4d1;
+  --hl-title: #9be3b8;
+  --hl-type: #d7b043;
+  --hl-tag: #6fd9a0;
+}
+
+/* ── Tailwind semantic utilities (inline so runtime theme switching works) ────────────── */
+
+@theme inline {
+  --color-bg: var(--t-bg);
+  --color-surface: var(--t-surface);
+  --color-raised: var(--t-raised);
+  --color-border: var(--t-border);
+  --color-edge: var(--t-edge);
+  --color-ink: var(--t-ink);
+  --color-muted: var(--t-muted);
+  --color-faint: var(--t-faint);
+  --color-accent: var(--t-accent);
+  --color-accent-ink: var(--t-accent-ink);
+  --color-ok: var(--t-ok);
+  --color-warn: var(--t-warn);
+  --color-danger: var(--t-danger);
+  --radius-ui: var(--t-radius-ui);
+  --font-body: var(--t-font-body);
+  --font-display: var(--t-font-display);
+  --font-mono: var(--t-font-mono);
+  --shadow-card: var(--t-shadow-card);
+  --shadow-pop: var(--t-shadow-pop);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────────────────── */
+
+html {
+  background: var(--t-bg);
+  color: var(--t-ink);
+  font-family: var(--t-font-body);
+}
 body {
   margin: 0;
+  font-size: 0.9375rem;
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: color-mix(in oklab, var(--t-accent) 30%, transparent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--t-ink) 18%, transparent) transparent;
 }
 
-/* ── Wiki markdown rendering (W4a). No @tailwindcss/typography dep — a scoped, minimal prose. ── */
+/* Paper grain + Terminal scanlines: a fixed, non-interactive texture pass per identity. */
+[data-theme="paper"] body::after,
+[data-theme="terminal"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 200;
+}
+[data-theme="paper"] body::after {
+  opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+[data-theme="terminal"] body::after {
+  opacity: 0.5;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.16) 0px,
+    rgba(0, 0, 0, 0.16) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--t-font-display);
+}
+
+/* Terminal renders headings in mono with tightened tracking. */
+[data-theme="terminal"] h1,
+[data-theme="terminal"] h2,
+[data-theme="terminal"] h3 {
+  letter-spacing: -0.02em;
+}
+/* Paper gives display headings the Newsreader optical treatment. */
+[data-theme="paper"] h1 {
+  font-weight: 500;
+}
+
+/* ── Wiki markdown prose (tokenized — correct in every theme) ─────────────────────────── */
+
 .wiki-prose {
-  color: #262626;
-  line-height: 1.65;
+  color: var(--t-ink);
+  line-height: 1.7;
   font-size: 0.95rem;
   overflow-wrap: break-word;
 }
@@ -22,6 +224,7 @@ body {
 .wiki-prose h2,
 .wiki-prose h3,
 .wiki-prose h4 {
+  font-family: var(--t-font-display);
   font-weight: 600;
   line-height: 1.3;
   margin: 1.6em 0 0.6em;
@@ -31,7 +234,7 @@ body {
 }
 .wiki-prose h2 {
   font-size: 1.3rem;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--t-border);
   padding-bottom: 0.3em;
 }
 .wiki-prose h3 {
@@ -42,6 +245,9 @@ body {
 }
 .wiki-prose p {
   margin: 0.8em 0;
+}
+.wiki-prose a {
+  color: var(--t-accent);
 }
 .wiki-prose ul,
 .wiki-prose ol {
@@ -62,15 +268,32 @@ body {
   margin: 0.3em 0;
 }
 .wiki-prose blockquote {
-  border-left: 3px solid #d4d4d4;
+  border-left: 3px solid var(--t-edge);
   padding-left: 1em;
   margin: 1em 0;
-  color: #525252;
+  color: var(--t-muted);
 }
 .wiki-prose hr {
   border: none;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--t-border);
   margin: 1.6em 0;
+}
+.wiki-prose code {
+  font-family: var(--t-font-mono);
+  font-size: 0.85em;
+}
+.wiki-prose :not(pre) > code {
+  background: var(--t-raised);
+  border: 1px solid var(--t-border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.wiki-prose pre {
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--t-radius-ui);
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
 }
 .wiki-prose table {
   border-collapse: collapse;
@@ -81,12 +304,12 @@ body {
 }
 .wiki-prose th,
 .wiki-prose td {
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--t-border);
   padding: 0.4em 0.7em;
   text-align: left;
 }
 .wiki-prose th {
-  background: #f5f5f5;
+  background: var(--t-raised);
   font-weight: 600;
 }
 .wiki-prose input[type="checkbox"] {
@@ -97,39 +320,40 @@ body {
   height: auto;
 }
 
-/* ── highlight.js minimal theme (github-ish). Applied client-side by CodeBlock. ── */
+/* ── highlight.js — theme-driven token colors ─────────────────────────────────────────── */
+
 .hljs {
-  color: #24292e;
+  color: var(--t-ink);
 }
 .hljs-comment,
 .hljs-quote {
-  color: #6a737d;
+  color: var(--hl-comment);
   font-style: italic;
 }
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-built_in {
-  color: #d73a49;
+  color: var(--hl-kw);
 }
 .hljs-string,
 .hljs-attr,
 .hljs-template-tag {
-  color: #032f62;
+  color: var(--hl-str);
 }
 .hljs-number,
 .hljs-literal {
-  color: #005cc5;
+  color: var(--hl-num);
 }
 .hljs-title,
 .hljs-title.function_,
 .hljs-section {
-  color: #6f42c1;
+  color: var(--hl-title);
 }
 .hljs-type,
 .hljs-class .hljs-title {
-  color: #e36209;
+  color: var(--hl-type);
 }
 .hljs-tag,
 .hljs-name {
-  color: #22863a;
+  color: var(--hl-tag);
 }

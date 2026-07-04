@@ -20,7 +20,7 @@ function WikiLayout() {
   return (
     <RequireAuth>
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="md:sticky md:top-6 md:max-h-[calc(100vh-3rem)] md:self-start md:overflow-y-auto md:border-neutral-200 md:border-r md:pr-4">
+        <aside className="md:sticky md:top-6 md:max-h-[calc(100vh-3rem)] md:self-start md:overflow-y-auto md:border-border md:border-r md:pr-4">
           <WikiSidebar pages={pages} />
         </aside>
         <div className="min-w-0">

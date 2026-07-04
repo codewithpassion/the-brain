@@ -100,7 +100,7 @@ function GraphPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Graph</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Explore entities, traverse links, and find orphaned nodes.
         </p>
       </header>
@@ -138,13 +138,13 @@ function GraphPage() {
 
       {error !== null && (
         <Card>
-          <CardContent className="py-4 text-red-600 text-sm">Error: {error}</CardContent>
+          <CardContent className="py-4 text-danger text-sm">Error: {error}</CardContent>
         </Card>
       )}
 
       {!entities.ok && searchList === null && orphanResult === null && (
         <Card>
-          <CardContent className="py-4 text-neutral-500 text-sm">
+          <CardContent className="py-4 text-muted text-sm">
             Entity list unavailable: {entities.error}
           </CardContent>
         </Card>
@@ -187,39 +187,41 @@ function GraphPage() {
           </CardHeader>
           <CardContent>
             {traversalLoading ? (
-              <p className="text-neutral-500 text-sm">Loading…</p>
+              <p className="text-muted text-sm">Loading…</p>
             ) : traversal === null ? (
-              <p className="text-neutral-500 text-sm">No traversal data.</p>
+              <p className="text-muted text-sm">No traversal data.</p>
             ) : traversal.paths.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No neighbors found.</p>
+              <p className="text-muted text-sm">No neighbors found.</p>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-neutral-400">
-                    <th className="pb-1 font-medium">ID</th>
-                    <th className="pb-1 font-medium">Relation</th>
-                    <th className="pb-1 font-medium">Depth</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {traversal.paths.map((p, i) => {
-                    const otherId = p.from_id === selected.id ? p.to_id : p.from_id
-                    const other = baseList.find((e) => e.id === otherId)
-                    return (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: paths have no stable key
-                      <tr key={i} className="border-neutral-100 border-t">
-                        <td className="py-1.5 font-mono text-xs">
-                          {other?.name ?? otherId.slice(0, 8)}
-                        </td>
-                        <td className="py-1.5">
-                          <Badge variant="outline">{p.link_type}</Badge>
-                        </td>
-                        <td className="py-1.5 text-neutral-600">{p.depth}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-faint">
+                      <th className="pb-1 font-medium">ID</th>
+                      <th className="pb-1 font-medium">Relation</th>
+                      <th className="pb-1 font-medium">Depth</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traversal.paths.map((p, i) => {
+                      const otherId = p.from_id === selected.id ? p.to_id : p.from_id
+                      const other = baseList.find((e) => e.id === otherId)
+                      return (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: paths have no stable key
+                        <tr key={i} className="border-border border-t">
+                          <td className="py-1.5 font-mono text-xs">
+                            {other?.name ?? otherId.slice(0, 8)}
+                          </td>
+                          <td className="py-1.5">
+                            <Badge variant="outline">{p.link_type}</Badge>
+                          </td>
+                          <td className="py-1.5 text-muted">{p.depth}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -274,7 +276,7 @@ function CurateCard() {
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <form onSubmit={onAddTag} className="flex flex-col gap-2">
-          <p className="font-medium text-neutral-500 text-sm">Add tag to a page</p>
+          <p className="font-medium text-muted text-sm">Add tag to a page</p>
           <div className="flex flex-wrap gap-2">
             <Input
               value={tagTarget}
@@ -297,11 +299,11 @@ function CurateCard() {
               {tagBusy ? "Adding…" : "Add tag"}
             </Button>
           </div>
-          {tagMsg !== null && <p className="text-neutral-600 text-sm">{tagMsg}</p>}
+          {tagMsg !== null && <p className="text-muted text-sm">{tagMsg}</p>}
         </form>
 
         <form onSubmit={onAddLink} className="flex flex-col gap-2">
-          <p className="font-medium text-neutral-500 text-sm">Add link between pages</p>
+          <p className="font-medium text-muted text-sm">Add link between pages</p>
           <div className="flex flex-wrap gap-2">
             <Input
               value={from}
@@ -328,7 +330,7 @@ function CurateCard() {
               {linkBusy ? "Linking…" : "Add link"}
             </Button>
           </div>
-          {linkMsg !== null && <p className="text-neutral-600 text-sm">{linkMsg}</p>}
+          {linkMsg !== null && <p className="text-muted text-sm">{linkMsg}</p>}
         </form>
       </CardContent>
     </Card>
@@ -343,34 +345,36 @@ function EntityTable({
   onSelect: (entity: Entity) => void
 }) {
   if (entities.length === 0) {
-    return <p className="text-neutral-500 text-sm">No entities found.</p>
+    return <p className="text-muted text-sm">No entities found.</p>
   }
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-neutral-400">
-          <th className="pb-1 font-medium">Name</th>
-          <th className="pb-1 font-medium">Kind</th>
-          <th className="pb-1 font-medium">Mentions</th>
-          <th className="pb-1 font-medium" />
-        </tr>
-      </thead>
-      <tbody>
-        {entities.map((e) => (
-          <tr key={e.id} className="border-neutral-100 border-t">
-            <td className="py-1.5 font-mono text-xs">{e.name}</td>
-            <td className="py-1.5">
-              <Badge variant="outline">{e.kind}</Badge>
-            </td>
-            <td className="py-1.5 text-neutral-600">{e.mentionCount}</td>
-            <td className="py-1.5">
-              <Button variant="ghost" size="sm" onClick={() => onSelect(e)}>
-                Explore
-              </Button>
-            </td>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-faint">
+            <th className="pb-1 font-medium">Name</th>
+            <th className="pb-1 font-medium">Kind</th>
+            <th className="pb-1 font-medium">Mentions</th>
+            <th className="pb-1 font-medium" />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {entities.map((e) => (
+            <tr key={e.id} className="border-border border-t">
+              <td className="py-1.5 font-mono text-xs">{e.name}</td>
+              <td className="py-1.5">
+                <Badge variant="outline">{e.kind}</Badge>
+              </td>
+              <td className="py-1.5 text-muted">{e.mentionCount}</td>
+              <td className="py-1.5">
+                <Button variant="ghost" size="sm" onClick={() => onSelect(e)}>
+                  Explore
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

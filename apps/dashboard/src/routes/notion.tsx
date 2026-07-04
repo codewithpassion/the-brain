@@ -104,7 +104,7 @@ function NotionPage() {
         </header>
         <Card>
           <CardContent className="py-6">
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               {connections.error.includes("403") || connections.error.includes("admin")
                 ? "Admin or owner access is required to manage Notion connections."
                 : `Unavailable: ${connections.error}`}
@@ -122,7 +122,7 @@ function NotionPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Notion</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Connect a Notion workspace to sync its pages into the Brain. You choose which pages and
           databases to share with the integration inside Notion — only shared content is visible.
           Admin only. Disconnecting stops all sync immediately. Page edits sync on a poll; page
@@ -132,12 +132,12 @@ function NotionPage() {
 
       {banner && (
         <div
-          className={`rounded-md border px-4 py-3 text-sm ${
+          className={`rounded-ui border px-4 py-3 text-sm ${
             banner.tone === "ok"
-              ? "border-green-200 bg-green-50 text-green-700"
+              ? "border-ok/25 bg-ok/10 text-ok"
               : banner.tone === "warn"
-                ? "border-amber-200 bg-amber-50 text-amber-700"
-                : "border-red-200 bg-red-50 text-red-700"
+                ? "border-warn/25 bg-warn/12 text-warn"
+                : "border-danger/25 bg-danger/10 text-danger"
           }`}
         >
           {banner.text}
@@ -145,7 +145,7 @@ function NotionPage() {
       )}
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+        <div className="rounded-ui border border-danger/25 bg-danger/10 px-4 py-3 text-danger text-sm">
           {error}
         </div>
       )}
@@ -156,7 +156,7 @@ function NotionPage() {
             <CardTitle>Confirm connection</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <p className="text-neutral-600 text-sm">
+            <p className="text-muted text-sm">
               Connect Notion workspace{" "}
               <span className="font-medium">{workspace ?? "(unknown)"}</span> to this org? Only
               confirm if you just authorized this workspace — otherwise cancel.
@@ -166,14 +166,14 @@ function NotionPage() {
                 type="button"
                 disabled={confirming}
                 onClick={handleConfirm}
-                className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+                className="rounded bg-accent px-3 py-1.5 text-sm text-accent-ink hover:opacity-90 disabled:opacity-50"
               >
                 {confirming ? "Confirming…" : "Confirm"}
               </button>
               <button
                 type="button"
                 onClick={cancelConfirm}
-                className="rounded border border-neutral-200 px-3 py-1.5 text-neutral-600 text-sm hover:bg-neutral-50"
+                className="rounded border border-border px-3 py-1.5 text-muted text-sm hover:bg-raised"
               >
                 Cancel
               </button>
@@ -191,7 +191,7 @@ function NotionPage() {
             type="button"
             disabled={connecting}
             onClick={handleConnect}
-            className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+            className="rounded bg-accent px-3 py-1.5 text-sm text-accent-ink hover:opacity-90 disabled:opacity-50"
           >
             {connecting ? "Starting…" : "Connect Notion"}
           </button>
@@ -204,34 +204,34 @@ function NotionPage() {
         </CardHeader>
         <CardContent>
           {active.length === 0 ? (
-            <p className="text-neutral-500 text-sm">No connected workspaces yet.</p>
+            <p className="text-muted text-sm">No connected workspaces yet.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-neutral-200 border-b text-left text-neutral-500">
-                  <th className="py-2 font-medium">Workspace</th>
-                  <th className="py-2 font-medium">Connected</th>
-                  <th className="py-2 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {active.map((c) => (
-                  <tr key={c.workspaceId} className="border-neutral-100 border-b">
-                    <td className="py-2">{c.workspaceName ?? c.workspaceId}</td>
-                    <td className="py-2 text-neutral-500">
-                      {new Date(c.createdAt).toLocaleString()}
-                    </td>
-                    <td className="py-2 text-right">
-                      <DisconnectButton
-                        workspaceId={c.workspaceId}
-                        onError={setError}
-                        onRefresh={refresh}
-                      />
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-border border-b text-left text-muted">
+                    <th className="py-2 font-medium">Workspace</th>
+                    <th className="py-2 font-medium">Connected</th>
+                    <th className="py-2 font-medium text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {active.map((c) => (
+                    <tr key={c.workspaceId} className="border-border border-b">
+                      <td className="py-2">{c.workspaceName ?? c.workspaceId}</td>
+                      <td className="py-2 text-muted">{new Date(c.createdAt).toLocaleString()}</td>
+                      <td className="py-2 text-right">
+                        <DisconnectButton
+                          workspaceId={c.workspaceId}
+                          onError={setError}
+                          onRefresh={refresh}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -254,7 +254,7 @@ function DisconnectButton({
   if (confirming) {
     return (
       <span className="flex items-center justify-end gap-1 text-xs">
-        <span className="text-neutral-500">Disconnect?</span>
+        <span className="text-muted">Disconnect?</span>
         <button
           type="button"
           disabled={working}
@@ -270,14 +270,14 @@ function DisconnectButton({
               await onRefresh()
             }
           }}
-          className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+          className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
         >
           {working ? "…" : "Yes"}
         </button>
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+          className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
         >
           No
         </button>
@@ -289,7 +289,7 @@ function DisconnectButton({
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded border border-red-200 px-2 py-0.5 text-red-600 text-xs hover:bg-red-50"
+      className="rounded border border-danger/25 px-2 py-0.5 text-danger text-xs hover:bg-danger/10"
     >
       Disconnect
     </button>

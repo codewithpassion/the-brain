@@ -32,7 +32,7 @@ function StatsPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Admin / Stats</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Cost ceiling enforcement, memberships, and scale headroom for the active tenant.
         </p>
       </header>
@@ -84,7 +84,7 @@ function SpendCard({
             </div>
           </div>
         ) : (
-          <p className="text-neutral-500 text-sm">Unavailable: {spend.error}</p>
+          <p className="text-muted text-sm">Unavailable: {spend.error}</p>
         )}
       </CardContent>
     </Card>
@@ -108,7 +108,7 @@ function StatsCountsCard({ stats }: { stats: Maybe<BrainStats> }) {
             <Row label="Facts" value={stats.data.facts.toLocaleString()} />
           </div>
         ) : (
-          <p className="text-neutral-500 text-sm">Unavailable: {stats.error}</p>
+          <p className="text-muted text-sm">Unavailable: {stats.error}</p>
         )}
       </CardContent>
     </Card>
@@ -123,30 +123,32 @@ function MembersCard({ members }: { members: Maybe<MembershipsResult> }) {
       </CardHeader>
       <CardContent>
         {members.ok ? (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-neutral-400">
-                <th className="pb-1 font-medium">User</th>
-                <th className="pb-1 font-medium">Role</th>
-                <th className="pb-1 font-medium">Team</th>
-                <th className="pb-1 font-medium">Scopes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.data.memberships.map((m) => (
-                <tr key={m.userId} className="border-neutral-100 border-t">
-                  <td className="py-1.5 font-mono text-xs">{m.userId}</td>
-                  <td className="py-1.5">
-                    <Badge variant="outline">{m.role}</Badge>
-                  </td>
-                  <td className="py-1.5 text-neutral-600">{m.teamId ?? "—"}</td>
-                  <td className="py-1.5 text-neutral-600">{m.allowedScopes ?? "*"}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-faint">
+                  <th className="pb-1 font-medium">User</th>
+                  <th className="pb-1 font-medium">Role</th>
+                  <th className="pb-1 font-medium">Team</th>
+                  <th className="pb-1 font-medium">Scopes</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {members.data.memberships.map((m) => (
+                  <tr key={m.userId} className="border-border border-t">
+                    <td className="py-1.5 font-mono text-xs">{m.userId}</td>
+                    <td className="py-1.5">
+                      <Badge variant="outline">{m.role}</Badge>
+                    </td>
+                    <td className="py-1.5 text-muted">{m.teamId ?? "—"}</td>
+                    <td className="py-1.5 text-muted">{m.allowedScopes ?? "*"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <p className="text-neutral-500 text-sm">Unavailable: {members.error}</p>
+          <p className="text-muted text-sm">Unavailable: {members.error}</p>
         )}
       </CardContent>
     </Card>
@@ -156,7 +158,7 @@ function MembersCard({ members }: { members: Maybe<MembershipsResult> }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
-      <span className="text-neutral-500">{label}</span>
+      <span className="text-muted">{label}</span>
       <span className="font-medium">{value}</span>
     </div>
   )

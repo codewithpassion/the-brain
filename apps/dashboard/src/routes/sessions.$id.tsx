@@ -34,7 +34,7 @@ function SessionDetailPage() {
     return (
       <div className="flex flex-col gap-6">
         <BackLink />
-        <p className="text-red-600 text-sm">Error loading session: {context.error}</p>
+        <p className="text-danger text-sm">Error loading session: {context.error}</p>
       </div>
     )
   }
@@ -47,7 +47,7 @@ function SessionDetailPage() {
 
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Session</h1>
-        <p className="mt-0.5 font-mono text-neutral-500 text-sm">{id}</p>
+        <p className="mt-0.5 font-mono text-muted text-sm">{id}</p>
       </header>
 
       {/* ── Turns transcript ── */}
@@ -57,22 +57,19 @@ function SessionDetailPage() {
         </CardHeader>
         <CardContent>
           {ctx.turns.length === 0 ? (
-            <p className="text-neutral-500 text-sm">No turns recorded.</p>
+            <p className="text-muted text-sm">No turns recorded.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {ctx.turns.map((t) => (
-                <div
-                  key={t.idx}
-                  className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0"
-                >
+                <div key={t.idx} className="border-border border-b pb-3 last:border-0 last:pb-0">
                   <div className="mb-1 flex items-center gap-2">
-                    <span className="font-mono text-neutral-400 text-xs">#{t.idx}</span>
+                    <span className="font-mono text-faint text-xs">#{t.idx}</span>
                     <Badge variant={roleVariant(t.role)}>{t.role}</Badge>
                   </div>
                   {t.content !== null ? (
-                    <pre className="whitespace-pre-wrap text-neutral-700 text-sm">{t.content}</pre>
+                    <pre className="whitespace-pre-wrap text-muted text-sm">{t.content}</pre>
                   ) : (
-                    <span className="text-neutral-300 text-sm">— no content —</span>
+                    <span className="text-faint text-sm">— no content —</span>
                   )}
                 </div>
               ))}
@@ -88,28 +85,30 @@ function SessionDetailPage() {
         </CardHeader>
         <CardContent>
           {ctx.facts.length === 0 ? (
-            <p className="text-neutral-500 text-sm">No facts visible to this session.</p>
+            <p className="text-muted text-sm">No facts visible to this session.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-neutral-400">
-                  <th className="pb-1 font-medium">ID</th>
-                  <th className="pb-1 font-medium">Kind</th>
-                  <th className="pb-1 font-medium">Fact</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ctx.facts.map((f) => (
-                  <tr key={f.id} className="border-neutral-100 border-t">
-                    <td className="py-1.5 font-mono text-xs text-neutral-400">{f.id}</td>
-                    <td className="py-1.5">
-                      <Badge variant="outline">{f.kind}</Badge>
-                    </td>
-                    <td className="py-1.5 text-neutral-700">{f.fact}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-faint">
+                    <th className="pb-1 font-medium">ID</th>
+                    <th className="pb-1 font-medium">Kind</th>
+                    <th className="pb-1 font-medium">Fact</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {ctx.facts.map((f) => (
+                    <tr key={f.id} className="border-border border-t">
+                      <td className="py-1.5 font-mono text-xs text-faint">{f.id}</td>
+                      <td className="py-1.5">
+                        <Badge variant="outline">{f.kind}</Badge>
+                      </td>
+                      <td className="py-1.5 text-muted">{f.fact}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -123,10 +122,7 @@ function SessionDetailPage() {
           <CardContent>
             <div className="flex flex-col gap-3">
               {ctx.memories.map((m) => (
-                <div
-                  key={m.slug}
-                  className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0"
-                >
+                <div key={m.slug} className="border-border border-b pb-3 last:border-0 last:pb-0">
                   <div className="flex items-center gap-2 mb-1">
                     <Link
                       to="/memory/$"
@@ -136,9 +132,9 @@ function SessionDetailPage() {
                       {m.slug}
                     </Link>
                     <Badge variant="secondary">{m.type}</Badge>
-                    <span className="text-neutral-400 text-xs">v{m.version}</span>
+                    <span className="text-faint text-xs">v{m.version}</span>
                   </div>
-                  {m.title !== "" && <p className="text-neutral-600 text-sm">{m.title}</p>}
+                  {m.title !== "" && <p className="text-muted text-sm">{m.title}</p>}
                 </div>
               ))}
             </div>
@@ -151,7 +147,7 @@ function SessionDetailPage() {
 
 function BackLink() {
   return (
-    <Link to="/sessions" className="text-neutral-500 text-sm hover:text-neutral-800">
+    <Link to="/sessions" className="text-muted text-sm hover:text-ink">
       ← Sessions
     </Link>
   )

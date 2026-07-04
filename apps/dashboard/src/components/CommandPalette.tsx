@@ -18,6 +18,12 @@ interface Cmd {
 
 const NEW_PAGE_SLUG = "untitled"
 
+/** Programmatic open (the sidebar's "Jump to…" button — no keyboard needed on mobile). */
+const OPEN_EVENT = "brain:palette"
+export const openPalette = (): void => {
+  window.dispatchEvent(new Event(OPEN_EVENT))
+}
+
 export function CommandPalette() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -36,8 +42,13 @@ export function CommandPalette() {
       }
       if (e.key === "Escape") setOpen(false)
     }
+    const onOpenEvent = () => setOpen(true)
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener(OPEN_EVENT, onOpenEvent)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener(OPEN_EVENT, onOpenEvent)
+    }
   }, [])
 
   // Load the page list once when the palette first opens.
@@ -152,16 +163,15 @@ export function CommandPalette() {
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop; ⌘K/Esc handled globally
     // biome-ignore lint/a11y/useKeyWithClickEvents: click-to-dismiss backdrop; Esc closes globally
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/30 pt-[15vh]"
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/50 pt-[15vh] backdrop-blur-[2px]"
       onClick={() => setOpen(false)}
     >
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: dialog surface; stops backdrop close */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: click only stops propagation; keys are on the input */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-[36rem] max-w-[90vw] overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-2xl"
+        className="w-[36rem] max-w-[92vw] overflow-hidden rounded-ui border border-border bg-surface shadow-pop"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -169,12 +179,12 @@ export function CommandPalette() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onNavKey}
-          placeholder="Jump to a page, entity, or document…  (New page, Graph)"
-          className="w-full border-neutral-100 border-b px-4 py-3 text-sm focus:outline-none"
+          placeholder="Jump to a page, entity, or document…"
+          className="w-full border-border border-b bg-transparent px-4 py-3 text-ink text-sm placeholder:text-faint focus:outline-none"
         />
         <div className="max-h-[50vh] overflow-y-auto py-1">
           {items.length === 0 ? (
-            <div className="px-4 py-3 text-neutral-400 text-sm">No matches.</div>
+            <div className="px-4 py-3 text-faint text-sm">No matches.</div>
           ) : (
             items.map((cmd, i) => (
               <button
@@ -183,14 +193,12 @@ export function CommandPalette() {
                 onMouseEnter={() => setSelected(i)}
                 onClick={() => go(cmd)}
                 className={`flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm ${
-                  i === selected
-                    ? "bg-neutral-900 text-white"
-                    : "text-neutral-700 hover:bg-neutral-100"
+                  i === selected ? "bg-raised text-ink" : "text-muted hover:bg-raised/60"
                 }`}
               >
                 <span className="truncate">{cmd.label}</span>
                 <span
-                  className={`shrink-0 text-xs ${i === selected ? "text-neutral-300" : "text-neutral-400"}`}
+                  className={`shrink-0 font-mono text-xs ${i === selected ? "text-accent" : "text-faint"}`}
                 >
                   {cmd.hint}
                 </span>

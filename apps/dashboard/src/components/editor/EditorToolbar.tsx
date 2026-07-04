@@ -5,11 +5,11 @@
 import type { Editor } from "@tiptap/react"
 
 const btn = (active: boolean): string =>
-  `rounded px-2 py-1 text-sm ${active ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"}`
+  `rounded px-2 py-1 text-sm ${active ? "bg-raised text-ink" : "text-muted hover:bg-raised"}`
 
 export function EditorToolbar({ editor }: { editor: Editor }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 border-neutral-200 border-b px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-1 border-border border-b px-2 py-1.5">
       <button
         type="button"
         className={btn(editor.isActive("bold"))}
@@ -31,7 +31,7 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
       >
         <span className="font-mono">{"</>"}</span>
       </button>
-      <span className="mx-1 h-4 w-px bg-neutral-200" />
+      <span className="mx-1 h-4 w-px bg-border" />
       <button
         type="button"
         className={btn(editor.isActive("heading", { level: 1 }))}
@@ -46,7 +46,7 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
       >
         H2
       </button>
-      <span className="mx-1 h-4 w-px bg-neutral-200" />
+      <span className="mx-1 h-4 w-px bg-border" />
       <button
         type="button"
         className={btn(editor.isActive("bulletList"))}

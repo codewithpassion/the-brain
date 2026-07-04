@@ -50,7 +50,7 @@ function SearchPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Search / Think</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Ask a question — the brain retrieves cited evidence and synthesizes a grounded answer.
         </p>
       </header>
@@ -75,13 +75,13 @@ function SearchPage() {
             aria-label="Path namespace"
             className="max-w-72 h-8 text-sm"
           />
-          {namespace && <span className="text-neutral-400 text-xs">scoped to {namespace}</span>}
+          {namespace && <span className="text-faint text-xs">scoped to {namespace}</span>}
         </div>
       </form>
 
       {error !== null && (
         <Card>
-          <CardContent className="py-4 text-red-600 text-sm">Request failed: {error}</CardContent>
+          <CardContent className="py-4 text-danger text-sm">Request failed: {error}</CardContent>
         </Card>
       )}
 
@@ -101,7 +101,7 @@ function ThinkView({ result }: { result: ThinkResult }) {
           {result.answer.length > 0 ? (
             <p className="whitespace-pre-wrap text-sm leading-relaxed">{result.answer}</p>
           ) : (
-            <p className="text-neutral-500 text-sm">No synthesized answer was produced.</p>
+            <p className="text-muted text-sm">No synthesized answer was produced.</p>
           )}
           {result.warnings.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -121,15 +121,15 @@ function ThinkView({ result }: { result: ThinkResult }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {result.evidence.length === 0 && (
-            <p className="text-neutral-500 text-sm">No matching evidence.</p>
+            <p className="text-muted text-sm">No matching evidence.</p>
           )}
           {result.evidence.map((hit) => (
-            <div key={hit.id} className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0">
+            <div key={hit.id} className="border-border border-b pb-3 last:border-0 last:pb-0">
               <div className="flex items-center gap-2">
                 <Badge variant="outline">{hit.slug}</Badge>
-                <span className="text-neutral-400 text-xs">score {hit.score.toFixed(4)}</span>
+                <span className="text-faint text-xs">score {hit.score.toFixed(4)}</span>
               </div>
-              <p className="mt-1.5 text-neutral-700 text-sm">{hit.snippet}</p>
+              <p className="mt-1.5 text-muted text-sm">{hit.snippet}</p>
             </div>
           ))}
         </CardContent>
@@ -156,7 +156,7 @@ function ThinkView({ result }: { result: ThinkResult }) {
             <CardTitle>Gaps</CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="list-disc pl-5 text-neutral-600 text-sm">
+            <ul className="list-disc pl-5 text-muted text-sm">
               {result.gaps.map((g) => (
                 <li key={g}>{g}</li>
               ))}

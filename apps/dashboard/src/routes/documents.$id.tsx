@@ -54,7 +54,7 @@ function DocumentDetailPage() {
     return (
       <div className="flex flex-col gap-6">
         <BackLink />
-        <p className="text-red-600 text-sm">Error loading document: {initialDoc.error}</p>
+        <p className="text-danger text-sm">Error loading document: {initialDoc.error}</p>
       </div>
     )
   }
@@ -129,19 +129,19 @@ function DocumentDetailPage() {
             size="sm"
             onClick={handleDelete}
             disabled={deleting}
-            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+            className="text-danger hover:bg-danger/10 hover:text-danger"
           >
             {deleting ? "Deleting…" : "Delete"}
           </Button>
         </div>
       </div>
 
-      {deleteError !== null && <p className="text-red-600 text-sm">Delete failed: {deleteError}</p>}
+      {deleteError !== null && <p className="text-danger text-sm">Delete failed: {deleteError}</p>}
 
       {/* ── Reprocess banner ── */}
       {needsReprocess && (
-        <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-amber-800 text-sm">
+        <div className="flex items-center justify-between rounded-ui border border-warn/25 bg-warn/12 px-4 py-3">
+          <p className="text-warn text-sm">
             This document has status <strong>{doc.status}</strong> and may not be fully indexed.
           </p>
           <Button
@@ -154,7 +154,7 @@ function DocumentDetailPage() {
           </Button>
         </div>
       )}
-      {reprocessNotice !== null && <p className="text-neutral-600 text-sm">{reprocessNotice}</p>}
+      {reprocessNotice !== null && <p className="text-muted text-sm">{reprocessNotice}</p>}
 
       {/* ── Header ── */}
       <header>
@@ -164,9 +164,7 @@ function DocumentDetailPage() {
           </h1>
           <Badge variant={docStatusVariant(doc.status)}>{doc.status}</Badge>
         </div>
-        {doc.title !== "" && (
-          <p className="mt-0.5 font-mono text-neutral-500 text-sm">{doc.slug}</p>
-        )}
+        {doc.title !== "" && <p className="mt-0.5 font-mono text-muted text-sm">{doc.slug}</p>}
       </header>
 
       {/* ── Metadata ── */}
@@ -182,7 +180,7 @@ function DocumentDetailPage() {
             {doc.scope !== null && <MetaRow label="Scope" value={doc.scope} mono />}
             <MetaRow label="Content type" value={doc.contentType} mono />
             <MetaRow label="Chunks" value={String(doc.chunkCount)} />
-            <dt className="font-medium text-neutral-500">Tags</dt>
+            <dt className="font-medium text-muted">Tags</dt>
             <dd>
               {doc.tags.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
@@ -193,7 +191,7 @@ function DocumentDetailPage() {
                   ))}
                 </div>
               ) : (
-                <span className="text-neutral-300">—</span>
+                <span className="text-faint">—</span>
               )}
             </dd>
             <MetaRow label="Created" value={doc.createdAt} />
@@ -209,7 +207,7 @@ function DocumentDetailPage() {
             {reprocessing ? "Queuing…" : "Reprocess"}
           </Button>
           {reprocessNotice !== null && (
-            <span className="text-neutral-600 text-sm">{reprocessNotice}</span>
+            <span className="text-muted text-sm">{reprocessNotice}</span>
           )}
         </div>
       )}
@@ -226,10 +224,10 @@ function DocumentDetailPage() {
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
                 rows={20}
-                className="w-full rounded-md border border-neutral-200 bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                className="w-full rounded-ui border border-border bg-bg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/60"
               />
               {saveError !== null && (
-                <p className="text-red-600 text-sm">Save failed: {saveError}</p>
+                <p className="text-danger text-sm">Save failed: {saveError}</p>
               )}
               <div className="flex gap-2">
                 <Button onClick={handleSave} disabled={saving}>
@@ -243,7 +241,7 @@ function DocumentDetailPage() {
           ) : doc.body !== "" ? (
             <Markdown body={doc.body} pending={[]} />
           ) : (
-            <p className="text-neutral-300 text-sm">No body content.</p>
+            <p className="text-faint text-sm">No body content.</p>
           )}
         </CardContent>
       </Card>
@@ -253,7 +251,7 @@ function DocumentDetailPage() {
 
 function BackLink() {
   return (
-    <Link to="/documents" className="text-neutral-500 text-sm hover:text-neutral-800">
+    <Link to="/documents" className="text-muted text-sm hover:text-ink">
       ← Documents
     </Link>
   )
@@ -262,10 +260,8 @@ function BackLink() {
 function MetaRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <>
-      <dt className="font-medium text-neutral-500">{label}</dt>
-      <dd className={mono === true ? "font-mono text-xs text-neutral-700" : "text-neutral-700"}>
-        {value}
-      </dd>
+      <dt className="font-medium text-muted">{label}</dt>
+      <dd className={mono === true ? "font-mono text-xs text-muted" : "text-muted"}>{value}</dd>
     </>
   )
 }

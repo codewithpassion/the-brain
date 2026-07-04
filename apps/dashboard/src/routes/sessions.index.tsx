@@ -57,7 +57,7 @@ function SessionsPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Sessions</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Active and past conversation sessions, plus recalled facts.
         </p>
       </header>
@@ -69,47 +69,57 @@ function SessionsPage() {
         <CardContent>
           {sessions.ok ? (
             sessions.data.sessions.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No sessions found.</p>
+              <p className="text-muted text-sm">No sessions found.</p>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-neutral-400">
-                    <th className="pb-1 font-medium">Client</th>
-                    <th className="pb-1 font-medium">Title</th>
-                    <th className="pb-1 font-medium">Status</th>
-                    <th className="pb-1 font-medium">Turns</th>
-                    <th className="pb-1 font-medium">User</th>
-                    <th className="pb-1 font-medium">Last activity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.data.sessions.map((s) => (
-                    <tr key={s.id} className="border-neutral-100 border-t">
-                      <td className="py-1.5 font-mono text-xs">
-                        <Link to="/sessions/$id" params={{ id: s.id }} className="hover:underline">
-                          {s.client}
-                        </Link>
-                      </td>
-                      <td className="py-1.5 text-neutral-700">
-                        <Link to="/sessions/$id" params={{ id: s.id }} className="hover:underline">
-                          {s.title !== "" ? s.title : "—"}
-                        </Link>
-                      </td>
-                      <td className="py-1.5">
-                        <Badge variant={sessionStatusVariant(s.status)}>{s.status}</Badge>
-                      </td>
-                      <td className="py-1.5 text-neutral-600">{s.turnCount}</td>
-                      <td className="py-1.5 font-mono text-xs text-neutral-500" title={s.userId}>
-                        {s.userId.slice(0, 12)}…
-                      </td>
-                      <td className="py-1.5 text-neutral-600">{s.lastActivityAt}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-faint">
+                      <th className="pb-1 font-medium">Client</th>
+                      <th className="pb-1 font-medium">Title</th>
+                      <th className="pb-1 font-medium">Status</th>
+                      <th className="pb-1 font-medium">Turns</th>
+                      <th className="pb-1 font-medium">User</th>
+                      <th className="pb-1 font-medium">Last activity</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {sessions.data.sessions.map((s) => (
+                      <tr key={s.id} className="border-border border-t">
+                        <td className="py-1.5 font-mono text-xs">
+                          <Link
+                            to="/sessions/$id"
+                            params={{ id: s.id }}
+                            className="hover:underline"
+                          >
+                            {s.client}
+                          </Link>
+                        </td>
+                        <td className="py-1.5 text-muted">
+                          <Link
+                            to="/sessions/$id"
+                            params={{ id: s.id }}
+                            className="hover:underline"
+                          >
+                            {s.title !== "" ? s.title : "—"}
+                          </Link>
+                        </td>
+                        <td className="py-1.5">
+                          <Badge variant={sessionStatusVariant(s.status)}>{s.status}</Badge>
+                        </td>
+                        <td className="py-1.5 text-muted">{s.turnCount}</td>
+                        <td className="py-1.5 font-mono text-xs text-muted" title={s.userId}>
+                          {s.userId.slice(0, 12)}…
+                        </td>
+                        <td className="py-1.5 text-muted">{s.lastActivityAt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
           ) : (
-            <p className="text-neutral-500 text-sm">Unavailable: {sessions.error}</p>
+            <p className="text-muted text-sm">Unavailable: {sessions.error}</p>
           )}
         </CardContent>
       </Card>
@@ -131,21 +141,18 @@ function SessionsPage() {
             </Button>
           </form>
 
-          {recallError !== null && <p className="text-red-600 text-sm">Error: {recallError}</p>}
+          {recallError !== null && <p className="text-danger text-sm">Error: {recallError}</p>}
 
           {facts !== null &&
             (facts.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No facts recalled.</p>
+              <p className="text-muted text-sm">No facts recalled.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {facts.map((f) => (
-                  <div
-                    key={f.id}
-                    className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0"
-                  >
-                    <p className="text-neutral-700 text-sm">{f.content}</p>
+                  <div key={f.id} className="border-border border-b pb-3 last:border-0 last:pb-0">
+                    <p className="text-muted text-sm">{f.content}</p>
                     {f.score !== undefined && (
-                      <span className="text-neutral-400 text-xs">score {f.score.toFixed(4)}</span>
+                      <span className="text-faint text-xs">score {f.score.toFixed(4)}</span>
                     )}
                   </div>
                 ))}

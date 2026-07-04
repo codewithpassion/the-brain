@@ -19,7 +19,7 @@ function WikiHome() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="font-semibold text-2xl tracking-tight">Wiki</h1>
-        <p className="mt-1 text-neutral-500 text-sm">
+        <p className="mt-1 text-muted text-sm">
           Browse pages, entities, and memory. {pages.length} page{pages.length === 1 ? "" : "s"} in
           this tenant.
         </p>
@@ -31,23 +31,23 @@ function WikiHome() {
         </CardHeader>
         <CardContent>
           {recent.length === 0 ? (
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               No pages yet. Agents and the dream engine populate the wiki as they work.
             </p>
           ) : (
-            <ul className="flex flex-col divide-y divide-neutral-100">
+            <ul className="flex flex-col divide-y divide-border">
               {recent.map((p) => (
                 <li key={p.slug} className="flex items-center gap-3 py-2">
                   <Link
                     to="/wiki/$"
                     params={{ _splat: p.slug }}
-                    className="min-w-0 flex-1 truncate text-blue-700 text-sm hover:underline"
+                    className="min-w-0 flex-1 truncate text-accent text-sm hover:underline"
                     title={p.slug}
                   >
                     {p.title || p.slug}
                   </Link>
                   <Badge variant="outline">{p.type}</Badge>
-                  <span className="hidden shrink-0 text-neutral-400 text-xs sm:inline">
+                  <span className="hidden shrink-0 text-faint text-xs sm:inline">
                     {p.updatedAt.slice(0, 10)}
                   </span>
                 </li>

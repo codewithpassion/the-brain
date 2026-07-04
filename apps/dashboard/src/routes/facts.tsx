@@ -93,7 +93,7 @@ function FactsPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Facts</h1>
-        <p className="text-neutral-500 text-sm">Hot-memory facts extracted from sessions.</p>
+        <p className="text-muted text-sm">Hot-memory facts extracted from sessions.</p>
       </header>
 
       <Card>
@@ -104,7 +104,7 @@ function FactsPage() {
           {/* Filter controls */}
           <form onSubmit={onFilterSubmit} className="flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1 min-w-48">
-              <label htmlFor="fact-query" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="fact-query" className="text-muted text-xs font-medium">
                 Keyword
               </label>
               <Input
@@ -116,7 +116,7 @@ function FactsPage() {
               />
             </div>
             <div className="flex flex-col gap-1 min-w-36">
-              <label htmlFor="fact-entity" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="fact-entity" className="text-muted text-xs font-medium">
                 Entity slug
               </label>
               <Input
@@ -128,7 +128,7 @@ function FactsPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="fact-since" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="fact-since" className="text-muted text-xs font-medium">
                 Since
               </label>
               <Input
@@ -139,7 +139,7 @@ function FactsPage() {
                 className="h-8 text-sm"
               />
             </div>
-            <label className="flex h-8 items-center gap-1.5 text-neutral-600 text-xs">
+            <label className="flex h-8 items-center gap-1.5 text-muted text-xs">
               <input
                 type="checkbox"
                 checked={includeSuperseded}
@@ -157,23 +157,23 @@ function FactsPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="h-8 px-3 text-sm text-neutral-500 hover:text-neutral-800"
+                className="h-8 px-3 text-sm text-muted hover:text-ink"
               >
                 Clear
               </button>
             )}
           </form>
 
-          {!facts.ok && <p className="text-neutral-500 text-sm">Unavailable: {facts.error}</p>}
+          {!facts.ok && <p className="text-muted text-sm">Unavailable: {facts.error}</p>}
 
           {facts.ok &&
             (factList.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No facts found.</p>
+              <p className="text-muted text-sm">No facts found.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-neutral-400">
+                    <tr className="text-left text-faint">
                       <th className="pb-1 font-medium">ID</th>
                       <th className="pb-1 font-medium">Kind</th>
                       <th className="pb-1 font-medium">Fact</th>
@@ -182,20 +182,20 @@ function FactsPage() {
                   </thead>
                   <tbody>
                     {factList.map((f) => (
-                      <tr key={f.id} className="border-neutral-100 border-t">
-                        <td className="py-1.5 font-mono text-xs text-neutral-400">{f.id}</td>
+                      <tr key={f.id} className="border-border border-t">
+                        <td className="py-1.5 font-mono text-xs text-faint">{f.id}</td>
                         <td className="py-1.5">
                           <Badge variant="outline">{f.kind}</Badge>
                         </td>
-                        <td className="py-1.5 text-neutral-700">
+                        <td className="py-1.5 text-muted">
                           {f.fact}
                           {f.consolidatedInto != null && (
-                            <Badge variant="outline" className="ml-2 text-neutral-400">
+                            <Badge variant="outline" className="ml-2 text-faint">
                               consolidated → #{f.consolidatedInto}
                             </Badge>
                           )}
                           {f.supersededBy != null && (
-                            <Badge variant="outline" className="ml-2 text-neutral-400">
+                            <Badge variant="outline" className="ml-2 text-faint">
                               superseded → #{f.supersededBy}
                             </Badge>
                           )}
@@ -225,7 +225,7 @@ function ForgetButton({ factId, onForgotten }: { factId: number; onForgotten: ()
   if (confirming) {
     return (
       <span className="flex items-center gap-1 text-xs">
-        <span className="text-neutral-500">Forget?</span>
+        <span className="text-muted">Forget?</span>
         <button
           type="button"
           disabled={forgetting}
@@ -241,14 +241,14 @@ function ForgetButton({ factId, onForgotten }: { factId: number; onForgotten: ()
               setForgetting(false)
             }
           }}
-          className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+          className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
         >
           {forgetting ? "…" : "Yes"}
         </button>
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+          className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
         >
           No
         </button>
@@ -260,7 +260,7 @@ function ForgetButton({ factId, onForgotten }: { factId: number; onForgotten: ()
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded border border-red-200 px-2 py-0.5 text-red-600 text-xs hover:bg-red-50"
+      className="rounded border border-danger/25 px-2 py-0.5 text-danger text-xs hover:bg-danger/10"
     >
       Forget
     </button>

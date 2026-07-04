@@ -91,31 +91,31 @@ export function WikiEditor({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">Slug</span>
+          <span className="text-muted">Slug</span>
           <input
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             readOnly={mode === "edit"}
-            className="w-64 rounded border border-neutral-200 px-2 py-1 font-mono text-sm read-only:bg-neutral-50 read-only:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            className="w-64 rounded border border-border px-2 py-1 font-mono text-sm read-only:bg-raised read-only:text-muted focus:outline-none focus:ring-1 focus:ring-accent/60"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">Type</span>
+          <span className="text-muted">Type</span>
           <input
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="w-32 rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            className="w-32 rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">Visibility</span>
+          <span className="text-muted">Visibility</span>
           <select
             value={visibility}
             onChange={(e) => {
               setVisibility(e.target.value)
               setVisibilityTouched(true)
             }}
-            className="rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            className="rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
           >
             <option value="world">world</option>
             <option value="team">team</option>
@@ -124,32 +124,32 @@ export function WikiEditor({
         </label>
         <label className="flex items-center gap-1.5 text-sm">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-          <span className="text-neutral-600">Draft</span>
+          <span className="text-muted">Draft</span>
         </label>
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">Title</span>
+        <span className="text-muted">Title</span>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+          className="w-full rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">
-          Tags <span className="text-neutral-400">(comma-separated)</span>
+        <span className="text-muted">
+          Tags <span className="text-faint">(comma-separated)</span>
         </span>
         <input
           value={tags}
           onChange={(e) => setTags(e.target.value)}
-          className="w-full rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+          className="w-full rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
         />
       </label>
 
       <Suspense
         fallback={
-          <div className="min-h-[24rem] rounded-md border border-neutral-200 p-4 text-neutral-400 text-sm">
+          <div className="min-h-[24rem] rounded-ui border border-border p-4 text-faint text-sm">
             Loading editor…
           </div>
         }
@@ -157,7 +157,7 @@ export function WikiEditor({
         <LazyEditor ref={editorRef} initialMarkdown={initial.body} />
       </Suspense>
 
-      {error !== null && <p className="text-red-600 text-sm">Save failed: {error}</p>}
+      {error !== null && <p className="text-danger text-sm">Save failed: {error}</p>}
 
       <div className="flex gap-2">
         <Button onClick={() => save(draft)} disabled={saving}>

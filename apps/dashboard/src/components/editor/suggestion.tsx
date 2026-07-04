@@ -52,13 +52,13 @@ export const SuggestionList = forwardRef<
 
   if (items.length === 0) {
     return (
-      <div className="w-72 rounded-md border border-neutral-200 bg-white p-2 text-neutral-400 text-sm shadow-lg">
+      <div className="w-72 rounded-ui border border-border bg-surface p-2 text-faint text-sm shadow-pop">
         No matches
       </div>
     )
   }
   return (
-    <div className="max-h-64 w-72 overflow-y-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg">
+    <div className="max-h-64 w-72 overflow-y-auto rounded-ui border border-border bg-surface py-1 shadow-pop">
       {items.map((item, i) => (
         <button
           type="button"
@@ -66,12 +66,12 @@ export const SuggestionList = forwardRef<
           onMouseEnter={() => setSelected(i)}
           onClick={() => command(item)}
           className={`flex w-full flex-col items-start px-3 py-1.5 text-left text-sm ${
-            i === selected ? "bg-neutral-900 text-white" : "text-neutral-700 hover:bg-neutral-100"
+            i === selected ? "bg-raised text-ink" : "text-muted hover:bg-raised"
           }`}
         >
-          <span className={item.create ? "text-red-500" : ""}>{item.label}</span>
+          <span className={item.create ? "text-danger" : ""}>{item.label}</span>
           {item.hint && (
-            <span className={`text-xs ${i === selected ? "text-neutral-300" : "text-neutral-400"}`}>
+            <span className={`text-xs ${i === selected ? "text-accent" : "text-faint"}`}>
               {item.hint}
             </span>
           )}

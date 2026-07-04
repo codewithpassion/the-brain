@@ -187,7 +187,7 @@ function IngestPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Add Document</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Ingest a document into the brain. It will appear in the{" "}
           <Link to="/documents" className="underline">
             Documents catalog
@@ -209,18 +209,18 @@ function IngestPage() {
               onChange={(e) => setThought(e.target.value)}
               placeholder="Jot a quick thought… (stored under brain/thoughts, tagged 'thought')"
               rows={3}
-              className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              className="w-full rounded-ui border border-border bg-bg px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent/60"
             />
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={thoughtLoading} className="w-fit">
                 {thoughtLoading ? "Capturing…" : "Capture thought"}
               </Button>
               {thoughtSlug && (
-                <span className="text-neutral-500 text-sm">
+                <span className="text-muted text-sm">
                   Captured · <span className="font-mono">{thoughtSlug}</span>
                 </span>
               )}
-              {thoughtError && <span className="text-red-600 text-sm">{thoughtError}</span>}
+              {thoughtError && <span className="text-danger text-sm">{thoughtError}</span>}
             </div>
           </form>
         </CardContent>
@@ -233,7 +233,7 @@ function IngestPage() {
         <CardContent>
           <form onSubmit={onSubmit} className="flex flex-col gap-4">
             {/* Tab switcher */}
-            <div className="flex gap-1 rounded-lg bg-neutral-100 p-1 text-sm w-fit">
+            <div className="flex gap-1 rounded-ui bg-raised p-1 text-sm w-fit">
               <button
                 type="button"
                 onClick={() => {
@@ -242,8 +242,8 @@ function IngestPage() {
                 }}
                 className={
                   tab === "paste"
-                    ? "rounded-md bg-white px-4 py-1.5 font-medium shadow-sm"
-                    : "rounded-md px-4 py-1.5 text-neutral-600 hover:bg-neutral-200"
+                    ? "rounded-ui bg-surface px-4 py-1.5 font-medium shadow-sm"
+                    : "rounded-ui px-4 py-1.5 text-muted hover:bg-raised"
                 }
               >
                 Paste Text
@@ -256,8 +256,8 @@ function IngestPage() {
                 }}
                 className={
                   tab === "file"
-                    ? "rounded-md bg-white px-4 py-1.5 font-medium shadow-sm"
-                    : "rounded-md px-4 py-1.5 text-neutral-600 hover:bg-neutral-200"
+                    ? "rounded-ui bg-surface px-4 py-1.5 font-medium shadow-sm"
+                    : "rounded-ui px-4 py-1.5 text-muted hover:bg-raised"
                 }
               >
                 Upload File
@@ -267,7 +267,7 @@ function IngestPage() {
             {/* Paste tab */}
             {tab === "paste" && (
               <div className="flex flex-col gap-2">
-                <label htmlFor="paste-body" className="font-medium text-sm text-neutral-700">
+                <label htmlFor="paste-body" className="font-medium text-sm text-muted">
                   Markdown / plain text
                 </label>
                 <textarea
@@ -276,7 +276,7 @@ function IngestPage() {
                   onChange={(e) => setPasteText(e.target.value)}
                   placeholder="# My Document&#10;&#10;Paste your markdown or text here…"
                   rows={12}
-                  className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 font-mono text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  className="w-full rounded-ui border border-border bg-bg px-3 py-2 font-mono text-sm text-ink placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent/60"
                 />
               </div>
             )}
@@ -284,9 +284,9 @@ function IngestPage() {
             {/* File upload tab */}
             {tab === "file" && (
               <div className="flex flex-col gap-2">
-                <label htmlFor="file-input" className="font-medium text-sm text-neutral-700">
+                <label htmlFor="file-input" className="font-medium text-sm text-muted">
                   File{" "}
-                  <span className="font-normal text-neutral-400">
+                  <span className="font-normal text-faint">
                     (.md .txt .html .pdf .docx .jpg .png .gif .webp — max {MAX_BODY_MIB} MiB; .m4a
                     .mp3 .wav voice memos — max {AUDIO_MAX_MIB} MiB, transcribed automatically)
                   </span>
@@ -297,10 +297,10 @@ function IngestPage() {
                   type="file"
                   accept=".md,.txt,.html,.htm,.pdf,.docx,.jpg,.jpeg,.png,.gif,.webp,.m4a,.mp3,.wav"
                   onChange={onFileChange}
-                  className="block w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 file:mr-3 file:rounded file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-sm file:font-medium"
+                  className="block w-full rounded-ui border border-border bg-bg px-3 py-2 text-sm text-ink file:mr-3 file:rounded file:border-0 file:bg-raised file:px-3 file:py-1 file:text-sm file:font-medium"
                 />
                 {file && (
-                  <p className="text-neutral-500 text-xs">
+                  <p className="text-muted text-xs">
                     {file.name} · {(file.size / 1024).toFixed(1)} KiB
                   </p>
                 )}
@@ -310,8 +310,8 @@ function IngestPage() {
             {/* Optional metadata */}
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label htmlFor="doc-title" className="font-medium text-sm text-neutral-700">
-                  Title <span className="font-normal text-neutral-400">(optional)</span>
+                <label htmlFor="doc-title" className="font-medium text-sm text-muted">
+                  Title <span className="font-normal text-faint">(optional)</span>
                 </label>
                 <Input
                   id="doc-title"
@@ -321,9 +321,8 @@ function IngestPage() {
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label htmlFor="doc-slug" className="font-medium text-sm text-neutral-700">
-                  Slug{" "}
-                  <span className="font-normal text-neutral-400">(optional — auto if blank)</span>
+                <label htmlFor="doc-slug" className="font-medium text-sm text-muted">
+                  Slug <span className="font-normal text-faint">(optional — auto if blank)</span>
                 </label>
                 <Input
                   id="doc-slug"
@@ -333,9 +332,8 @@ function IngestPage() {
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label htmlFor="doc-tags" className="font-medium text-sm text-neutral-700">
-                  Tags{" "}
-                  <span className="font-normal text-neutral-400">(optional — comma-separated)</span>
+                <label htmlFor="doc-tags" className="font-medium text-sm text-muted">
+                  Tags <span className="font-normal text-faint">(optional — comma-separated)</span>
                 </label>
                 <Input
                   id="doc-tags"
@@ -345,8 +343,8 @@ function IngestPage() {
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label htmlFor="doc-path" className="font-medium text-sm text-neutral-700">
-                  Path <span className="font-normal text-neutral-400">(optional — namespace)</span>
+                <label htmlFor="doc-path" className="font-medium text-sm text-muted">
+                  Path <span className="font-normal text-faint">(optional — namespace)</span>
                 </label>
                 <Input
                   id="doc-path"
@@ -381,9 +379,7 @@ function IngestPage() {
                 {success.status}
               </Badge>
               <span className="font-mono text-sm">{success.slug}</span>
-              {success.path && (
-                <span className="font-mono text-neutral-500 text-xs">{success.path}</span>
-              )}
+              {success.path && <span className="font-mono text-muted text-xs">{success.path}</span>}
             </div>
             {success.tags && (
               <div className="flex flex-wrap gap-1">
@@ -399,12 +395,12 @@ function IngestPage() {
               </div>
             )}
             {success.status === "indexed" && (
-              <p className="text-neutral-600 text-sm">
+              <p className="text-muted text-sm">
                 Indexed {success.chunkCount} chunk(s). The document is now searchable.
               </p>
             )}
             {success.status === "accepted" && (
-              <p className="text-neutral-600 text-sm">
+              <p className="text-muted text-sm">
                 Accepted for background ingestion. Check the{" "}
                 <Link to="/documents" className="underline">
                   Documents
@@ -413,11 +409,11 @@ function IngestPage() {
               </p>
             )}
             {success.status === "duplicate" && (
-              <p className="text-neutral-600 text-sm">
+              <p className="text-muted text-sm">
                 A document with this content or slug already exists — no changes made.
               </p>
             )}
-            <Link to="/documents" className="text-sm text-neutral-500 underline">
+            <Link to="/documents" className="text-sm text-muted underline">
               View Documents catalog →
             </Link>
           </CardContent>
@@ -428,7 +424,7 @@ function IngestPage() {
       {error !== null && (
         <Card>
           <CardContent className="pt-6">
-            <p className="text-red-600 text-sm">Error: {error}</p>
+            <p className="text-danger text-sm">Error: {error}</p>
           </CardContent>
         </Card>
       )}

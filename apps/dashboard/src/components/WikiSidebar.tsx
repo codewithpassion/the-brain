@@ -60,9 +60,9 @@ function TreeRow({ node, depth }: { node: TreeNode; depth: number }) {
         to="/wiki/$"
         params={{ _splat: node.slug ?? "" }}
         style={pad}
-        className="block truncate rounded py-1 pr-2 text-neutral-700 text-sm hover:bg-neutral-100"
+        className="block truncate rounded py-1 pr-2 text-muted text-sm hover:bg-raised"
         activeProps={{
-          className: "block truncate rounded py-1 pr-2 text-sm bg-neutral-900 text-white",
+          className: "block truncate rounded py-1 pr-2 text-sm bg-accent/15 text-accent",
         }}
         title={node.slug ?? undefined}
       >
@@ -75,9 +75,9 @@ function TreeRow({ node, depth }: { node: TreeNode; depth: number }) {
     <details open={depth < 1} className="group">
       <summary
         style={pad}
-        className="flex cursor-pointer list-none items-center gap-1 rounded py-1 pr-2 text-neutral-600 text-sm hover:bg-neutral-100"
+        className="flex cursor-pointer list-none items-center gap-1 rounded py-1 pr-2 text-muted text-sm hover:bg-raised"
       >
-        <span className="inline-block w-3 text-neutral-400 transition-transform group-open:rotate-90">
+        <span className="inline-block w-3 text-faint transition-transform group-open:rotate-90">
           ▸
         </span>
         {node.slug ? (
@@ -111,7 +111,7 @@ function Section({ title, entries }: { title: string; entries: WikiListEntry[] }
   if (entries.length === 0) return null
   return (
     <div className="mb-4">
-      <h3 className="mb-1 px-1 font-semibold text-neutral-400 text-xs uppercase tracking-wide">
+      <h3 className="mb-1 px-1 font-semibold text-faint text-xs uppercase tracking-wide">
         {title}
       </h3>
       {sortChildren(root).map((k) => (
@@ -142,9 +142,9 @@ export function WikiSidebar({ pages }: { pages: WikiListEntry[] }) {
       <Link
         to="/wiki"
         activeOptions={{ exact: true }}
-        className="mb-3 block rounded px-2 py-1 font-semibold text-neutral-800 hover:bg-neutral-100"
+        className="mb-3 block rounded px-2 py-1 font-semibold text-ink hover:bg-raised"
         activeProps={{
-          className: "mb-3 block rounded px-2 py-1 font-semibold bg-neutral-900 text-white",
+          className: "mb-3 block rounded px-2 py-1 font-semibold bg-accent/15 text-accent",
         }}
       >
         🏠 Wiki home
@@ -153,12 +153,12 @@ export function WikiSidebar({ pages }: { pages: WikiListEntry[] }) {
         to="/wiki/$"
         params={{ _splat: "untitled" }}
         search={{ new: true }}
-        className="mb-3 block rounded border border-neutral-200 px-2 py-1 text-center text-neutral-600 text-xs hover:bg-neutral-100"
+        className="mb-3 block rounded border border-border px-2 py-1 text-center text-muted text-xs hover:bg-raised"
       >
         + New page
       </Link>
       {pages.length === 0 ? (
-        <p className="px-1 text-neutral-400 text-xs">No pages yet.</p>
+        <p className="px-1 text-faint text-xs">No pages yet.</p>
       ) : (
         <>
           <Section title="Pages" entries={docs} />

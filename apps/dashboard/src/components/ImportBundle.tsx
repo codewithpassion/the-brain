@@ -56,7 +56,7 @@ export function ImportBundle() {
         <CardTitle>Import bundle</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Upload an OKF <span className="font-mono">.zip</span>. Imported pages land under{" "}
           <span className="font-mono">imported/&lt;namespace&gt;/…</span> as{" "}
           <strong>private drafts</strong>, kept out of search until you review + publish them.
@@ -67,21 +67,21 @@ export function ImportBundle() {
             value={namespace}
             onChange={(e) => setNamespace(e.target.value)}
             placeholder="namespace (e.g. acme)"
-            className="w-48 rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            className="w-48 rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
           />
           <input
             type="file"
             accept=".zip"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-neutral-600 text-sm"
+            className="text-muted text-sm"
           />
           <Button onClick={run} disabled={busy}>
             {busy ? "Importing…" : "Import"}
           </Button>
         </div>
-        {error !== null && <p className="text-red-600 text-sm">Import failed: {error}</p>}
+        {error !== null && <p className="text-danger text-sm">Import failed: {error}</p>}
         {result !== null && (
-          <p className="text-neutral-700 text-sm">
+          <p className="text-muted text-sm">
             Imported {result.imported} · skipped {result.skipped} · failed {result.failed}. Find
             them under the <span className="font-mono">imported</span> namespace (Drafts).
           </p>

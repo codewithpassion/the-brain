@@ -36,7 +36,7 @@ export function Toaster() {
       {msgs.map((m) => (
         <div
           key={m.id}
-          className="pointer-events-auto rounded-md bg-neutral-900 px-3 py-2 text-sm text-white shadow-lg"
+          className="pointer-events-auto rounded-ui bg-ink px-3 py-2 text-bg text-sm shadow-pop"
         >
           {m.text}
         </div>

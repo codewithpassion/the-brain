@@ -20,7 +20,7 @@ export function ComingSoon({
           <CardTitle>Coming in {version}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-neutral-600 text-sm">{blurb}</p>
+          <p className="text-muted text-sm">{blurb}</p>
         </CardContent>
       </Card>
     </div>

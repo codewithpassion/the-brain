@@ -63,9 +63,7 @@ export function Markdown({ body, pending }: { body: string; pending: string[] })
       },
       // `code` now only ever renders INLINE code (fenced blocks are handled by `pre`).
       code: ({ children }) => (
-        <code className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-[0.85em]">
-          {children}
-        </code>
+        <code className="rounded bg-raised px-1 py-0.5 font-mono text-[0.85em]">{children}</code>
       ),
       a: ({ href, children }: ComponentProps<"a">) => {
         const raw = href ?? ""
@@ -75,7 +73,7 @@ export function Markdown({ body, pending }: { body: string; pending: string[] })
             <a
               href={raw}
               {...(isExternal(raw) ? { target: "_blank", rel: "noreferrer" } : {})}
-              className="text-blue-700 underline decoration-blue-300 hover:decoration-blue-600"
+              className="text-accent underline decoration-accent/40 hover:decoration-accent/60"
             >
               {children}
             </a>
@@ -89,8 +87,8 @@ export function Markdown({ body, pending }: { body: string; pending: string[] })
             title={isPending ? `Create page: ${resolved.slug}` : resolved.slug}
             className={
               isPending
-                ? "text-red-600 underline decoration-dotted decoration-red-400 hover:text-red-700"
-                : "text-blue-700 underline decoration-blue-300 hover:decoration-blue-600"
+                ? "text-danger underline decoration-dotted decoration-danger/40 hover:text-danger"
+                : "text-accent underline decoration-accent/40 hover:decoration-accent/60"
             }
           >
             {children}

@@ -24,7 +24,7 @@ function AuditPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Audit log</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Append-only record of memory operations and recall traces, newest first.
         </p>
       </header>
@@ -36,33 +36,33 @@ function AuditPage() {
         <CardContent>
           {audit.ok ? (
             audit.data.entries.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No audit entries found.</p>
+              <p className="text-muted text-sm">No audit entries found.</p>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-neutral-400">
-                    <th className="pb-1 font-medium">When</th>
-                    <th className="pb-1 font-medium">User</th>
-                    <th className="pb-1 font-medium">Action</th>
-                    <th className="pb-1 font-medium">Target</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {audit.data.entries.map((entry) => (
-                    <tr key={entry.id} className="border-neutral-100 border-t">
-                      <td className="py-1.5 text-neutral-600">{entry.at}</td>
-                      <td className="py-1.5 font-mono text-xs">{entry.userId}</td>
-                      <td className="py-1.5 text-neutral-700">{entry.action}</td>
-                      <td className="py-1.5 font-mono text-xs text-neutral-600">
-                        {entry.targetId}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-faint">
+                      <th className="pb-1 font-medium">When</th>
+                      <th className="pb-1 font-medium">User</th>
+                      <th className="pb-1 font-medium">Action</th>
+                      <th className="pb-1 font-medium">Target</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {audit.data.entries.map((entry) => (
+                      <tr key={entry.id} className="border-border border-t">
+                        <td className="py-1.5 text-muted">{entry.at}</td>
+                        <td className="py-1.5 font-mono text-xs">{entry.userId}</td>
+                        <td className="py-1.5 text-muted">{entry.action}</td>
+                        <td className="py-1.5 font-mono text-xs text-muted">{entry.targetId}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
           ) : (
-            <p className="text-neutral-500 text-sm">Unavailable: {audit.error}</p>
+            <p className="text-muted text-sm">Unavailable: {audit.error}</p>
           )}
         </CardContent>
       </Card>

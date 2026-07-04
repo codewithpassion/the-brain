@@ -35,7 +35,7 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   }, [code, lang])
 
   return (
-    <pre className="my-4 overflow-x-auto rounded-md border border-neutral-100 bg-neutral-50 p-4 text-sm leading-relaxed">
+    <pre className="my-4 overflow-x-auto rounded-ui border border-border bg-raised p-4 text-sm leading-relaxed">
       <code ref={ref} className={lang ? `language-${lang} font-mono` : "font-mono"}>
         {code}
       </code>

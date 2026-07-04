@@ -50,7 +50,7 @@ function MembersPage() {
         </header>
         <Card>
           <CardContent className="py-6">
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               {members.error.includes("403") || members.error.includes("admin")
                 ? "Admin or owner access is required to manage members."
                 : `Unavailable: ${members.error}`}
@@ -65,13 +65,11 @@ function MembersPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Members</h1>
-        <p className="text-neutral-500 text-sm">
-          Manage who has access to this org. Owner/admin only.
-        </p>
+        <p className="text-muted text-sm">Manage who has access to this org. Owner/admin only.</p>
       </header>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+        <div className="rounded-ui border border-danger/25 bg-danger/10 px-4 py-3 text-danger text-sm">
           {error}
         </div>
       )}
@@ -103,68 +101,70 @@ function MembersTable({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-neutral-500 text-sm">No members yet.</p>
+          <p className="text-muted text-sm">No members yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-neutral-400">
-                <th className="pb-2 font-medium">User ID</th>
-                <th className="pb-2 font-medium">Role</th>
-                <th className="pb-2 font-medium">Scopes</th>
-                <th className="pb-2 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) =>
-                editingId === m.userId ? (
-                  <EditRow
-                    key={m.userId}
-                    member={m}
-                    onCancel={() => setEditingId(null)}
-                    onSave={async (role, allowedScopes) => {
-                      onError(null)
-                      const res = await updateMember({
-                        data: {
-                          userId: m.userId,
-                          role,
-                          ...(allowedScopes !== undefined ? { allowedScopes } : {}),
-                        },
-                      })
-                      if (!res.ok) {
-                        onError(res.error)
-                      } else {
-                        setEditingId(null)
-                        await onRefresh()
-                      }
-                    }}
-                  />
-                ) : (
-                  <tr key={m.userId} className="border-neutral-100 border-t">
-                    <td className="py-2 font-mono text-xs">{m.userId}</td>
-                    <td className="py-2">
-                      <Badge variant="outline">{m.role}</Badge>
-                    </td>
-                    <td className="py-2 text-neutral-500">{m.allowedScopes ?? "*"}</td>
-                    <td className="py-2">
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onError(null)
-                            setEditingId(m.userId)
-                          }}
-                          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
-                        >
-                          Edit
-                        </button>
-                        <RemoveButton userId={m.userId} onError={onError} onRefresh={onRefresh} />
-                      </div>
-                    </td>
-                  </tr>
-                ),
-              )}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-faint">
+                  <th className="pb-2 font-medium">User ID</th>
+                  <th className="pb-2 font-medium">Role</th>
+                  <th className="pb-2 font-medium">Scopes</th>
+                  <th className="pb-2 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((m) =>
+                  editingId === m.userId ? (
+                    <EditRow
+                      key={m.userId}
+                      member={m}
+                      onCancel={() => setEditingId(null)}
+                      onSave={async (role, allowedScopes) => {
+                        onError(null)
+                        const res = await updateMember({
+                          data: {
+                            userId: m.userId,
+                            role,
+                            ...(allowedScopes !== undefined ? { allowedScopes } : {}),
+                          },
+                        })
+                        if (!res.ok) {
+                          onError(res.error)
+                        } else {
+                          setEditingId(null)
+                          await onRefresh()
+                        }
+                      }}
+                    />
+                  ) : (
+                    <tr key={m.userId} className="border-border border-t">
+                      <td className="py-2 font-mono text-xs">{m.userId}</td>
+                      <td className="py-2">
+                        <Badge variant="outline">{m.role}</Badge>
+                      </td>
+                      <td className="py-2 text-muted">{m.allowedScopes ?? "*"}</td>
+                      <td className="py-2">
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onError(null)
+                              setEditingId(m.userId)
+                            }}
+                            className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
+                          >
+                            Edit
+                          </button>
+                          <RemoveButton userId={m.userId} onError={onError} onRefresh={onRefresh} />
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -194,13 +194,13 @@ function EditRow({
   }
 
   return (
-    <tr className="border-neutral-100 border-t bg-neutral-50">
+    <tr className="border-border border-t bg-raised">
       <td className="py-2 font-mono text-xs">{member.userId}</td>
       <td className="py-2">
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="rounded border border-neutral-200 px-1 py-0.5 text-sm"
+          className="rounded border border-border px-1 py-0.5 text-sm"
         >
           <option value="owner">owner</option>
           <option value="admin">admin</option>
@@ -214,7 +214,7 @@ function EditRow({
           value={scopesRaw}
           onChange={(e) => setScopesRaw(e.target.value)}
           placeholder="* or scope1,scope2"
-          className="w-full rounded border border-neutral-200 px-2 py-0.5 text-xs"
+          className="w-full rounded border border-border px-2 py-0.5 text-xs"
         />
       </td>
       <td className="py-2">
@@ -227,14 +227,14 @@ function EditRow({
               await onSave(role, parsedScopes())
               setSaving(false)
             }}
-            className="rounded bg-neutral-900 px-2 py-0.5 text-white text-xs hover:bg-neutral-700 disabled:opacity-50"
+            className="rounded bg-accent px-2 py-0.5 text-accent-ink text-xs hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+            className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
           >
             Cancel
           </button>
@@ -259,7 +259,7 @@ function RemoveButton({
   if (confirming) {
     return (
       <span className="flex items-center gap-1 text-xs">
-        <span className="text-neutral-500">Remove?</span>
+        <span className="text-muted">Remove?</span>
         <button
           type="button"
           disabled={removing}
@@ -275,14 +275,14 @@ function RemoveButton({
               await onRefresh()
             }
           }}
-          className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+          className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
         >
           {removing ? "…" : "Yes"}
         </button>
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+          className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
         >
           No
         </button>
@@ -294,7 +294,7 @@ function RemoveButton({
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded border border-red-200 px-2 py-0.5 text-red-600 text-xs hover:bg-red-50"
+      className="rounded border border-danger/25 px-2 py-0.5 text-danger text-xs hover:bg-danger/10"
     >
       Remove
     </button>
@@ -363,26 +363,26 @@ function AddMemberCard({
                 setEmail(e.target.value)
                 setPreview(null)
               }}
-              className="flex-1 rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              className="flex-1 rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
             />
             <button
               type="button"
               onClick={handleSearch}
               disabled={searching || !email.trim()}
-              className="rounded border border-neutral-200 px-3 py-1.5 text-neutral-700 text-sm hover:bg-neutral-50 disabled:opacity-50"
+              className="rounded border border-border px-3 py-1.5 text-muted text-sm hover:bg-raised disabled:opacity-50"
             >
               {searching ? "Looking…" : "Look up"}
             </button>
           </div>
 
           {preview === "not-found" && (
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               No Brain account found. The user must sign in at least once first.
             </p>
           )}
 
           {preview !== null && preview !== "not-found" && (
-            <div className="flex items-center gap-3 rounded-md border border-neutral-100 bg-neutral-50 px-3 py-2">
+            <div className="flex items-center gap-3 rounded-ui border border-border bg-raised px-3 py-2">
               {preview.imageUrl && (
                 <img src={preview.imageUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
               )}
@@ -390,21 +390,21 @@ function AddMemberCard({
                 <div className="font-medium">
                   {preview.firstName} {preview.lastName}
                 </div>
-                <div className="text-neutral-500">{preview.email}</div>
-                <div className="font-mono text-neutral-400 text-xs">{preview.userId}</div>
+                <div className="text-muted">{preview.email}</div>
+                <div className="font-mono text-faint text-xs">{preview.userId}</div>
               </div>
             </div>
           )}
 
           <div className="flex items-center gap-2">
-            <label htmlFor="member-role" className="text-neutral-600 text-sm">
+            <label htmlFor="member-role" className="text-muted text-sm">
               Role
             </label>
             <select
               id="member-role"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="rounded border border-neutral-200 px-2 py-1 text-sm"
+              className="rounded border border-border px-2 py-1 text-sm"
             >
               <option value="admin">admin</option>
               <option value="member">member</option>
@@ -412,13 +412,13 @@ function AddMemberCard({
             </select>
           </div>
 
-          {localError && <p className="text-red-600 text-sm">{localError}</p>}
+          {localError && <p className="text-danger text-sm">{localError}</p>}
 
           <button
             type="button"
             onClick={handleAdd}
             disabled={adding || !email.trim()}
-            className="self-start rounded bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+            className="self-start rounded bg-accent px-4 py-1.5 text-sm text-accent-ink hover:opacity-90 disabled:opacity-50"
           >
             {adding ? "Adding…" : "Add member"}
           </button>

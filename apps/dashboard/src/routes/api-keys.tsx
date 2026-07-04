@@ -48,7 +48,7 @@ function ApiKeysPage() {
         </header>
         <Card>
           <CardContent className="py-6">
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               {keys.error.includes("403") || keys.error.includes("admin")
                 ? "Admin or owner access is required to manage API keys."
                 : `Unavailable: ${keys.error}`}
@@ -63,13 +63,13 @@ function ApiKeysPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">API Keys</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Manage bk_ API keys for this org. Admin only. Revoked keys stop working immediately.
         </p>
       </header>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+        <div className="rounded-ui border border-danger/25 bg-danger/10 px-4 py-3 text-danger text-sm">
           {error}
         </div>
       )}
@@ -102,35 +102,31 @@ function NewKeyBanner({
   }
 
   return (
-    <div className="rounded-md border border-green-200 bg-green-50 p-4">
+    <div className="rounded-ui border border-ok/25 bg-ok/10 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="font-semibold text-green-800 text-sm">
+        <p className="font-semibold text-ok text-sm">
           Key created: <span className="font-normal">{result.name}</span>
         </p>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="text-green-600 text-xs hover:text-green-800"
-        >
+        <button type="button" onClick={onDismiss} className="text-ok text-xs hover:opacity-70">
           Dismiss
         </button>
       </div>
-      <p className="mb-2 text-green-700 text-xs">
+      <p className="mb-2 text-ok text-xs">
         Copy this key now — you will not be able to see it again.
       </p>
       <div className="flex items-center gap-2">
-        <code className="flex-1 rounded border border-green-200 bg-white px-3 py-1.5 font-mono text-sm break-all">
+        <code className="flex-1 rounded border border-ok/25 bg-bg px-3 py-1.5 font-mono text-sm break-all">
           {result.token}
         </code>
         <button
           type="button"
           onClick={handleCopy}
-          className="rounded border border-green-300 bg-white px-3 py-1.5 text-green-700 text-sm hover:bg-green-50"
+          className="rounded border border-ok/25 bg-bg px-3 py-1.5 text-ok text-sm hover:bg-ok/10"
         >
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
-      <p className="mt-1 text-green-600 text-xs">
+      <p className="mt-1 text-ok text-xs">
         Prefix: <code className="font-mono">{result.keyPrefix}</code> · Scopes:{" "}
         {result.scopes.join(", ") || "none"}
       </p>
@@ -156,60 +152,62 @@ function KeysTable({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-neutral-500 text-sm">No API keys yet.</p>
+          <p className="text-muted text-sm">No API keys yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-neutral-400">
-                <th className="pb-2 font-medium">Name</th>
-                <th className="pb-2 font-medium">Prefix</th>
-                <th className="pb-2 font-medium">Scopes</th>
-                <th className="pb-2 font-medium">Read-only</th>
-                <th className="pb-2 font-medium">Created</th>
-                <th className="pb-2 font-medium">Last used</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((k) => (
-                <tr key={k.id} className="border-neutral-100 border-t">
-                  <td className="py-2 font-medium">{k.name}</td>
-                  <td className="py-2 font-mono text-xs">{k.keyPrefix}…</td>
-                  <td className="py-2 text-neutral-500">{k.scopes.join(", ") || "—"}</td>
-                  <td className="py-2">
-                    {k.readOnly ? (
-                      <Badge variant="outline">read-only</Badge>
-                    ) : (
-                      <span className="text-neutral-400">—</span>
-                    )}
-                  </td>
-                  <td className="py-2 text-neutral-500 text-xs">
-                    {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
-                  </td>
-                  <td className="py-2 text-neutral-500 text-xs">
-                    {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : "never"}
-                  </td>
-                  <td className="py-2">
-                    {k.revokedAt ? (
-                      <Badge variant="outline" className="text-red-600">
-                        revoked
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-green-600">
-                        active
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="py-2">
-                    {!k.revokedAt && (
-                      <RevokeButton keyId={k.id} onError={onError} onRefresh={onRefresh} />
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-faint">
+                  <th className="pb-2 font-medium">Name</th>
+                  <th className="pb-2 font-medium">Prefix</th>
+                  <th className="pb-2 font-medium">Scopes</th>
+                  <th className="pb-2 font-medium">Read-only</th>
+                  <th className="pb-2 font-medium">Created</th>
+                  <th className="pb-2 font-medium">Last used</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((k) => (
+                  <tr key={k.id} className="border-border border-t">
+                    <td className="py-2 font-medium">{k.name}</td>
+                    <td className="py-2 font-mono text-xs">{k.keyPrefix}…</td>
+                    <td className="py-2 text-muted">{k.scopes.join(", ") || "—"}</td>
+                    <td className="py-2">
+                      {k.readOnly ? (
+                        <Badge variant="outline">read-only</Badge>
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 text-muted text-xs">
+                      {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="py-2 text-muted text-xs">
+                      {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : "never"}
+                    </td>
+                    <td className="py-2">
+                      {k.revokedAt ? (
+                        <Badge variant="outline" className="text-danger">
+                          revoked
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-ok">
+                          active
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="py-2">
+                      {!k.revokedAt && (
+                        <RevokeButton keyId={k.id} onError={onError} onRefresh={onRefresh} />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -231,7 +229,7 @@ function RevokeButton({
   if (confirming) {
     return (
       <span className="flex items-center gap-1 text-xs">
-        <span className="text-neutral-500">Revoke?</span>
+        <span className="text-muted">Revoke?</span>
         <button
           type="button"
           disabled={revoking}
@@ -247,14 +245,14 @@ function RevokeButton({
               await onRefresh()
             }
           }}
-          className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+          className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
         >
           {revoking ? "…" : "Yes"}
         </button>
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+          className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
         >
           No
         </button>
@@ -266,7 +264,7 @@ function RevokeButton({
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded border border-red-200 px-2 py-0.5 text-red-600 text-xs hover:bg-red-50"
+      className="rounded border border-danger/25 px-2 py-0.5 text-danger text-xs hover:bg-danger/10"
     >
       Revoke
     </button>
@@ -326,7 +324,7 @@ function CreateKeyCard({
       <CardContent>
         <div className="flex flex-col gap-4 max-w-md">
           <div>
-            <label htmlFor="key-name" className="mb-1 block text-neutral-700 text-sm">
+            <label htmlFor="key-name" className="mb-1 block text-muted text-sm">
               Name
             </label>
             <input
@@ -335,12 +333,12 @@ function CreateKeyCard({
               placeholder="e.g. ci-deploy"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              className="w-full rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
             />
           </div>
 
           <div>
-            <p className="mb-1 text-neutral-700 text-sm">Capabilities</p>
+            <p className="mb-1 text-muted text-sm">Capabilities</p>
             <div className="flex gap-3">
               {CAPABILITY_OPTIONS.map((cap) => (
                 <label key={cap} className="flex cursor-pointer items-center gap-1.5 text-sm">
@@ -363,16 +361,16 @@ function CreateKeyCard({
               onChange={(e) => setReadOnly(e.target.checked)}
               className="rounded"
             />
-            <span className="text-neutral-700">Read-only</span>
+            <span className="text-muted">Read-only</span>
           </label>
 
-          {localError && <p className="text-red-600 text-sm">{localError}</p>}
+          {localError && <p className="text-danger text-sm">{localError}</p>}
 
           <button
             type="button"
             onClick={handleCreate}
             disabled={creating || !name.trim()}
-            className="self-start rounded bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+            className="self-start rounded bg-accent px-4 py-1.5 text-sm text-accent-ink hover:opacity-90 disabled:opacity-50"
           >
             {creating ? "Creating…" : "Create key"}
           </button>

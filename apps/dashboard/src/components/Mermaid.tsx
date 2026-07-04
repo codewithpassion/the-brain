@@ -5,6 +5,7 @@
  * the code block visible instead of blanking the page (guardrail #2).
  */
 import { useEffect, useRef, useState } from "react"
+import { THEME_EVENT } from "../lib/theme"
 
 let seq = 0
 
@@ -12,7 +13,17 @@ export function Mermaid({ chart }: { chart: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [svg, setSvg] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // Bumped on every app theme switch so the diagram re-renders in the new palette (mermaid bakes the
+  // theme into the SVG at render time; without this an already-rendered diagram would stay stale).
+  const [themeEpoch, setThemeEpoch] = useState(0)
 
+  useEffect(() => {
+    const onTheme = () => setThemeEpoch((n) => n + 1)
+    window.addEventListener(THEME_EVENT, onTheme)
+    return () => window.removeEventListener(THEME_EVENT, onTheme)
+  }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: themeEpoch re-runs the render on theme switch
   useEffect(() => {
     let cancelled = false
     seq += 1
@@ -20,7 +31,10 @@ export function Mermaid({ chart }: { chart: string }) {
     import("mermaid")
       .then(async (mod) => {
         const mermaid = mod.default
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" })
+        // Match the active app theme: the light-editorial "paper" theme pairs with mermaid's
+        // "neutral"; the dark "carbon"/phosphor "terminal" themes pair with "dark".
+        const mermaidTheme = document.documentElement.dataset.theme === "paper" ? "neutral" : "dark"
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: mermaidTheme })
         const { svg: out } = await mermaid.render(id, chart)
         if (!cancelled) setSvg(out)
       })
@@ -30,7 +44,7 @@ export function Mermaid({ chart }: { chart: string }) {
     return () => {
       cancelled = true
     }
-  }, [chart])
+  }, [chart, themeEpoch])
 
   if (svg !== null && !failed) {
     return (
@@ -44,7 +58,7 @@ export function Mermaid({ chart }: { chart: string }) {
   }
   // SSR + pre-hydration + fail-soft: show the source as a code block.
   return (
-    <pre className="my-4 overflow-x-auto rounded-md border border-neutral-100 bg-neutral-50 p-4 font-mono text-sm">
+    <pre className="my-4 overflow-x-auto rounded-ui border border-border bg-raised p-4 font-mono text-sm">
       <code>{chart}</code>
     </pre>
   )

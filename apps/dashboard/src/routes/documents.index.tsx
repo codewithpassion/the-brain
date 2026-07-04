@@ -133,7 +133,7 @@ function DocumentsPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Documents</h1>
-        <p className="text-neutral-500 text-sm">Ingested document catalog.</p>
+        <p className="text-muted text-sm">Ingested document catalog.</p>
       </header>
 
       <Card>
@@ -144,7 +144,7 @@ function DocumentsPage() {
           {/* Filter controls */}
           <form onSubmit={onFilterSubmit} className="flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1 min-w-36">
-              <label htmlFor="filter-tag" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="filter-tag" className="text-muted text-xs font-medium">
                 Tag
               </label>
               <Input
@@ -156,7 +156,7 @@ function DocumentsPage() {
               />
             </div>
             <div className="flex flex-col gap-1 min-w-36">
-              <label htmlFor="filter-path" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="filter-path" className="text-muted text-xs font-medium">
                 Path prefix
               </label>
               <Input
@@ -168,7 +168,7 @@ function DocumentsPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="filter-since" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="filter-since" className="text-muted text-xs font-medium">
                 Since
               </label>
               <Input
@@ -180,7 +180,7 @@ function DocumentsPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="filter-until" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="filter-until" className="text-muted text-xs font-medium">
                 Until
               </label>
               <Input
@@ -198,23 +198,23 @@ function DocumentsPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="h-8 px-3 text-sm text-neutral-500 hover:text-neutral-800"
+                className="h-8 px-3 text-sm text-muted hover:text-ink"
               >
                 Clear
               </button>
             )}
           </form>
 
-          {catalogError !== null && <p className="text-red-600 text-sm">Error: {catalogError}</p>}
+          {catalogError !== null && <p className="text-danger text-sm">Error: {catalogError}</p>}
 
           {docs.ok ? (
             docList.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No documents found.</p>
+              <p className="text-muted text-sm">No documents found.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-neutral-400">
+                    <tr className="text-left text-faint">
                       <th className="pb-1 font-medium">Slug</th>
                       <th className="pb-1 font-medium">Title</th>
                       <th className="pb-1 font-medium">Status</th>
@@ -227,7 +227,7 @@ function DocumentsPage() {
                   </thead>
                   <tbody>
                     {docList.map((doc) => (
-                      <tr key={doc.id} className="border-neutral-100 border-t">
+                      <tr key={doc.id} className="border-border border-t">
                         <td className="py-1.5 font-mono text-xs">
                           <Link
                             to="/documents/$id"
@@ -237,7 +237,7 @@ function DocumentsPage() {
                             {doc.slug}
                           </Link>
                         </td>
-                        <td className="py-1.5 text-neutral-700">
+                        <td className="py-1.5 text-muted">
                           <Link
                             to="/documents/$id"
                             params={{ id: doc.id }}
@@ -249,7 +249,7 @@ function DocumentsPage() {
                         <td className="py-1.5">
                           <Badge variant={docStatusVariant(doc.status)}>{doc.status}</Badge>
                         </td>
-                        <td className="py-1.5 text-neutral-600">{doc.chunkCount}</td>
+                        <td className="py-1.5 text-muted">{doc.chunkCount}</td>
                         <td className="py-1.5">
                           {doc.tags && doc.tags.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
@@ -265,29 +265,26 @@ function DocumentsPage() {
                               ))}
                             </div>
                           ) : (
-                            <span className="text-neutral-300">—</span>
+                            <span className="text-faint">—</span>
                           )}
                         </td>
-                        <td className="py-1.5 font-mono text-xs text-neutral-500">
+                        <td className="py-1.5 font-mono text-xs text-muted">
                           {doc.path ? (
                             <button
                               type="button"
                               onClick={() => onPathClick(doc.path as string)}
-                              className="hover:text-neutral-800 hover:underline cursor-pointer"
+                              className="hover:text-ink hover:underline cursor-pointer"
                             >
                               {doc.path}
                             </button>
                           ) : (
-                            <span className="text-neutral-300">—</span>
+                            <span className="text-faint">—</span>
                           )}
                         </td>
-                        <td
-                          className="py-1.5 font-mono text-xs text-neutral-500"
-                          title={doc.userId}
-                        >
+                        <td className="py-1.5 font-mono text-xs text-muted" title={doc.userId}>
                           {doc.userId.slice(0, 12)}…
                         </td>
-                        <td className="py-1.5 text-neutral-600">{doc.createdAt}</td>
+                        <td className="py-1.5 text-muted">{doc.createdAt}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -295,7 +292,7 @@ function DocumentsPage() {
               </div>
             )
           ) : (
-            <p className="text-neutral-500 text-sm">Unavailable: {docs.error}</p>
+            <p className="text-muted text-sm">Unavailable: {docs.error}</p>
           )}
         </CardContent>
       </Card>
@@ -317,25 +314,25 @@ function DocumentsPage() {
             </Button>
           </form>
 
-          {searchError !== null && <p className="text-red-600 text-sm">Error: {searchError}</p>}
+          {searchError !== null && <p className="text-danger text-sm">Error: {searchError}</p>}
 
           {hits !== null &&
             (hits.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No results.</p>
+              <p className="text-muted text-sm">No results.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {hits.map((doc) => (
                   <div
                     key={doc.documentId}
-                    className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0"
+                    className="border-border border-b pb-3 last:border-0 last:pb-0"
                   >
                     <div className="flex items-center gap-2">
                       <Badge>{doc.slug}</Badge>
-                      <span className="text-neutral-400 text-xs">
+                      <span className="text-faint text-xs">
                         {doc.hitCount} chunk(s) · top {doc.topScore.toFixed(4)}
                       </span>
                     </div>
-                    <p className="mt-1.5 text-neutral-700 text-sm">{doc.snippet}</p>
+                    <p className="mt-1.5 text-muted text-sm">{doc.snippet}</p>
                   </div>
                 ))}
               </div>

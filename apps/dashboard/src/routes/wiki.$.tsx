@@ -83,7 +83,7 @@ function WikiPageView() {
     return (
       <div className="flex flex-col gap-4">
         <BackHome />
-        <p className="text-red-600 text-sm">Error loading page: {result.error}</p>
+        <p className="text-danger text-sm">Error loading page: {result.error}</p>
       </div>
     )
   }
@@ -137,7 +137,7 @@ function WikiPageView() {
         <Breadcrumbs slug={slug} />
         <Card>
           <CardContent className="flex flex-col items-start gap-3 py-8">
-            <p className="text-neutral-600 text-sm">
+            <p className="text-muted text-sm">
               Page <span className="font-mono">{slug}</span> not found.
             </p>
             {isEntitySlug(slug) ? (
@@ -207,7 +207,7 @@ function PageView({
               <Link
                 key={t}
                 to="/wiki"
-                className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-200"
+                className="rounded-full bg-raised px-2 py-0.5 text-muted text-xs hover:bg-accent/15 hover:text-accent"
               >
                 #{t}
               </Link>
@@ -220,7 +220,7 @@ function PageView({
       <Card>
         <CardContent className="py-5">
           {body.trim() === "" ? (
-            <p className="text-neutral-400 text-sm">This page has no body yet.</p>
+            <p className="text-faint text-sm">This page has no body yet.</p>
           ) : (
             <Markdown body={body} pending={links.pending} />
           )}
@@ -264,7 +264,7 @@ function ExportBundleButton({ namespace }: { namespace: string }) {
       >
         {busy ? "Exporting…" : "Export bundle"}
       </Button>
-      {error !== null && <span className="text-red-600 text-xs">{error}</span>}
+      {error !== null && <span className="text-danger text-xs">{error}</span>}
     </span>
   )
 }
@@ -279,16 +279,14 @@ function StubView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
         <h1 className="mt-1 font-semibold text-2xl tracking-tight">
           {detail.entity?.canonicalName || slug}
         </h1>
-        <p className="mt-1 text-neutral-500 text-sm">
+        <p className="mt-1 text-muted text-sm">
           No page exists for this entity yet — its live graph sections are shown below.
         </p>
       </div>
       <Card>
         <CardContent className="flex flex-col items-start gap-2 py-6">
-          <p className="text-neutral-600 text-sm">
-            This entity's live graph sections are shown below.
-          </p>
-          <p className="text-neutral-400 text-xs">
+          <p className="text-muted text-sm">This entity's live graph sections are shown below.</p>
+          <p className="text-faint text-xs">
             Authoring a dedicated entity page (with the entity's tier + linkage) lands via the
             entity-mint path — creating one here would produce a mis-scoped, unlinked page.
           </p>
@@ -302,7 +300,7 @@ function StubView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
 /** Why the generic create flow is refused for an `entities/…` slug (shown on create + not-found). */
 function EntityMintNote() {
   return (
-    <p className="text-neutral-500 text-sm">
+    <p className="text-muted text-sm">
       Entity pages are authored via the entity-mint path — inheriting the entity's tier and graph
       linkage. Creating one here would produce a mis-scoped, unlinked page.
     </p>
@@ -321,21 +319,21 @@ function EntitySections({ entity }: { entity: WikiEntitySection }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div>
-          <h4 className="mb-1 font-semibold text-neutral-500 text-xs uppercase tracking-wide">
+          <h4 className="mb-1 font-semibold text-muted text-xs uppercase tracking-wide">
             Relations ({entity.relations.length})
           </h4>
           {entity.relations.length === 0 ? (
-            <p className="text-neutral-400 text-sm">No relations.</p>
+            <p className="text-faint text-sm">No relations.</p>
           ) : (
             <ul className="flex flex-col gap-1">
               {entity.relations.map((r) => (
                 <li key={`${r.direction}-${r.kind}-${r.entityId}`} className="text-sm">
-                  <span className="text-neutral-400">{r.direction === "out" ? "→" : "←"}</span>{" "}
-                  <span className="text-neutral-500">{r.kind}</span>{" "}
+                  <span className="text-faint">{r.direction === "out" ? "→" : "←"}</span>{" "}
+                  <span className="text-muted">{r.kind}</span>{" "}
                   <Link
                     to="/wiki/$"
                     params={{ _splat: r.slug }}
-                    className="text-blue-700 hover:underline"
+                    className="text-accent hover:underline"
                   >
                     {r.name}
                   </Link>
@@ -345,13 +343,13 @@ function EntitySections({ entity }: { entity: WikiEntitySection }) {
           )}
         </div>
         <div>
-          <h4 className="mb-1 font-semibold text-neutral-500 text-xs uppercase tracking-wide">
+          <h4 className="mb-1 font-semibold text-muted text-xs uppercase tracking-wide">
             Mentions ({entity.mentions.length})
           </h4>
           {entity.mentions.length === 0 ? (
-            <p className="text-neutral-400 text-sm">No mentions.</p>
+            <p className="text-faint text-sm">No mentions.</p>
           ) : (
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               Referenced by {entity.mentions.length} source
               {entity.mentions.length === 1 ? "" : "s"} across the corpus.
             </p>
@@ -376,7 +374,7 @@ function Backlinks({
       </CardHeader>
       <CardContent>
         {backlinks.length === 0 ? (
-          <p className="text-neutral-400 text-sm">Nothing links here yet.</p>
+          <p className="text-faint text-sm">Nothing links here yet.</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {backlinks.map((b, i) => (
@@ -386,20 +384,20 @@ function Backlinks({
                   <Link
                     to="/wiki/$"
                     params={{ _splat: b.fromSlug }}
-                    className="font-medium text-blue-700 hover:underline"
+                    className="font-medium text-accent hover:underline"
                   >
                     {b.fromTitle || b.fromSlug}
                   </Link>
                 ) : (
                   <Badge variant="outline">{b.linkType}</Badge>
                 )}{" "}
-                {b.context && <span className="text-neutral-500">— {b.context}</span>}
+                {b.context && <span className="text-muted">— {b.context}</span>}
               </li>
             ))}
           </ul>
         )}
         {pending.length > 0 && (
-          <p className="mt-3 border-neutral-100 border-t pt-2 text-neutral-400 text-xs">
+          <p className="mt-3 border-border border-t pt-2 text-faint text-xs">
             {pending.length} outbound red link{pending.length === 1 ? "" : "s"} awaiting creation.
           </p>
         )}
@@ -419,9 +417,9 @@ function Timeline({ timeline }: { timeline: WikiPageDetail["timeline"] }) {
         <ul className="flex flex-col gap-2">
           {timeline.map((t) => (
             <li key={t.id} className="text-sm">
-              <span className="font-mono text-neutral-400 text-xs">{t.date.slice(0, 10)}</span>{" "}
-              <span className="text-neutral-700">{t.summary}</span>
-              {t.detail && <span className="text-neutral-500"> — {t.detail}</span>}
+              <span className="font-mono text-faint text-xs">{t.date.slice(0, 10)}</span>{" "}
+              <span className="text-muted">{t.summary}</span>
+              {t.detail && <span className="text-muted"> — {t.detail}</span>}
             </li>
           ))}
         </ul>
@@ -509,11 +507,11 @@ function History({
         )}
       </CardHeader>
       <CardContent>
-        {error !== null && <p className="mb-2 text-red-600 text-sm">{error}</p>}
+        {error !== null && <p className="mb-2 text-danger text-sm">{error}</p>}
         {revisions.length === 0 ? (
-          <p className="text-neutral-400 text-sm">No revisions.</p>
+          <p className="text-faint text-sm">No revisions.</p>
         ) : (
-          <ul className="flex flex-col divide-y divide-neutral-100">
+          <ul className="flex flex-col divide-y divide-border">
             {revisions.map((r) => {
               const prevBody = bodyByVersion.get(r.version - 1)
               const thisBody = bodyByVersion.get(r.version)
@@ -522,23 +520,19 @@ function History({
               return (
                 <li key={r.revisionId} className="py-1.5 text-sm">
                   <div className="flex items-center gap-3">
-                    <span className="w-10 shrink-0 font-mono text-neutral-400 text-xs">
-                      v{r.version}
-                    </span>
+                    <span className="w-10 shrink-0 font-mono text-faint text-xs">v{r.version}</span>
                     <span className="shrink-0">
                       <AuthorBadge authorUserId={r.authorUserId} />
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-neutral-600">
-                      {r.reason ?? "—"}
-                    </span>
-                    <span className="hidden shrink-0 text-neutral-400 text-xs sm:inline">
+                    <span className="min-w-0 flex-1 truncate text-muted">{r.reason ?? "—"}</span>
+                    <span className="hidden shrink-0 text-faint text-xs sm:inline">
                       {r.createdAt.slice(0, 10)}
                     </span>
                     {canDiff && (
                       <button
                         type="button"
                         onClick={() => setOpenId(isOpen ? null : r.revisionId)}
-                        className="shrink-0 text-blue-700 text-xs hover:underline"
+                        className="shrink-0 text-accent text-xs hover:underline"
                       >
                         {isOpen ? "hide diff" : "diff"}
                       </button>
@@ -548,7 +542,7 @@ function History({
                         type="button"
                         onClick={() => restore(r.version, thisBody)}
                         disabled={restoring !== null}
-                        className="shrink-0 text-neutral-500 text-xs hover:text-neutral-900 hover:underline"
+                        className="shrink-0 text-muted text-xs hover:text-ink hover:underline"
                       >
                         {restoring === r.version ? "restoring…" : "restore"}
                       </button>
@@ -571,17 +565,17 @@ function History({
 function DiffView({ oldBody, newBody }: { oldBody: string; newBody: string }) {
   const lines = diffLines(oldBody, newBody)
   return (
-    <pre className="mt-2 overflow-x-auto rounded-md border border-neutral-100 bg-neutral-50 p-3 font-mono text-xs leading-relaxed">
+    <pre className="mt-2 overflow-x-auto rounded-ui border border-border bg-raised p-3 font-mono text-xs leading-relaxed">
       {lines.map((l, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: positional diff rows have no stable id
           key={i}
           className={
             l.type === "add"
-              ? "bg-green-50 text-green-800"
+              ? "bg-ok/10 text-ok"
               : l.type === "del"
-                ? "bg-red-50 text-red-800"
-                : "text-neutral-500"
+                ? "bg-danger/10 text-danger"
+                : "text-muted"
           }
         >
           {l.type === "add" ? "+ " : l.type === "del" ? "- " : "  "}
@@ -598,11 +592,8 @@ function Breadcrumbs({ slug }: { slug: string }) {
   const segments = slug.split("/").filter((s) => s.length > 0)
   let acc = ""
   return (
-    <nav
-      className="flex flex-wrap items-center gap-1 text-neutral-400 text-xs"
-      aria-label="Breadcrumb"
-    >
-      <Link to="/wiki" className="hover:text-neutral-700 hover:underline">
+    <nav className="flex flex-wrap items-center gap-1 text-faint text-xs" aria-label="Breadcrumb">
+      <Link to="/wiki" className="hover:text-muted hover:underline">
         wiki
       </Link>
       {segments.map((seg, i) => {
@@ -612,12 +603,12 @@ function Breadcrumbs({ slug }: { slug: string }) {
           <span key={acc} className="flex items-center gap-1">
             <span>/</span>
             {isLast ? (
-              <span className="text-neutral-600">{seg}</span>
+              <span className="text-muted">{seg}</span>
             ) : (
               <Link
                 to="/wiki/$"
                 params={{ _splat: acc }}
-                className="hover:text-neutral-700 hover:underline"
+                className="hover:text-muted hover:underline"
               >
                 {seg}
               </Link>
@@ -631,7 +622,7 @@ function Breadcrumbs({ slug }: { slug: string }) {
 
 function BackHome() {
   return (
-    <Link to="/wiki" className="text-neutral-500 text-sm hover:underline">
+    <Link to="/wiki" className="text-muted text-sm hover:underline">
       ← Wiki
     </Link>
   )

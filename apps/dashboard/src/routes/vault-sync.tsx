@@ -49,7 +49,7 @@ function VaultSyncPage() {
         </header>
         <Card>
           <CardContent className="py-6">
-            <p className="text-neutral-500 text-sm">
+            <p className="text-muted text-sm">
               {credentials.error.includes("403") || credentials.error.includes("admin")
                 ? "Admin or owner access is required to manage vault credentials."
                 : `Unavailable: ${credentials.error}`}
@@ -64,7 +64,7 @@ function VaultSyncPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Vault Sync (Obsidian)</h1>
-        <p className="text-neutral-500 text-sm">
+        <p className="text-muted text-sm">
           Sync your Obsidian vault into the Brain via WebDAV — without exposing the underlying
           storage bucket. Each credential is a dedicated username and password scoped to this org.
           Admin only. Revoked credentials stop working immediately.
@@ -72,7 +72,7 @@ function VaultSyncPage() {
       </header>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+        <div className="rounded-ui border border-danger/25 bg-danger/10 px-4 py-3 text-danger text-sm">
           {error}
         </div>
       )}
@@ -111,18 +111,14 @@ function NewCredentialBanner({
   }
 
   return (
-    <div className="rounded-md border border-green-200 bg-green-50 p-4">
+    <div className="rounded-ui border border-ok/25 bg-ok/10 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="font-semibold text-green-800 text-sm">Credential created</p>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="text-green-600 text-xs hover:text-green-800"
-        >
+        <p className="font-semibold text-ok text-sm">Credential created</p>
+        <button type="button" onClick={onDismiss} className="text-ok text-xs hover:opacity-70">
           Dismiss
         </button>
       </div>
-      <p className="mb-3 text-green-700 text-xs font-medium">
+      <p className="mb-3 text-ok text-xs font-medium">
         Copy the password now — you will not be able to see it again.
       </p>
       <div className="flex flex-col gap-2">
@@ -162,15 +158,15 @@ function CredentialField({
 }) {
   return (
     <div>
-      <p className="mb-0.5 text-green-700 text-xs">{label}</p>
+      <p className="mb-0.5 text-ok text-xs">{label}</p>
       <div className="flex items-center gap-2">
-        <code className="flex-1 rounded border border-green-200 bg-white px-3 py-1.5 font-mono text-sm break-all">
+        <code className="flex-1 rounded border border-ok/25 bg-bg px-3 py-1.5 font-mono text-sm break-all">
           {value}
         </code>
         <button
           type="button"
           onClick={onCopy}
-          className="rounded border border-green-300 bg-white px-3 py-1.5 text-green-700 text-sm hover:bg-green-50"
+          className="rounded border border-ok/25 bg-bg px-3 py-1.5 text-ok text-sm hover:bg-ok/10"
         >
           {copied ? "Copied!" : "Copy"}
         </button>
@@ -197,46 +193,52 @@ function CredentialsTable({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-neutral-500 text-sm">No vault credentials yet.</p>
+          <p className="text-muted text-sm">No vault credentials yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-neutral-400">
-                <th className="pb-2 font-medium">Username</th>
-                <th className="pb-2 font-medium">Label</th>
-                <th className="pb-2 font-medium">Created</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr key={c.username} className="border-neutral-100 border-t">
-                  <td className="py-2 font-mono text-xs">{c.username}</td>
-                  <td className="py-2 text-neutral-500">{c.label ?? "—"}</td>
-                  <td className="py-2 text-neutral-500 text-xs">
-                    {new Date(c.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="py-2">
-                    {c.revokedAt ? (
-                      <Badge variant="outline" className="text-red-600">
-                        revoked
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-green-600">
-                        active
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="py-2">
-                    {!c.revokedAt && (
-                      <RevokeButton username={c.username} onError={onError} onRefresh={onRefresh} />
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-faint">
+                  <th className="pb-2 font-medium">Username</th>
+                  <th className="pb-2 font-medium">Label</th>
+                  <th className="pb-2 font-medium">Created</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.username} className="border-border border-t">
+                    <td className="py-2 font-mono text-xs">{c.username}</td>
+                    <td className="py-2 text-muted">{c.label ?? "—"}</td>
+                    <td className="py-2 text-muted text-xs">
+                      {new Date(c.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="py-2">
+                      {c.revokedAt ? (
+                        <Badge variant="outline" className="text-danger">
+                          revoked
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-ok">
+                          active
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="py-2">
+                      {!c.revokedAt && (
+                        <RevokeButton
+                          username={c.username}
+                          onError={onError}
+                          onRefresh={onRefresh}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -258,7 +260,7 @@ function RevokeButton({
   if (confirming) {
     return (
       <span className="flex items-center gap-1 text-xs">
-        <span className="text-neutral-500">Revoke?</span>
+        <span className="text-muted">Revoke?</span>
         <button
           type="button"
           disabled={revoking}
@@ -274,14 +276,14 @@ function RevokeButton({
               await onRefresh()
             }
           }}
-          className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+          className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
         >
           {revoking ? "…" : "Yes"}
         </button>
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+          className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
         >
           No
         </button>
@@ -293,7 +295,7 @@ function RevokeButton({
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded border border-red-200 px-2 py-0.5 text-red-600 text-xs hover:bg-red-50"
+      className="rounded border border-danger/25 px-2 py-0.5 text-danger text-xs hover:bg-danger/10"
     >
       Revoke
     </button>
@@ -340,8 +342,8 @@ function GenerateCredentialCard({
       <CardContent>
         <div className="flex flex-col gap-4 max-w-md">
           <div>
-            <label htmlFor="vault-label" className="mb-1 block text-neutral-700 text-sm">
-              Label <span className="text-neutral-400">(optional)</span>
+            <label htmlFor="vault-label" className="mb-1 block text-muted text-sm">
+              Label <span className="text-faint">(optional)</span>
             </label>
             <input
               id="vault-label"
@@ -349,17 +351,17 @@ function GenerateCredentialCard({
               placeholder="e.g. personal-vault"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              className="w-full rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
             />
           </div>
 
-          {localError && <p className="text-red-600 text-sm">{localError}</p>}
+          {localError && <p className="text-danger text-sm">{localError}</p>}
 
           <button
             type="button"
             onClick={handleGenerate}
             disabled={generating}
-            className="self-start rounded bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+            className="self-start rounded bg-accent px-4 py-1.5 text-sm text-accent-ink hover:opacity-90 disabled:opacity-50"
           >
             {generating ? "Generating…" : "Generate"}
           </button>
@@ -373,24 +375,24 @@ function GenerateCredentialCard({
 
 /** Bold inline emphasis matching the guide's neutral palette. */
 const B = ({ children }: { children: ReactNode }) => (
-  <span className="font-medium text-neutral-900">{children}</span>
+  <span className="font-medium text-ink">{children}</span>
 )
 
 /** Inline code chip (commands, field values). */
 const Cmd = ({ children }: { children: ReactNode }) => (
-  <code className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-xs">{children}</code>
+  <code className="rounded bg-raised px-1 py-0.5 font-mono text-xs">{children}</code>
 )
 
 /** One numbered step: a circular badge + title + body. */
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 font-semibold text-white text-xs">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-accent-ink text-xs">
         {n}
       </span>
       <div className="min-w-0 text-sm">
-        <p className="mb-1 font-medium text-neutral-900">{title}</p>
-        <div className="text-neutral-600 leading-relaxed">{children}</div>
+        <p className="mb-1 font-medium text-ink">{title}</p>
+        <div className="text-muted leading-relaxed">{children}</div>
       </div>
     </li>
   )
@@ -423,27 +425,23 @@ function ConnectObsidianCard() {
             credential from step 2:
             <table className="mt-2 w-full max-w-md">
               <tbody>
-                <tr className="border-neutral-100 border-t">
-                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
+                <tr className="border-border border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-muted text-xs">
                     Server address
                   </td>
-                  <td className="py-1 text-neutral-600 text-xs">
+                  <td className="py-1 text-muted text-xs">
                     the <Cmd>endpoint</Cmd> (ends in <Cmd>/dav</Cmd>)
                   </td>
                 </tr>
-                <tr className="border-neutral-100 border-t">
-                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
-                    Username
-                  </td>
-                  <td className="py-1 text-neutral-600 text-xs">
+                <tr className="border-border border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-muted text-xs">Username</td>
+                  <td className="py-1 text-muted text-xs">
                     the <Cmd>username</Cmd> (starts with <Cmd>vk_</Cmd>)
                   </td>
                 </tr>
-                <tr className="border-neutral-100 border-t">
-                  <td className="py-1 pr-3 align-top font-medium text-neutral-700 text-xs">
-                    Password
-                  </td>
-                  <td className="py-1 text-neutral-600 text-xs">the generated password</td>
+                <tr className="border-border border-t">
+                  <td className="py-1 pr-3 align-top font-medium text-muted text-xs">Password</td>
+                  <td className="py-1 text-muted text-xs">the generated password</td>
                 </tr>
               </tbody>
             </table>
@@ -480,9 +478,9 @@ function ConnectObsidianCard() {
           </Step>
         </ol>
 
-        <div className="mt-5 border-neutral-100 border-t pt-4">
-          <p className="mb-2 font-medium text-neutral-700 text-sm">Good to know</p>
-          <ul className="flex list-disc flex-col gap-1 pl-5 text-neutral-600 text-xs">
+        <div className="mt-5 border-border border-t pt-4">
+          <p className="mb-2 font-medium text-muted text-sm">Good to know</p>
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-muted text-xs">
             <li>
               Markdown notes are indexed for search and the graph; other files (images, PDFs) are
               stored and synced but not indexed.

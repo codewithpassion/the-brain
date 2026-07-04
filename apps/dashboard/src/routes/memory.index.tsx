@@ -173,7 +173,7 @@ function MemoryListPage() {
     <div className="flex flex-col gap-6">
       <header>
         <h1 className="font-semibold text-2xl tracking-tight">Memory</h1>
-        <p className="text-neutral-500 text-sm">OKF agent-memory items.</p>
+        <p className="text-muted text-sm">OKF agent-memory items.</p>
       </header>
 
       {/* ── List + filter ── */}
@@ -184,7 +184,7 @@ function MemoryListPage() {
         <CardContent className="flex flex-col gap-4">
           <form onSubmit={onFilterSubmit} className="flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1 min-w-48">
-              <label htmlFor="mem-path" className="text-neutral-500 text-xs font-medium">
+              <label htmlFor="mem-path" className="text-muted text-xs font-medium">
                 Path filter
               </label>
               <Input
@@ -202,7 +202,7 @@ function MemoryListPage() {
                 onChange={(e) => setPrefixFilter(e.target.checked)}
                 className="rounded"
               />
-              <span className="text-neutral-700">Whole subtree</span>
+              <span className="text-muted">Whole subtree</span>
             </label>
             <Button type="submit" disabled={listLoading} className="h-8 text-sm">
               {listLoading ? "Loading…" : "Apply"}
@@ -211,25 +211,23 @@ function MemoryListPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="h-8 px-3 text-sm text-neutral-500 hover:text-neutral-800"
+                className="h-8 px-3 text-sm text-muted hover:text-ink"
               >
                 Clear
               </button>
             )}
           </form>
 
-          {!memories.ok && (
-            <p className="text-neutral-500 text-sm">Unavailable: {memories.error}</p>
-          )}
+          {!memories.ok && <p className="text-muted text-sm">Unavailable: {memories.error}</p>}
 
           {memories.ok &&
             (memList.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No memories found.</p>
+              <p className="text-muted text-sm">No memories found.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-neutral-400">
+                    <tr className="text-left text-faint">
                       <th className="pb-1 font-medium">Slug</th>
                       <th className="pb-1 font-medium">Type</th>
                       <th className="pb-1 font-medium">Title</th>
@@ -239,7 +237,7 @@ function MemoryListPage() {
                   </thead>
                   <tbody>
                     {memList.map((m) => (
-                      <tr key={m.slug} className="border-neutral-100 border-t">
+                      <tr key={m.slug} className="border-border border-t">
                         <td className="py-1.5 font-mono text-xs">
                           <Link
                             to="/memory/$"
@@ -249,12 +247,10 @@ function MemoryListPage() {
                             {m.slug}
                           </Link>
                         </td>
-                        <td className="py-1.5 text-neutral-600">{m.type}</td>
-                        <td className="py-1.5 text-neutral-700">
-                          {m.title !== "" ? m.title : "—"}
-                        </td>
-                        <td className="py-1.5 text-neutral-500">{m.version}</td>
-                        <td className="py-1.5 text-neutral-500 text-xs">{m.updatedAt}</td>
+                        <td className="py-1.5 text-muted">{m.type}</td>
+                        <td className="py-1.5 text-muted">{m.title !== "" ? m.title : "—"}</td>
+                        <td className="py-1.5 text-muted">{m.version}</td>
+                        <td className="py-1.5 text-muted text-xs">{m.updatedAt}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -273,7 +269,7 @@ function MemoryListPage() {
           <form onSubmit={handleCreate} className="flex flex-col gap-3 max-w-lg">
             <div className="flex gap-2">
               <div className="flex flex-col gap-1 flex-1">
-                <label htmlFor="new-slug" className="text-neutral-700 text-sm">
+                <label htmlFor="new-slug" className="text-muted text-sm">
                   Slug
                 </label>
                 <Input
@@ -285,7 +281,7 @@ function MemoryListPage() {
                 />
               </div>
               <div className="flex flex-col gap-1 w-36">
-                <label htmlFor="new-type" className="text-neutral-700 text-sm">
+                <label htmlFor="new-type" className="text-muted text-sm">
                   Type
                 </label>
                 <Input
@@ -298,8 +294,8 @@ function MemoryListPage() {
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="new-tags" className="text-neutral-700 text-sm">
-                Tags <span className="text-neutral-400">(comma-separated)</span>
+              <label htmlFor="new-tags" className="text-muted text-sm">
+                Tags <span className="text-faint">(comma-separated)</span>
               </label>
               <Input
                 id="new-tags"
@@ -310,7 +306,7 @@ function MemoryListPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="new-body" className="text-neutral-700 text-sm">
+              <label htmlFor="new-body" className="text-muted text-sm">
                 Body
               </label>
               <textarea
@@ -318,10 +314,10 @@ function MemoryListPage() {
                 value={newBody}
                 onChange={(e) => setNewBody(e.target.value)}
                 rows={4}
-                className="w-full rounded-md border border-neutral-200 bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                className="w-full rounded-ui border border-border bg-bg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/60"
               />
             </div>
-            {createError !== null && <p className="text-red-600 text-sm">{createError}</p>}
+            {createError !== null && <p className="text-danger text-sm">{createError}</p>}
             <div>
               <Button type="submit" disabled={creating || !newSlug.trim() || !newType.trim()}>
                 {creating ? "Creating…" : "Create"}
@@ -345,36 +341,33 @@ function MemoryListPage() {
               <button
                 type="button"
                 onClick={downloadAll}
-                className="rounded border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                className="rounded border border-border px-3 py-1.5 text-sm text-muted hover:bg-raised"
               >
                 Download bundle
               </button>
             )}
           </div>
           {exportError !== null && (
-            <p className="text-red-600 text-sm">Export failed: {exportError}</p>
+            <p className="text-danger text-sm">Export failed: {exportError}</p>
           )}
           {exportData !== null && (
             <div className="flex flex-col gap-3">
-              <p className="text-neutral-500 text-xs">
+              <p className="text-muted text-xs">
                 {exportData.count} file(s) · OKF {exportData.okfVersion}
               </p>
               {exportData.files.map((f) => (
-                <div
-                  key={f.path}
-                  className="rounded-md border border-neutral-100 bg-neutral-50 p-3"
-                >
+                <div key={f.path} className="rounded-ui border border-border bg-raised p-3">
                   <div className="mb-1.5 flex items-center justify-between">
-                    <span className="font-mono text-neutral-600 text-xs">{f.path}</span>
+                    <span className="font-mono text-muted text-xs">{f.path}</span>
                     <button
                       type="button"
                       onClick={() => copyToClipboard(f.content)}
-                      className="rounded border border-neutral-200 bg-white px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-muted text-xs hover:bg-raised"
                     >
                       Copy
                     </button>
                   </div>
-                  <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-neutral-700">
+                  <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-muted">
                     {f.content}
                   </pre>
                 </div>
@@ -392,7 +385,7 @@ function MemoryListPage() {
         <CardContent>
           <form onSubmit={handleImport} className="flex flex-col gap-3 max-w-lg">
             <div className="flex flex-col gap-1">
-              <label htmlFor="import-path" className="text-neutral-700 text-sm">
+              <label htmlFor="import-path" className="text-muted text-sm">
                 File path
               </label>
               <Input
@@ -404,7 +397,7 @@ function MemoryListPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="import-content" className="text-neutral-700 text-sm">
+              <label htmlFor="import-content" className="text-muted text-sm">
                 File content (OKF markdown)
               </label>
               <textarea
@@ -412,15 +405,15 @@ function MemoryListPage() {
                 value={importContent}
                 onChange={(e) => setImportContent(e.target.value)}
                 rows={8}
-                className="w-full rounded-md border border-neutral-200 bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                className="w-full rounded-ui border border-border bg-bg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/60"
                 placeholder="---&#10;type: decision&#10;title: My Decision&#10;---&#10;&#10;Body content here."
               />
             </div>
             {importError !== null && (
-              <p className="text-red-600 text-sm">Import failed: {importError}</p>
+              <p className="text-danger text-sm">Import failed: {importError}</p>
             )}
             {importResult !== null && (
-              <p className="text-neutral-600 text-sm">
+              <p className="text-muted text-sm">
                 Done: {importResult.imported} imported, {importResult.skipped} skipped,{" "}
                 {importResult.failed} failed.
               </p>

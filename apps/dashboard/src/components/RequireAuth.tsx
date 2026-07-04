@@ -19,13 +19,13 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       <Show when="signed-out">
         <Card>
           <CardContent className="flex flex-col items-start gap-3 py-8">
-            <p className="text-neutral-600 text-sm">
+            <p className="text-muted text-sm">
               Please sign in to use The Brain. Your memory is private to your tenant.
             </p>
             <Link
               to="/sign-in/$"
               params={{ _splat: "" }}
-              className="rounded-md bg-neutral-900 px-4 py-2 font-medium text-sm text-white hover:bg-neutral-700"
+              className="rounded-ui bg-accent px-4 py-2 font-medium text-accent-ink text-sm hover:opacity-90"
             >
               Sign in
             </Link>

@@ -50,7 +50,7 @@ function MemoryDetailPage() {
     return (
       <div className="flex flex-col gap-6">
         <BackLink />
-        <p className="text-red-600 text-sm">Error loading memory: {initialItem.error}</p>
+        <p className="text-danger text-sm">Error loading memory: {initialItem.error}</p>
       </div>
     )
   }
@@ -59,7 +59,7 @@ function MemoryDetailPage() {
     return (
       <div className="flex flex-col gap-6">
         <BackLink />
-        <p className="text-neutral-500 text-sm">Memory "{slug}" not found.</p>
+        <p className="text-muted text-sm">Memory "{slug}" not found.</p>
       </div>
     )
   }
@@ -154,19 +154,19 @@ function MemoryDetailPage() {
           )}
           {forgetConfirm ? (
             <span className="flex items-center gap-1 text-xs">
-              <span className="text-neutral-500">Forget?</span>
+              <span className="text-muted">Forget?</span>
               <button
                 type="button"
                 disabled={forgetting}
                 onClick={handleForget}
-                className="rounded bg-red-600 px-2 py-0.5 text-white text-xs hover:bg-red-700 disabled:opacity-50"
+                className="rounded bg-danger px-2 py-0.5 text-accent-ink text-xs hover:bg-danger/90 disabled:opacity-50"
               >
                 {forgetting ? "…" : "Yes"}
               </button>
               <button
                 type="button"
                 onClick={() => setForgetConfirm(false)}
-                className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+                className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
               >
                 No
               </button>
@@ -176,7 +176,7 @@ function MemoryDetailPage() {
               variant="outline"
               size="sm"
               onClick={() => setForgetConfirm(true)}
-              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              className="text-danger hover:bg-danger/10 hover:text-danger"
             >
               Forget
             </Button>
@@ -193,9 +193,7 @@ function MemoryDetailPage() {
           <Badge variant="secondary">{mem.type}</Badge>
           <Badge variant="outline">{mem.visibility}</Badge>
         </div>
-        {mem.title !== "" && (
-          <p className="mt-0.5 font-mono text-neutral-500 text-sm">{mem.slug}</p>
-        )}
+        {mem.title !== "" && <p className="mt-0.5 font-mono text-muted text-sm">{mem.slug}</p>}
       </header>
 
       {/* ── Metadata ── */}
@@ -210,7 +208,7 @@ function MemoryDetailPage() {
             <MetaRow label="Visibility" value={mem.visibility} />
             {mem.scope !== null && <MetaRow label="Scope" value={mem.scope} mono />}
             <MetaRow label="Version" value={String(mem.version)} />
-            <dt className="font-medium text-neutral-500">Tags</dt>
+            <dt className="font-medium text-muted">Tags</dt>
             <dd>
               {tags.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
@@ -221,7 +219,7 @@ function MemoryDetailPage() {
                   ))}
                 </div>
               ) : (
-                <span className="text-neutral-300">—</span>
+                <span className="text-faint">—</span>
               )}
             </dd>
             <MetaRow label="Created" value={mem.createdAt} />
@@ -240,48 +238,48 @@ function MemoryDetailPage() {
             <div className="flex flex-col gap-3">
               <div className="flex gap-2">
                 <div className="flex flex-col gap-1 flex-1">
-                  <label htmlFor="edit-type" className="text-neutral-700 text-sm">
+                  <label htmlFor="edit-type" className="text-muted text-sm">
                     Type
                   </label>
                   <input
                     id="edit-type"
                     value={editType}
                     onChange={(e) => setEditType(e.target.value)}
-                    className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                    className="w-full rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
                   />
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
-                  <label htmlFor="edit-title" className="text-neutral-700 text-sm">
+                  <label htmlFor="edit-title" className="text-muted text-sm">
                     Title
                   </label>
                   <input
                     id="edit-title"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                    className="w-full rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
                   />
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <label htmlFor="edit-tags" className="text-neutral-700 text-sm">
-                  Tags <span className="text-neutral-400">(comma-separated)</span>
+                <label htmlFor="edit-tags" className="text-muted text-sm">
+                  Tags <span className="text-faint">(comma-separated)</span>
                 </label>
                 <input
                   id="edit-tags"
                   value={editTags}
                   onChange={(e) => setEditTags(e.target.value)}
                   placeholder="e.g. planning, preferences"
-                  className="w-full rounded border border-neutral-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                  className="w-full rounded border border-border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
                 />
               </div>
               <textarea
                 value={editBody}
                 onChange={(e) => setEditBody(e.target.value)}
                 rows={16}
-                className="w-full rounded-md border border-neutral-200 bg-white p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                className="w-full rounded-ui border border-border bg-bg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent/60"
               />
               {saveError !== null && (
-                <p className="text-red-600 text-sm">Save failed: {saveError}</p>
+                <p className="text-danger text-sm">Save failed: {saveError}</p>
               )}
               <div className="flex gap-2">
                 <Button onClick={handleSave} disabled={saving}>
@@ -293,12 +291,8 @@ function MemoryDetailPage() {
               </div>
             </div>
           ) : (
-            <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-neutral-100 bg-neutral-50 p-4 font-mono text-sm leading-relaxed">
-              {mem.body !== "" ? (
-                mem.body
-              ) : (
-                <span className="text-neutral-300">No body content.</span>
-              )}
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-ui border border-border bg-raised p-4 font-mono text-sm leading-relaxed">
+              {mem.body !== "" ? mem.body : <span className="text-faint">No body content.</span>}
             </pre>
           )}
         </CardContent>
@@ -314,13 +308,13 @@ function MemoryDetailPage() {
         </CardHeader>
         {historyError !== null && (
           <CardContent>
-            <p className="text-red-600 text-sm">Error: {historyError}</p>
+            <p className="text-danger text-sm">Error: {historyError}</p>
           </CardContent>
         )}
         {history !== null && (
           <CardContent>
             {history.length === 0 ? (
-              <p className="text-neutral-500 text-sm">No revision history.</p>
+              <p className="text-muted text-sm">No revision history.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {history.map((rev) => (
@@ -369,19 +363,19 @@ function RevisionRow({
   }
 
   return (
-    <div className="border-neutral-100 border-b pb-3 last:border-0 last:pb-0">
+    <div className="border-border border-b pb-3 last:border-0 last:pb-0">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-neutral-700 text-xs">v{rev.version}</span>
+            <span className="font-mono text-muted text-xs">v{rev.version}</span>
             <Badge variant="outline">{rev.type}</Badge>
-            <span className="text-neutral-400 text-xs">{rev.createdAt}</span>
+            <span className="text-faint text-xs">{rev.createdAt}</span>
           </div>
-          {rev.title !== "" && <span className="text-neutral-600 text-sm">{rev.title}</span>}
+          {rev.title !== "" && <span className="text-muted text-sm">{rev.title}</span>}
           {rev.authorUserId !== null && (
-            <span className="text-neutral-400 text-xs">by {rev.authorUserId}</span>
+            <span className="text-faint text-xs">by {rev.authorUserId}</span>
           )}
-          <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap font-mono text-neutral-600 text-xs">
+          <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap font-mono text-muted text-xs">
             {rev.body.slice(0, 300)}
             {rev.body.length > 300 ? "…" : ""}
           </pre>
@@ -389,19 +383,19 @@ function RevisionRow({
         <div className="shrink-0">
           {confirming ? (
             <span className="flex items-center gap-1 text-xs">
-              <span className="text-neutral-500">Roll back?</span>
+              <span className="text-muted">Roll back?</span>
               <button
                 type="button"
                 disabled={rolling}
                 onClick={handleRollback}
-                className="rounded bg-neutral-800 px-2 py-0.5 text-white text-xs hover:bg-neutral-700 disabled:opacity-50"
+                className="rounded bg-accent px-2 py-0.5 text-accent-ink text-xs hover:opacity-90 disabled:opacity-50"
               >
                 {rolling ? "…" : "Yes"}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
-                className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+                className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
               >
                 No
               </button>
@@ -410,7 +404,7 @@ function RevisionRow({
             <button
               type="button"
               onClick={() => setConfirming(true)}
-              className="rounded border border-neutral-200 px-2 py-0.5 text-neutral-600 text-xs hover:bg-neutral-50"
+              className="rounded border border-border px-2 py-0.5 text-muted text-xs hover:bg-raised"
             >
               Roll back
             </button>
@@ -423,7 +417,7 @@ function RevisionRow({
 
 function BackLink() {
   return (
-    <Link to="/memory" className="text-neutral-500 text-sm hover:text-neutral-800">
+    <Link to="/memory" className="text-muted text-sm hover:text-ink">
       ← Memory
     </Link>
   )
@@ -432,10 +426,8 @@ function BackLink() {
 function MetaRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <>
-      <dt className="font-medium text-neutral-500">{label}</dt>
-      <dd className={mono === true ? "font-mono text-xs text-neutral-700" : "text-neutral-700"}>
-        {value}
-      </dd>
+      <dt className="font-medium text-muted">{label}</dt>
+      <dd className={mono === true ? "font-mono text-xs text-muted" : "text-muted"}>{value}</dd>
     </>
   )
 }

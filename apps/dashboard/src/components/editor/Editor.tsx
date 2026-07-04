@@ -49,10 +49,10 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ initialMarkdown, onChang
     [editor, initialMarkdown],
   )
 
-  if (!editor) return <div className="min-h-[24rem] text-neutral-400 text-sm">Loading editor…</div>
+  if (!editor) return <div className="min-h-[24rem] text-faint text-sm">Loading editor…</div>
 
   return (
-    <div className="rounded-md border border-neutral-200">
+    <div className="rounded-ui border border-border">
       <EditorToolbar editor={editor} />
       <div className="px-4 py-3">
         <EditorContent editor={editor} />

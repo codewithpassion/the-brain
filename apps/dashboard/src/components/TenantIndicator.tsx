@@ -39,11 +39,11 @@ export function TenantIndicator() {
           .catch(() => toast("Copy failed"))
       }}
       title={`Click to copy the MCP server URL\n${url}`}
-      className="flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-neutral-600 text-xs hover:bg-neutral-50"
+      className="flex items-center gap-1.5 rounded-ui border border-border bg-surface px-2.5 py-1 text-muted text-xs hover:bg-raised"
       aria-label="Copy MCP server URL"
     >
       <svg
-        className="h-3.5 w-3.5 text-neutral-400"
+        className="h-3.5 w-3.5 text-faint"
         viewBox="0 0 16 16"
         fill="none"
         stroke="currentColor"

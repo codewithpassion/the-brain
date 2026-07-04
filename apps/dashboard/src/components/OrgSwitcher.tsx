@@ -96,14 +96,14 @@ export function OrgSwitcher() {
           setCreating(false)
           setError(null)
         }}
-        className="flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-sm text-neutral-700 hover:bg-neutral-50"
+        className="flex items-center gap-1.5 rounded-ui border border-border bg-surface px-2.5 py-1 text-sm text-muted hover:bg-raised"
         title="Switch org"
       >
         <span className="max-w-[120px] truncate font-mono text-xs">
           {activeOrg?.name ?? activeTenant ?? "…"}
         </span>
         <svg
-          className="h-3 w-3 text-neutral-400"
+          className="h-3 w-3 text-faint"
           viewBox="0 0 12 12"
           fill="none"
           stroke="currentColor"
@@ -115,7 +115,7 @@ export function OrgSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-md border border-neutral-200 bg-white py-1 shadow-md">
+        <div className="absolute right-0 bottom-full z-50 mb-1 min-w-[180px] rounded-ui border border-border bg-surface py-1 shadow-pop">
           {!creating ? (
             <>
               {orgs.map((org) => (
@@ -126,13 +126,13 @@ export function OrgSwitcher() {
                     setOpen(false)
                     if (!isActive(org)) switchToOrg(org.slug)
                   }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 ${
-                    isActive(org) ? "font-semibold text-neutral-900" : "text-neutral-700"
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-raised ${
+                    isActive(org) ? "font-semibold text-ink" : "text-muted"
                   }`}
                 >
                   {isActive(org) && (
                     <svg
-                      className="h-3 w-3 shrink-0 text-neutral-900"
+                      className="h-3 w-3 shrink-0 text-ink"
                       viewBox="0 0 12 12"
                       fill="currentColor"
                       aria-hidden="true"
@@ -142,14 +142,14 @@ export function OrgSwitcher() {
                   )}
                   {!isActive(org) && <span className="h-3 w-3 shrink-0" />}
                   <span className="truncate">{org.name}</span>
-                  <span className="ml-auto shrink-0 text-neutral-400 text-xs">{org.role}</span>
+                  <span className="ml-auto shrink-0 text-faint text-xs">{org.role}</span>
                 </button>
               ))}
-              <hr className="my-1 border-neutral-100" />
+              <hr className="my-1 border-border" />
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-neutral-600 hover:bg-neutral-50"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-muted hover:bg-raised"
               >
                 <svg
                   className="h-3 w-3"
@@ -166,13 +166,13 @@ export function OrgSwitcher() {
             </>
           ) : (
             <div className="px-3 py-2">
-              <p className="mb-2 text-xs font-medium text-neutral-700">New org</p>
+              <p className="mb-2 text-xs font-medium text-muted">New org</p>
               <input
                 type="text"
                 placeholder="Name"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                className="mb-1.5 w-full rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                className="mb-1.5 w-full rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
                 // biome-ignore lint/a11y/noAutofocus: intentional UX for modal input
                 autoFocus
               />
@@ -181,15 +181,15 @@ export function OrgSwitcher() {
                 placeholder="Slug (optional)"
                 value={newSlug}
                 onChange={(e) => setNewSlug(e.target.value)}
-                className="mb-2 w-full rounded border border-neutral-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                className="mb-2 w-full rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-accent/60"
               />
-              {error && <p className="mb-1.5 text-red-600 text-xs">{error}</p>}
+              {error && <p className="mb-1.5 text-danger text-xs">{error}</p>}
               <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={handleCreate}
                   disabled={loading || !newName.trim()}
-                  className="rounded bg-neutral-900 px-2.5 py-1 text-white text-xs hover:bg-neutral-700 disabled:opacity-50"
+                  className="rounded bg-accent px-2.5 py-1 text-accent-ink text-xs hover:opacity-90 disabled:opacity-50"
                 >
                   {loading ? "Creating…" : "Create"}
                 </button>
@@ -201,7 +201,7 @@ export function OrgSwitcher() {
                     setNewSlug("")
                     setError(null)
                   }}
-                  className="rounded border border-neutral-200 px-2.5 py-1 text-neutral-600 text-xs hover:bg-neutral-50"
+                  className="rounded border border-border px-2.5 py-1 text-muted text-xs hover:bg-raised"
                 >
                   Cancel
                 </button>
