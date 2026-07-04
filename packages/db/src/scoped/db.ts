@@ -30,6 +30,7 @@ import {
   facts,
   memoryRecallTraces,
   memoryUsePolicy,
+  pages,
   tokenSpend,
 } from "../schema"
 import { type AuditSpec, batchWithAudit } from "./audit"
@@ -42,6 +43,14 @@ import {
 
 /** Alias of `documents` for the parent-part JOIN (§4.3 citation → parent resolution, W4.5). */
 const parentDocAlias = alias(documents, "parent_doc")
+
+/**
+ * Alias of `pages` for the backing-document → PAGE reverse-map (v3/W3). A chunk whose (root) document
+ * is a page's backing doc cites the PAGE slug, not the raw doc slug — uniform for wiki/entity backing
+ * docs (where the slugs already match) AND the shared insight document (page slug `insights/<k>` wins
+ * over the doc slug `insight-<k>-<fp>`). NULL for a non-page-backed document (citation unchanged).
+ */
+const citePageAlias = alias(pages, "cite_page")
 
 /** Both `drizzle-orm/d1` (async) and `drizzle-orm/bun-sqlite` (sync) satisfy this. */
 export type BrainDrizzle = BaseSQLiteDatabase<"sync" | "async", unknown>
@@ -286,8 +295,11 @@ export class ScopedDB {
       embeddedAt: chunks.embeddedAt,
       embeddingModel: chunks.embeddingModel,
       updatedAt: chunks.updatedAt,
-      slug: sql<string>`COALESCE(${parentDocAlias.slug}, ${documents.slug})`,
-      title: sql<string | null>`COALESCE(${parentDocAlias.title}, ${documents.title})`,
+      // W3: a page-backed document's chunk cites the PAGE slug (reverse-map via pages.document_id).
+      slug: sql<string>`COALESCE(${citePageAlias.slug}, ${parentDocAlias.slug}, ${documents.slug})`,
+      title: sql<
+        string | null
+      >`COALESCE(${citePageAlias.title}, ${parentDocAlias.title}, ${documents.title})`,
       sourceId: sql<string | null>`COALESCE(${parentDocAlias.sourceId}, ${documents.sourceId})`,
       trustGrade: sql<string>`COALESCE(${memoryUsePolicy.trustGrade}, 'evidence')`,
     }
@@ -326,6 +338,18 @@ export class ScopedDB {
           and(
             eq(parentDocAlias.id, documents.parentDocumentId),
             eq(parentDocAlias.tenantId, documents.tenantId),
+          ),
+        )
+        // W3 reverse-map: the page whose backing doc is this chunk's ROOT document (index ix_pages_document).
+        .leftJoin(
+          citePageAlias,
+          and(
+            eq(
+              citePageAlias.documentId,
+              sql`COALESCE(${documents.parentDocumentId}, ${documents.id})`,
+            ),
+            eq(citePageAlias.tenantId, documents.tenantId),
+            isNull(citePageAlias.deletedAt),
           ),
         )
         .leftJoin(
@@ -485,6 +509,9 @@ export class ScopedDB {
         and(
           eq(documents.tenantId, this.p.tenantId),
           isNull(documents.deletedAt), // live docs only
+          // v3/W3: a page's backing document (sourceKind='page') is an internal search index, not a
+          // user-facing document — never list it (the wiki page is the user-facing surface).
+          sql`(${documents.sourceKind} IS NULL OR ${documents.sourceKind} <> 'page')`,
           scopePredicate(this.p, documents.scope),
           opts?.status ? eq(documents.status, opts.status) : undefined,
         ),
@@ -583,6 +610,33 @@ export class ScopedDB {
           isNull(documents.deletedAt),
         ),
       )
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /**
+   * A backing document's sync fields by id, INCLUDING soft-deleted rows (v3/W3). Unlike
+   * `getDocumentById` (live only), this lets `syncBackingDoc` find a soft-deleted backing doc after
+   * a page delete → RESURRECT it (supersede + `deleted_at=null`) instead of a fresh INSERT that would
+   * collide on the unique `(tenant,slug)`/`(tenant,scope,fingerprint)` indexes (they span soft-deletes).
+   */
+  async getBackingDocById(documentId: string): Promise<{
+    id: string
+    fingerprint: string
+    status: string
+    bodyR2Key: string | null
+    deletedAt: string | null
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: documents.id,
+        fingerprint: documents.fingerprint,
+        status: documents.status,
+        bodyR2Key: documents.bodyR2Key,
+        deletedAt: documents.deletedAt,
+      })
+      .from(documents)
+      .where(and(eq(documents.tenantId, this.p.tenantId), eq(documents.id, documentId)))
       .limit(1)
     return rows[0] ?? null
   }
@@ -1033,6 +1087,8 @@ export class ScopedDB {
        */
       path?: string | null
       tags?: string[]
+      /** New slug — a v3/W3 backing doc follows its page's rename (`wiki_move_page`). */
+      slug?: string
     },
   ): Promise<void> {
     const update = this.db
@@ -1046,6 +1102,7 @@ export class ScopedDB {
         ...(patch.contentType !== undefined ? { contentType: patch.contentType } : {}),
         ...(patch.path !== undefined ? { path: patch.path } : {}),
         ...(patch.tags !== undefined ? { tags: JSON.stringify(patch.tags) } : {}),
+        ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
       })
       .where(and(eq(documents.id, documentId), eq(documents.tenantId, this.p.tenantId)))
     await this.batchWithAudit([update], {

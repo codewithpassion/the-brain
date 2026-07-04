@@ -32,6 +32,8 @@ export interface BatchIngestParams {
   contentType: string
   scope?: string | null
   teamId?: string | null
+  /** Chunk author (v3/W3) — set for a PRIVATE backing page so its author can search it. */
+  userId?: string | null
   visibility?: string
   /** Path namespace mirrored onto every produced chunk (e.g. "/project/x"). */
   path?: string | null
@@ -40,6 +42,13 @@ export interface BatchIngestParams {
    * a caller (or canary) may shrink them to force an oversized-doc split.
    */
   partLimits?: PlanPartsOptions
+  /**
+   * When true, `runBatchIngest` SKIPS KG entity extraction for this document (v3/W3): an
+   * AGENT-authored page's backing doc is searchable (chunks/FTS/vectors) but must NEVER emit
+   * `sourceKind='chunk'` mentions — else the dream's own synthesis feeds the graph (anti-loop).
+   * `runBatchIngestCore` never extracts, so this only gates the full `runBatchIngest` path.
+   */
+  skipEntityExtraction?: boolean
 }
 
 export interface BatchIngestResult {
@@ -121,6 +130,7 @@ export const runBatchIngestCore = async (
     tokenCount: number
     scope: string | null
     teamId: string | null
+    userId: string | null
     visibility: string
     path: string | null
   }[] = []
@@ -134,6 +144,7 @@ export const runBatchIngestCore = async (
       tokenCount: chunk.tokenCount,
       scope: params.scope ?? null,
       teamId: params.teamId ?? null,
+      userId: params.userId ?? null,
       visibility: params.visibility ?? "world",
       path: params.path ?? null,
     }))

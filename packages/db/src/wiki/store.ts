@@ -331,10 +331,12 @@ export class WikiStore {
   }
 
   /** Soft-delete a wiki page. Wiki-provenance only; idempotent (absent/already-deleted → false). */
-  async deletePage(slug: string): Promise<{ slug: string; deleted: boolean }> {
+  async deletePage(
+    slug: string,
+  ): Promise<{ slug: string; deleted: boolean; pageId: string | null }> {
     if (this.p.readOnly) throw new Error("wiki_delete_page denied: read-only principal")
     const live = await this.pages.findBySlug(slug)
-    if (live === undefined || live.deletedAt !== null) return { slug, deleted: false }
+    if (live === undefined || live.deletedAt !== null) return { slug, deleted: false, pageId: null }
     this.assertWikiProvenance(live, "wiki_delete_page", slug)
     this.assertCanEdit(live, slug)
     const now = new Date().toISOString()
@@ -345,7 +347,7 @@ export class WikiStore {
         and(eq(pages.id, live.id), eq(pages.tenantId, this.p.tenantId), isNull(pages.deletedAt)),
       )
     await this.pages.commitBatch([update, this.pages.auditStatement("wiki.delete", slug)])
-    return { slug, deleted: true }
+    return { slug, deleted: true, pageId: live.id }
   }
 
   // ── reads (a page is a page — memory-provenance pages surface here too, W-i1) ────────

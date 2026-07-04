@@ -489,6 +489,13 @@ describe("dream reflection maintains the entity page + insight page (author=syst
     const slugKey = "ada-byron" // slugify("Ada Byron")
     const insight = await wiki({ tenantId: "eR" }).getPage(`insights/${slugKey}`)
     expect(insight?.page.ingestedVia).toBe("insight")
+    // W3 (Option A): the insight page reuses the EXISTING insight document as its backing doc.
+    expect(
+      await count(
+        "SELECT count(*) AS n FROM pages WHERE tenant_id='eR' AND slug=? AND document_id IS NOT NULL",
+        [`insights/${slugKey}`],
+      ),
+    ).toBe(1)
 
     const entityPage = await wiki({ tenantId: "eR" }).getPage(entityPageSlug("person", "Ada Byron"))
     expect(entityPage?.page.ingestedVia).toBe("entity")

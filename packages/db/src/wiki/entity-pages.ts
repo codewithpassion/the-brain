@@ -437,7 +437,7 @@ export class EntityPageStore {
   async repointMergedPage(
     loserId: string,
     winnerId: string,
-  ): Promise<{ repointed: boolean; winnerSlug?: string }> {
+  ): Promise<{ repointed: boolean; winnerSlug?: string; loserPageId?: string }> {
     if (this.p.readOnly) throw new Error("entity page repoint denied: read-only principal")
     const loserRows = await this.db
       .select({
@@ -531,6 +531,6 @@ export class EntityPageStore {
         JSON.stringify({ loserId, winnerId, winnerSlug }),
       ),
     ])
-    return { repointed: true, winnerSlug }
+    return { repointed: true, winnerSlug, loserPageId: loserPage.id }
   }
 }

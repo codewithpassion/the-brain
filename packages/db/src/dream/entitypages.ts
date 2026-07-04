@@ -14,10 +14,11 @@
 import type { Principal } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
-import type { ScopedGraph } from "../graph/scoped-graph"
-import type { BrainDrizzle, ScopedDB } from "../scoped/db"
+import { runBatchIngestCore } from "../ingest"
+import { syncBackingDoc } from "../pages/backing-doc"
+import type { BrainDrizzle } from "../scoped/db"
 import { monthlyWindow } from "../search/ports"
-import { createScopedServices } from "../services"
+import { createScopedServices, type ScopedServices } from "../services"
 import { EntityPageStore } from "../wiki/entity-pages"
 import { runDreamJob } from "./job"
 import { entitypagesRunId } from "./plan"
@@ -26,10 +27,11 @@ import { type DreamRunStats, type DreamRunStatus, DreamRunStore } from "./runs"
 
 const ENTITYPAGES_PAGE_SIZE = 500
 
-/** The tenant-scoped bundle the entity-page backfill needs. */
-export interface DreamEntityPagesServices {
-  db: ScopedDB
-  graph: ScopedGraph
+/**
+ * The tenant-scoped bundle the entity-page backfill needs — the FULL `ScopedServices` (for the W3
+ * backing-doc sync: blobs/vectors/db/graph) plus the raw handle + run store.
+ */
+export type DreamEntityPagesServices = ScopedServices & {
   raw: BrainDrizzle
   runs: DreamRunStore
   principal: Principal
@@ -87,6 +89,12 @@ export const runDreamEntityPages = async (
         mintOnly: true,
       })
       const minted = res !== null && res.changed
+      // W3: a freshly-minted entity page gets a searchable backing doc (KG-skipped agent origin).
+      if (minted && res?.pageId != null) {
+        await syncBackingDoc(services, res.pageId, (params) =>
+          runBatchIngestCore(services, params).then(() => {}),
+        )
+      }
       return {
         neurons: 0,
         statsDelta: { entitiesExamined: 1, skipped: minted ? 0 : 1 },
@@ -114,8 +122,7 @@ export const createDreamEntityPagesServices = (
   const base = createScopedServices(env, principal)
   const raw = drizzle(env.DB)
   return {
-    db: base.db,
-    graph: base.graph,
+    ...base,
     raw,
     runs: new DreamRunStore(raw, principal),
     principal,

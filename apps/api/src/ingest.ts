@@ -67,7 +67,9 @@ export const runBatchIngest = async (
   // regardless. At deploy the durable EntityExtractionWorkflow wraps this across step.do() boundaries.
   // An oversized-doc split (§4.3, W4.5) puts overflow chunks under child part documents, so extract
   // over the root AND every materialized part — otherwise a split doc's later parts get no KG.
-  if (result.status !== "failed") {
+  // W3 anti-loop: an agent-authored page's backing doc is searchable but NEVER KG-extracted, so
+  // dream-synthesis prose can't create chunk-mentions that feed the graph back into the dream.
+  if (result.status !== "failed" && params.skipEntityExtraction !== true) {
     for (const docId of [params.documentId, ...result.partDocumentIds]) {
       await runEntityExtraction(services, docId).catch((err) => {
         console.error("entity-extraction failed for", docId, err)

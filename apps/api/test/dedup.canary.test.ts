@@ -6,6 +6,7 @@ import {
   runDreamDedup,
   ScopedDB,
   ScopedGraph,
+  ScopedR2,
   ScopedVectorize,
   upsertEntityWithVectorDedup,
 } from "@brain/db"
@@ -194,12 +195,22 @@ const dedupServices = (
   return {
     db: new ScopedDB(rawDb, p),
     graph: new ScopedGraph(rawDb, p),
+    vectors: new ScopedVectorize(index, p),
     entityVectors: new ScopedVectorize(index, p),
-    ai: { embed: embedStub, gen },
+    blobs: new ScopedR2(env_.BODIES, p),
+    // Full AI slice (W3 widened DreamDedupServices to ScopedServices); only embed/gen are exercised.
+    ai: {
+      embed: embedStub,
+      embedForIndex: async (t: string[]) => t.map(() => new Array(1024).fill(0)),
+      gen,
+      genExtract: async () => null,
+      rerank: async () => [],
+      transcribe: async () => ({ text: "", neurons: 0 }),
+    },
     runs: new DreamRunStore(rawDb, p),
     principal: p,
     raw: rawDb,
-  }
+  } as unknown as DreamDedupServices
 }
 
 beforeAll(async () => {

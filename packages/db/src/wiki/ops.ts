@@ -103,6 +103,7 @@ export const WIKI_SAVE_PAGE_OP = defineOp({
   description:
     "Create or update a wiki page by slug (versioned; collaboratively editable within scope/visibility). " +
     "Unresolved [[wikilinks]] become red links that resolve when the target page is created. " +
+    "A saved page becomes searchable (findable via search/think and cited by its page slug) within about a minute. " +
     "Use for durable, human/agent-authored knowledge pages meant to be browsed and linked. " +
     "Disambiguation: memory_set = agent-only addressable memory re-read verbatim by slug (not a wiki page); " +
     "add_thought = a quick timestamped capture into the ingest stream; ingest_document = index external " +
@@ -202,7 +203,7 @@ export const WIKI_DELETE_PAGE_OP = defineOp({
   capability: "write",
   readOnly: false,
   input: z.object({ slug: z.string().min(1).describe("The page slug to delete.") }),
-  output: z.object({ slug: z.string(), deleted: z.boolean() }),
+  output: z.object({ slug: z.string(), deleted: z.boolean(), pageId: z.string().nullable() }),
 })
 
 /** Every wiki op CONTRACT (registered handler-free, mirroring `MEMORY_OPS`). */
@@ -244,4 +245,4 @@ export const moveWikiPage = (
 export const deleteWikiPage = (
   store: WikiStore,
   slug: string,
-): Promise<{ slug: string; deleted: boolean }> => store.deletePage(slug)
+): Promise<{ slug: string; deleted: boolean; pageId: string | null }> => store.deletePage(slug)

@@ -423,6 +423,55 @@ export class ScopedGraph {
       .orderBy(desc(timelineEntries.date), desc(timelineEntries.id))
   }
 
+  // ── BACKING-DOCUMENT SYNC (v3/W3; page → searchable documents row) ──────────────────
+
+  /**
+   * A page's fields for backing-document sync, tenant-scoped by id (NO visibility gate — the caller
+   * just wrote this page). Null when absent. Carries `documentId` so the sync can supersede vs insert.
+   */
+  async getPageForBackingDoc(pageId: string): Promise<{
+    id: string
+    slug: string
+    type: string
+    title: string
+    visibility: string
+    scope: string | null
+    teamId: string | null
+    userId: string | null
+    ingestedVia: string | null
+    documentId: string | null
+    body: string
+    deletedAt: string | null
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: pages.id,
+        slug: pages.slug,
+        type: pages.type,
+        title: pages.title,
+        visibility: pages.visibility,
+        scope: pages.scope,
+        teamId: pages.teamId,
+        userId: pages.userId,
+        ingestedVia: pages.ingestedVia,
+        documentId: pages.documentId,
+        body: pages.compiledTruth,
+        deletedAt: pages.deletedAt,
+      })
+      .from(pages)
+      .where(and(eq(pages.tenantId, this.p.tenantId), eq(pages.id, pageId)))
+      .limit(1)
+    return rows[0] ?? null
+  }
+
+  /** Link a page to its backing document (`pages.document_id`). Tenant-forced. */
+  async linkPageBackingDoc(pageId: string, documentId: string | null): Promise<void> {
+    await this.db
+      .update(pages)
+      .set({ documentId })
+      .where(and(eq(pages.id, pageId), eq(pages.tenantId, this.p.tenantId)))
+  }
+
   // ── DOC-GRAPH WRITES (W4.4; manual curation — every mutation audited in-batch) ─────
 
   /**

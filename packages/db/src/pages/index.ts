@@ -3,6 +3,9 @@
  * agent memory (`MemoryStore`) and the wiki (`WikiStore`) drive, plus the pure helpers
  * (`contentHash`/`parseFrontmatter`/`extractLinkSlugs`) reused across the page layer.
  */
+
+export type { SyncBackingDocResult } from "./backing-doc"
+export { deleteBackingDoc, syncBackingDoc } from "./backing-doc"
 export type {
   ExistingPageRow,
   PageRevisionSummary,

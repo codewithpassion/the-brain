@@ -36,9 +36,10 @@ import {
 } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
-import type { DedupEntity, ScopedGraph } from "../graph/scoped-graph"
-import type { BrainDrizzle, ScopedDB } from "../scoped/db"
-import type { ScopedVectorize } from "../scoped/vectorize"
+import type { DedupEntity } from "../graph/scoped-graph"
+import { runBatchIngestCore } from "../ingest"
+import { syncBackingDoc } from "../pages/backing-doc"
+import type { BrainDrizzle } from "../scoped/db"
 import { estimateEmbedNeurons, estimateGenNeurons, monthlyWindow } from "../search/ports"
 import { createScopedServices, type ScopedServices } from "../services"
 import { EntityPageStore } from "../wiki/entity-pages"
@@ -54,12 +55,12 @@ const DEDUP_PAGE_SIZE = 500
 /** Cap of stranded loser vectors reconciled at sweep start (item 6). */
 const RECONCILE_LIMIT = 1000
 
-/** The tenant-scoped bundle the dedup sweep needs (built by `createDreamDedupServices`). */
-export interface DreamDedupServices {
-  db: ScopedDB
-  graph: ScopedGraph
-  entityVectors: ScopedVectorize
-  ai: Pick<ScopedServices["ai"], "embed" | "gen">
+/**
+ * The tenant-scoped bundle the dedup sweep needs — the FULL `ScopedServices` (W3: the D4 merge reaps
+ * the loser entity page's backing doc via `syncBackingDoc`, which needs blobs/vectors/db/graph) plus
+ * the raw handle + run store.
+ */
+export type DreamDedupServices = ScopedServices & {
   runs: DreamRunStore
   principal: Principal
   /** Raw handle for the D4 entity-page re-point follow-on (W2) — legal inside `@brain/db`. */
@@ -279,7 +280,15 @@ export const runDreamDedup = async (
         // W2 D4 follow-on: if the loser entity had a page, redirect it to the winner's entity page.
         // Best-effort + non-fatal (a separate write from the merge batch) — the merge is authoritative.
         try {
-          await entityPages.repointMergedPage(loser.id, winner.id)
+          const rp = await entityPages.repointMergedPage(loser.id, winner.id)
+          // W3: reap the loser page's now-stale backing doc — `syncBackingDoc` on a `type='redirect'`
+          // page (no longer backable) soft-deletes its doc + chunks + vectors so the pre-merge copy
+          // can't stay searchable / cite the redirect stub.
+          if (rp.loserPageId !== undefined) {
+            await syncBackingDoc(services, rp.loserPageId, (p) =>
+              runBatchIngestCore(services, p).then(() => {}),
+            )
+          }
         } catch (err) {
           console.error("dedup: entity-page repoint failed", loser.id, winner.id, err)
         }
@@ -340,10 +349,7 @@ export const createDreamDedupServices = (
   const base = createScopedServices(env, principal)
   const raw = drizzle(env.DB)
   return {
-    db: base.db,
-    graph: base.graph,
-    entityVectors: base.entityVectors,
-    ai: { embed: base.ai.embed, gen: base.ai.gen },
+    ...base,
     runs: new DreamRunStore(raw, principal),
     principal,
     raw,

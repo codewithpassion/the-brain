@@ -33,7 +33,7 @@ import { documents, dreamRuns, facts, memoryReview } from "../schema"
 import type { BrainDrizzle, ScopedDB } from "../scoped/db"
 import {
   DOC_ORIGIN_DREAM,
-  notDreamOrigin,
+  notAgentOrigin,
   notSoftExpired,
   scopePredicate,
   visibilityPredicate,
@@ -194,7 +194,9 @@ export const runDreamDigest = async (
       eq(documents.tenantId, tenantId),
       isNull(documents.deletedAt),
       isNull(documents.parentDocumentId), // §4.3 (W4.5): count a split doc once, not per part
-      notDreamOrigin(documents.origin),
+      // W3 anti-loop: exclude ALL agent-origin docs (dream insights + wiki-agent entity-page backing
+      // docs) from the "new user documents" count — else the dream inflates the digest with its own writes.
+      notAgentOrigin(documents.origin),
       since ? gt(documents.createdAt, since) : undefined,
       scopePredicate(principal, documents.scope),
     )

@@ -18,6 +18,7 @@ import {
   type AdminBoundOp,
   AUDIT_EXPORT_OP,
   auditExport,
+  type BatchIngestParams,
   type BoundOp,
   BREAK_GLASS_READ_OP,
   breakGlassRead,
@@ -31,6 +32,7 @@ import {
   createSnapshot,
   DELETE_DOCUMENT_OP,
   DREAM_NOW_OP,
+  deleteBackingDoc,
   deleteWikiPage,
   dispatchDreamRun,
   exportOkfBundle,
@@ -92,6 +94,7 @@ import {
   searchOp,
   setMemory,
   submitMemoryReview,
+  syncBackingDoc,
   type ThinkResult,
   thinkOp,
   UPDATE_DOCUMENT_OP,
@@ -413,19 +416,67 @@ const okfImportSurfaceOp: SurfaceOp = {
 // ── Wiki family (wiki_save_page / get / list / move / delete) ─────────────────
 // First-class wiki pages on the shared `pages` layer; the WikiStore enforces the same
 // tenant/scope/visibility isolation + in-batch audit as memory (docs/v3-implementation-plan.md W1).
+// W3: a page write also syncs a searchable backing document (off the write path via waitUntil).
 const wikiStore = (ctx: SurfaceContext) => createScopedServices(ctx.env, ctx.principal).wiki
+
+/**
+ * The ingest runner for a backing document: dispatch the durable `BATCH_INGEST` workflow when bound
+ * (it runs the full spine incl. KG for human wiki pages, honouring `skipEntityExtraction`), else run
+ * the KG-less core inline (local/test — matches `ingest_document`'s inline fallback).
+ */
+const runPageIngest =
+  (ctx: SurfaceContext, services: ScopedServices) =>
+  async (params: BatchIngestParams): Promise<void> => {
+    const workflow = ctx.env.BATCH_INGEST
+    if (workflow) {
+      await workflow.create({
+        id: await workflowInstanceId(`wiki-bd-${ctx.principal.tenantId}-${params.documentId}`),
+        params: { principal: ctx.principal, ingest: params },
+      })
+    } else {
+      await runBatchIngestCore(services, params)
+    }
+  }
+
+/**
+ * Fire the backing-doc sync OFF the write path (waitUntil), errors LOGGED not swallowed. Always
+ * called on save (even an unchanged one) so a missing/stale backing doc SELF-HEALS on the next write;
+ * `syncBackingDoc`'s tier-salted skip-unchanged makes the common (current) case a cheap no-op.
+ */
+const backgroundSync = (ctx: SurfaceContext, services: ScopedServices, pageId: string): void => {
+  ctx.waitUntil(
+    syncBackingDoc(services, pageId, runPageIngest(ctx, services)).catch((err) => {
+      console.error("wiki backing-doc sync failed", pageId, err)
+    }),
+  )
+}
 
 const wikiSavePageSurfaceOp: SurfaceOp = {
   def: WIKI_SAVE_PAGE_OP,
-  invoke: (ctx, input) =>
-    saveWikiPage(wikiStore(ctx), WIKI_SAVE_PAGE_OP.input.parse(input) as WikiSavePageInput),
+  invoke: async (ctx, input) => {
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const result = await saveWikiPage(
+      services.wiki,
+      WIKI_SAVE_PAGE_OP.input.parse(input) as WikiSavePageInput,
+    )
+    backgroundSync(ctx, services, result.pageId) // heals even an unchanged save (skip-unchanged no-op)
+    return result
+  },
 }
 
 const wikiGetPageSurfaceOp: SurfaceOp = {
   def: WIKI_GET_PAGE_OP,
   invoke: async (ctx, input) => {
+    const services = createScopedServices(ctx.env, ctx.principal)
     const { target } = WIKI_GET_PAGE_OP.input.parse(input)
-    return { page: await getWikiPage(wikiStore(ctx), target) }
+    const page = await getWikiPage(services.wiki, target)
+    // Self-heal on read: a page viewed with a missing/stale backing doc is re-synced in the background
+    // (a no-op when current). This is the safety net for a transient write-path sync failure that is
+    // never followed by another save. Skipped for a synthesizable stub (no page yet).
+    if (page !== null && page.stub !== true && page.page.id !== "") {
+      backgroundSync(ctx, services, page.page.id)
+    }
+    return { page }
   },
 }
 
@@ -445,17 +496,30 @@ const wikiListPagesSurfaceOp: SurfaceOp = {
 
 const wikiMovePageSurfaceOp: SurfaceOp = {
   def: WIKI_MOVE_PAGE_OP,
-  invoke: (ctx, input) => {
+  invoke: async (ctx, input) => {
+    const services = createScopedServices(ctx.env, ctx.principal)
     const { fromSlug, toSlug } = WIKI_MOVE_PAGE_OP.input.parse(input)
-    return moveWikiPage(wikiStore(ctx), fromSlug, toSlug)
+    const result = await moveWikiPage(services.wiki, fromSlug, toSlug)
+    // The moved page's backing doc follows its new slug/path; the redirect stub is excluded (redirect).
+    backgroundSync(ctx, services, result.pageId)
+    return result
   },
 }
 
 const wikiDeletePageSurfaceOp: SurfaceOp = {
   def: WIKI_DELETE_PAGE_OP,
-  invoke: (ctx, input) => {
+  invoke: async (ctx, input) => {
+    const services = createScopedServices(ctx.env, ctx.principal)
     const { slug } = WIKI_DELETE_PAGE_OP.input.parse(input)
-    return deleteWikiPage(wikiStore(ctx), slug)
+    const result = await deleteWikiPage(services.wiki, slug)
+    if (result.deleted && result.pageId !== null) {
+      ctx.waitUntil(
+        deleteBackingDoc(services, result.pageId).catch((err) => {
+          console.error("wiki backing-doc delete failed", result.pageId, err)
+        }),
+      )
+    }
+    return result
   },
 }
 

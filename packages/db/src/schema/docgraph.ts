@@ -1,5 +1,5 @@
 import { VISIBILITIES } from "@brain/shared"
-import { desc } from "drizzle-orm"
+import { desc, sql } from "drizzle-orm"
 import {
   check,
   index,
@@ -56,6 +56,11 @@ export const pages = sqliteTable(
     index("ix_pages_tenant_updated").on(t.tenantId, t.updatedAt),
     index("ix_pages_source").on(t.tenantId, t.sourceId, t.ingestedVia, t.deletedAt),
     index("ix_pages_entity").on(t.tenantId, t.entityId), // W2 entity-page lookup
+    // W3 backing-doc → page reverse-map; UNIQUE (partial) so a doc can't fan-out the citation JOIN
+    // to two live pages — a double-link raises a clear error instead of multiplying search results.
+    uniqueIndex("ix_pages_document")
+      .on(t.tenantId, t.documentId)
+      .where(sql`${t.documentId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
   ],
 )
 

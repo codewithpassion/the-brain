@@ -25,13 +25,14 @@ import { and, asc, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import { runBatchIngestCore } from "../ingest"
+import { syncBackingDoc } from "../pages/backing-doc"
 import { chunks, documents, dreamRuns, entities, entityMentions, pages } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import {
   DOC_ORIGIN_DREAM,
   liveEntityPredicate,
   notAgentAuthoredPage,
-  notDreamOrigin,
+  notAgentOrigin,
   scopePredicate,
 } from "../scoped/predicates"
 import { thinkOp } from "../search/ops"
@@ -169,7 +170,7 @@ export const selectReflectionTargets = async (
       and(
         eq(entityMentions.tenantId, principal.tenantId),
         opts.since ? gte(entityMentions.createdAt, opts.since) : undefined,
-        notDreamOrigin(documents.origin),
+        notAgentOrigin(documents.origin),
         notAgentAuthoredPage(pages.ingestedVia),
         isNull(documents.deletedAt), // a NULL join (session/page source) keeps the mention
         liveEntityPredicate(entities.mergedInto), // never reflect on a D4 dedup loser
@@ -196,7 +197,7 @@ export const selectReflectionTargets = async (
         eq(documents.tenantId, principal.tenantId),
         isNull(documents.deletedAt),
         isNotNull(documents.path),
-        notDreamOrigin(documents.origin),
+        notAgentOrigin(documents.origin),
         sql`${documents.path} NOT LIKE '/brain/insights/%'`,
         opts.since ? gte(documents.createdAt, opts.since) : undefined,
         scopePredicate(principal, documents.scope),
@@ -325,7 +326,12 @@ const reflectTarget = async (
       existing.status === "pending" ||
       existing.status === "processing" ||
       (full?.chunkCount ?? 0) === 0
-    if (!stuck) return { documentId: null, neurons } // already indexed → dedup, nothing to do
+    if (!stuck) {
+      // Already indexed → no re-ingest, but STILL (re)mint + link the insight/entity pages so a page
+      // whose first-run maintenance failed self-heals on the next reflect (documentId = the real doc).
+      await maintainInsightAndEntityPages(services, target, result.answer, body, existing.id)
+      return { documentId: null, neurons } // documentId null → the caller doesn't re-KG a deduped doc
+    }
     documentId = existing.id // repair the orphaned/pending doc below (re-put body + re-ingest)
   }
 
@@ -339,27 +345,51 @@ const reflectTarget = async (
   // D-i1: pin the insight at draft trust (never reads above draft).
   await services.db.upsertMemoryPolicy(documentId, { trustGrade: "draft", scopes: [] })
 
-  // W2: promote the insight to a first-class PAGE (Sources [[slug]] → real doc_links), and for an
-  // ENTITY target ALSO maintain the entity's page (dream-authored, versioned, don't-clobber). These
-  // are SECONDARY artifacts — a failure here must not fail the run (the insight doc already landed).
+  await maintainInsightAndEntityPages(services, target, result.answer, body, documentId)
+  return { documentId, neurons }
+}
+
+/**
+ * Promote the insight to a first-class PAGE (Sources `[[slug]]` → real doc_links), link it to its
+ * EXISTING insight document (W3 Option A — no double-index), and for an ENTITY target maintain the
+ * entity's page too (dream-authored, don't-clobber). IDEMPOTENT + runs on EVERY reflect of a target
+ * (incl. the dedup path) so `pages.document_id` lands even when the insight doc was unchanged — else a
+ * first-run failure would permanently degrade the insight's citation to the raw doc slug. SECONDARY:
+ * a failure here never fails the run (the insight doc already landed).
+ */
+const maintainInsightAndEntityPages = async (
+  services: DreamReflectServices,
+  target: ReflectionTarget,
+  answer: string,
+  body: string,
+  insightDocId: string,
+): Promise<void> => {
   try {
-    await mintInsightPage(services.raw, services.principal, {
+    const insightPage = await mintInsightPage(services.raw, services.principal, {
       slugKey: target.slugKey,
       title: target.label,
       body,
     })
+    await services.graph.linkPageBackingDoc(insightPage.pageId, insightDocId)
     if (target.entityId !== undefined) {
       // Dream-maintained = the body is REPLACED with the latest synthesis each run (not accumulated);
-      // a human's edits are protected by the don't-clobber gate (a system write is skipped when the
-      // page's latest revision is human-authored), and every version is retained + rollback-able.
+      // a human's edits are protected by the don't-clobber gate, and every version is rollback-able.
       const entityStore = new EntityPageStore(services.raw, services.principal)
-      const entityBody = `# ${target.label}\n\n${result.answer}\n\n## Insights\n- [[insights/${target.slugKey}]]\n`
-      await entityStore.mintOrUpdate(target.entityId, { body: entityBody, systemAuthored: true })
+      const entityBody = `# ${target.label}\n\n${answer}\n\n## Insights\n- [[insights/${target.slugKey}]]\n`
+      const minted = await entityStore.mintOrUpdate(target.entityId, {
+        body: entityBody,
+        systemAuthored: true,
+      })
+      // W3: the entity page's backing doc is searchable but KG-SKIPPED (agent origin) — KG-less core.
+      if (minted?.pageId != null && minted.changed) {
+        await syncBackingDoc(services, minted.pageId, (params) =>
+          runBatchIngestCore(services, params).then(() => {}),
+        )
+      }
     }
   } catch (err) {
     console.error("reflect: entity/insight page maintenance failed", target.key, err)
   }
-  return { documentId, neurons }
 }
 
 /** Run one reflection dream over the shared FSM driver. */

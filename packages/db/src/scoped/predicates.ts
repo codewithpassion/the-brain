@@ -108,6 +108,10 @@ export const notSoftExpiredSql = (alias: string, nowIso: string): SQL =>
 
 /** The `documents.origin` marker for Dream-generated insight documents (D2 anti-loop D-i2). */
 export const DOC_ORIGIN_DREAM = "dream" as const
+/** The `documents.origin` marker for an AGENT-authored page's backing document (v3/W3, W-i4). */
+export const DOC_ORIGIN_WIKI_AGENT = "wiki-agent" as const
+/** Every AGENT-authored `documents.origin` — excluded from reflection candidate SELECTs (anti-loop). */
+export const AGENT_DOC_ORIGINS = [DOC_ORIGIN_DREAM, DOC_ORIGIN_WIKI_AGENT] as const
 
 /**
  * Anti-loop gate (D-i2, depth ≤ 1): a document that is NOT Dream-generated (`origin` null or not
@@ -116,6 +120,18 @@ export const DOC_ORIGIN_DREAM = "dream" as const
  */
 export const notDreamOrigin = (originColumn: AnySQLiteColumn): SQL =>
   sql`(${originColumn} IS NULL OR ${originColumn} <> ${DOC_ORIGIN_DREAM})`
+
+/**
+ * Anti-loop gate (W-i4), generalizing `notDreamOrigin` to the whole AGENT origin set (`dream` +
+ * `wiki-agent`): a document that is NOT agent-authored. Used by the reflection candidate SELECTs so
+ * an entity/insight page's backing document never becomes a reflection target — exactly as an
+ * `origin='dream'` insight never does. Human wiki backing docs (origin NULL) still feed the graph.
+ */
+export const notAgentOrigin = (originColumn: AnySQLiteColumn): SQL =>
+  sql`(${originColumn} IS NULL OR ${originColumn} NOT IN (${sql.join(
+    AGENT_DOC_ORIGINS.map((o) => sql`${o}`),
+    sql`, `,
+  )}))`
 
 /** The `pages.ingested_via` provenance values that are AGENT-authored (W2 anti-loop, W-i4). */
 export const AGENT_PAGE_PROVENANCE = ["entity", "insight"] as const

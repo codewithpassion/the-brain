@@ -97,6 +97,7 @@ describe("migrations apply cleanly", () => {
       "0009_notion_connections.sql",
       "0010_wiki_pages.sql",
       "0011_dream_runs_entitypages.sql",
+      "0012_pages_document_idx.sql",
     ])
   })
 
