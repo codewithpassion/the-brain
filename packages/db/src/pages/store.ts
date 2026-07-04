@@ -58,7 +58,7 @@ export const parseFrontmatter = (value: string): Record<string, unknown> => {
  * Normalize an OKF link target to a candidate concept slug, or null when it is external.
  * OKF links look like `[customers](/tables/customers.md)`; wikilinks like `[[tables/customers]]`.
  */
-const normalizeLinkTarget = (raw: string): string | null => {
+export const normalizeLinkTarget = (raw: string): string | null => {
   const target = raw.trim().split("|")[0]?.split("#")[0]?.trim() ?? ""
   if (target.length === 0) return null
   if (/^[a-z]+:\/\//i.test(target) || target.startsWith("mailto:")) return null // external
@@ -68,14 +68,30 @@ const normalizeLinkTarget = (raw: string): string | null => {
     .trim()
 }
 
-/** Extract candidate concept slugs from a markdown body (`[[slug]]` + `[txt](target)`). */
+/**
+ * Blank out fenced code blocks (``` / ~~~) and inline code (`…`) so a `[[x]]` or `[t](x)` that a
+ * page author wrote INSIDE code is not turned into a real `doc_links` edge (W4a fix round). Replaces
+ * with spaces to preserve offsets and avoid accidentally joining adjacent text into a false match.
+ */
+const stripCode = (body: string): string =>
+  body
+    .replace(/```[\s\S]*?```/g, (m) => " ".repeat(m.length))
+    .replace(/~~~[\s\S]*?~~~/g, (m) => " ".repeat(m.length))
+    .replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length))
+
+/**
+ * Extract candidate concept slugs from a markdown body (`[[slug]]` + `[txt](target)`). Links inside
+ * code are ignored (`stripCode`), and IMAGE targets (`![alt](x.png)`) are excluded via the `(?<!!)`
+ * guard — neither should become a graph edge.
+ */
 const extractLinkSlugs = (body: string): string[] => {
+  const text = stripCode(body)
   const slugs: string[] = []
-  for (const m of body.matchAll(/\[\[([^\]]+)\]\]/g)) {
+  for (const m of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
     const s = normalizeLinkTarget(m[1] ?? "")
     if (s) slugs.push(s)
   }
-  for (const m of body.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+  for (const m of text.matchAll(/(?<!!)\[[^\]]*\]\(([^)]+)\)/g)) {
     const s = normalizeLinkTarget(m[1] ?? "")
     if (s) slugs.push(s)
   }
@@ -121,6 +137,11 @@ export interface PageRevisionSummary {
   reason: string | null
   authorUserId: string | null
   createdAt: string
+}
+
+/** A revision summary PLUS its full body snapshot (for the history/diff view). */
+export interface PageRevisionFull extends PageRevisionSummary {
+  body: string
 }
 
 /** `PageStore.upsert` input — provenance, audit, and authorization are all supplied by the caller. */
@@ -610,6 +631,23 @@ export class PageStore {
       .from(pageRevisions)
       .where(and(eq(pageRevisions.tenantId, this.p.tenantId), eq(pageRevisions.pageId, pageId)))
       .orderBy(desc(pageRevisions.id))
+  }
+
+  /** A page's revision history WITH body snapshots, newest-first (`id DESC`), for the diff view. */
+  async getRevisionsWithBodies(pageId: string, limit = 50): Promise<PageRevisionFull[]> {
+    return this.db
+      .select({
+        revisionId: pageRevisions.id,
+        version: pageRevisions.version,
+        reason: pageRevisions.reason,
+        authorUserId: pageRevisions.authorUserId,
+        createdAt: pageRevisions.createdAt,
+        body: pageRevisions.compiledTruth,
+      })
+      .from(pageRevisions)
+      .where(and(eq(pageRevisions.tenantId, this.p.tenantId), eq(pageRevisions.pageId, pageId)))
+      .orderBy(desc(pageRevisions.id))
+      .limit(limit)
   }
 
   /** The still-unresolved (red) outbound link target slugs for a page. */

@@ -14,6 +14,7 @@ export { mintInsightPage } from "./insight-pages"
 export {
   deleteWikiPage,
   getWikiPage,
+  getWikiPageHistory,
   listWikiPages,
   moveWikiPage,
   registerWikiOps,
@@ -23,12 +24,14 @@ export {
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_OPS,
+  WIKI_PAGE_HISTORY_OP,
   WIKI_SAVE_PAGE_OP,
 } from "./ops"
 export type {
   WikiListEntry,
   WikiMoveResult,
   WikiPageDetail,
+  WikiPageHistory,
   WikiSavePageInput,
   WikiSavePageResult,
 } from "./store"

@@ -77,3 +77,5 @@ export {
 export { scopeSatisfied } from "./scope"
 // ── Deterministic slugify (shared by entity / org / Dream insight slugs) ─────
 export { slugify } from "./slug"
+// ── Wikilink-slug golden fixtures (store ↔ dashboard normalizer drift guard) ──
+export { WIKILINK_SLUG_FIXTURES, type WikilinkSlugFixture } from "./wikilink-fixtures"

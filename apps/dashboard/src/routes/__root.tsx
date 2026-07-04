@@ -42,6 +42,7 @@ export const Route = createRootRoute({
 const PRIMARY_NAV: readonly { to: string; label: string }[] = [
   { to: "/", label: "Search" },
   { to: "/documents", label: "Documents" },
+  { to: "/wiki", label: "Wiki" },
   { to: "/memory", label: "Memory" },
   { to: "/graph", label: "Graph" },
   { to: "/sessions", label: "Sessions" },

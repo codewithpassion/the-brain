@@ -504,3 +504,51 @@ describe("dream reflection maintains the entity page + insight page (author=syst
     expect(entityPage?.links.resolved.some((l) => l.toId === insight?.page.id)).toBe(true)
   })
 })
+
+describe("LIVE-path stub repro (W4a fix round) — real owner viewing a world project entity", () => {
+  test("a world 'project' camelCase entity with no page returns a stub for a normal owner", async () => {
+    await seedEntity({
+      id: "eLive",
+      tenantId: "tLive",
+      kind: "project",
+      name: "AgentOs",
+      scope: "some-scope",
+      visibility: "world",
+    })
+    // A real Clerk owner: non-system userId, role owner, no teams.
+    const owner = wiki({
+      tenantId: "tLive",
+      userId: "user_2abc",
+      role: "owner",
+      teamIds: [],
+      allowedScopes: "*",
+      capabilities: ["read", "write"],
+    })
+    const stub = await owner.getPage("entities/project/agentos")
+    expect(stub?.stub).toBe(true)
+    expect(stub?.page.id).toBe("")
+    expect(stub?.entity?.canonicalName).toBe("AgentOs")
+  })
+
+  test("same, but with a RESTRICTED allowedScopes not including the entity scope", async () => {
+    await seedEntity({
+      id: "eLive2",
+      tenantId: "tLive2",
+      kind: "project",
+      name: "GBrain",
+      scope: "proj-scope",
+      visibility: "world",
+    })
+    const owner = wiki({
+      tenantId: "tLive2",
+      userId: "user_2def",
+      role: "owner",
+      teamIds: [],
+      allowedScopes: ["default"], // does NOT include 'proj-scope'
+      capabilities: ["read", "write"],
+    })
+    const stub = await owner.getPage("entities/project/gbrain")
+    expect(stub?.stub).toBe(true)
+    expect(stub?.entity?.canonicalName).toBe("GBrain")
+  })
+})

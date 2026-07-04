@@ -52,6 +52,10 @@ export interface DocLinkRow {
   toId: string
   linkType: string
   context: string
+  /** Source page slug/title — populated by `getBacklinks` (via its gated `from`-page join) so a
+   *  backlink is navigable; absent on outbound `getLinks` rows. */
+  fromSlug?: string
+  fromTitle?: string
 }
 
 /** A timeline entry after the gated read. */
@@ -370,7 +374,9 @@ export class ScopedGraph {
       )
   }
 
-  /** Backlinks (`idx_doc_links_to`): incoming typed links to a page, gated on the source. */
+  /** Backlinks (`idx_doc_links_to`): incoming typed links to a page, gated on the source. The
+   *  source page's slug/title ride the SAME gated `from`-page join (no ungated leak) so the UI can
+   *  render each backlink as a link to its source. */
   async getBacklinks(pageId: string): Promise<DocLinkRow[]> {
     if (!(await this.nodeVisible(DOC_GRAPH, pageId))) return []
     return this.db
@@ -379,6 +385,8 @@ export class ScopedGraph {
         toId: docLinks.toId,
         linkType: docLinks.linkType,
         context: docLinks.context,
+        fromSlug: pages.slug,
+        fromTitle: pages.title,
       })
       .from(docLinks)
       .innerJoin(pages, and(eq(pages.id, docLinks.fromId), eq(pages.tenantId, docLinks.tenantId)))

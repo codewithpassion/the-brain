@@ -156,7 +156,9 @@ export class EntityPageStore {
    * via the stub; such entities still get pages via the dream backfill / reflection. Null on no match.
    */
   async findEntityBySlug(slug: string): Promise<EntityForPage | null> {
-    const parts = slug.split("/")
+    // Filter empty segments so a stray leading/trailing/double slash (`/entities/x/y`, `entities/x/y/`)
+    // still resolves to the 3-part entity slug rather than silently 404-ing to a non-entity miss.
+    const parts = slug.split("/").filter((s) => s.length > 0)
     if (parts.length !== 3 || parts[0] !== "entities") return null
     const kindSeg = parts[1] ?? ""
     const nameSeg = parts[2] ?? ""

@@ -49,6 +49,7 @@ import {
   getMemory,
   getSessionContext,
   getWikiPage,
+  getWikiPageHistory,
   INGEST_DOCUMENT_OP,
   importOkfBundle,
   LIST_PENDING_REVIEWS_OP,
@@ -104,6 +105,7 @@ import {
   WIKI_GET_PAGE_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
+  WIKI_PAGE_HISTORY_OP,
   WIKI_SAVE_PAGE_OP,
   type WikiSavePageInput,
 } from "@brain/db"
@@ -477,6 +479,14 @@ const wikiGetPageSurfaceOp: SurfaceOp = {
       backgroundSync(ctx, services, page.page.id)
     }
     return { page }
+  },
+}
+
+const wikiPageHistorySurfaceOp: SurfaceOp = {
+  def: WIKI_PAGE_HISTORY_OP,
+  invoke: async (ctx, input) => {
+    const { target, limit } = WIKI_PAGE_HISTORY_OP.input.parse(input)
+    return getWikiPageHistory(wikiStore(ctx), target, limit)
   },
 }
 
@@ -1047,6 +1057,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   okfImportSurfaceOp,
   wikiSavePageSurfaceOp,
   wikiGetPageSurfaceOp,
+  wikiPageHistorySurfaceOp,
   wikiListPagesSurfaceOp,
   wikiMovePageSurfaceOp,
   wikiDeletePageSurfaceOp,

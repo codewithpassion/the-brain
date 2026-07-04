@@ -7,3 +7,129 @@
 body {
   margin: 0;
 }
+
+/* ── Wiki markdown rendering (W4a). No @tailwindcss/typography dep — a scoped, minimal prose. ── */
+.wiki-prose {
+  color: #262626;
+  line-height: 1.65;
+  font-size: 0.95rem;
+  overflow-wrap: break-word;
+}
+.wiki-prose > :first-child {
+  margin-top: 0;
+}
+.wiki-prose h1,
+.wiki-prose h2,
+.wiki-prose h3,
+.wiki-prose h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.6em 0 0.6em;
+}
+.wiki-prose h1 {
+  font-size: 1.6rem;
+}
+.wiki-prose h2 {
+  font-size: 1.3rem;
+  border-bottom: 1px solid #e5e5e5;
+  padding-bottom: 0.3em;
+}
+.wiki-prose h3 {
+  font-size: 1.1rem;
+}
+.wiki-prose h4 {
+  font-size: 1rem;
+}
+.wiki-prose p {
+  margin: 0.8em 0;
+}
+.wiki-prose ul,
+.wiki-prose ol {
+  margin: 0.8em 0;
+  padding-left: 1.5em;
+}
+.wiki-prose ul {
+  list-style: disc;
+}
+.wiki-prose ol {
+  list-style: decimal;
+}
+.wiki-prose li {
+  margin: 0.3em 0;
+}
+.wiki-prose li > ul,
+.wiki-prose li > ol {
+  margin: 0.3em 0;
+}
+.wiki-prose blockquote {
+  border-left: 3px solid #d4d4d4;
+  padding-left: 1em;
+  margin: 1em 0;
+  color: #525252;
+}
+.wiki-prose hr {
+  border: none;
+  border-top: 1px solid #e5e5e5;
+  margin: 1.6em 0;
+}
+.wiki-prose table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+.wiki-prose th,
+.wiki-prose td {
+  border: 1px solid #e5e5e5;
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.wiki-prose th {
+  background: #f5f5f5;
+  font-weight: 600;
+}
+.wiki-prose input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+.wiki-prose img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── highlight.js minimal theme (github-ish). Applied client-side by CodeBlock. ── */
+.hljs {
+  color: #24292e;
+}
+.hljs-comment,
+.hljs-quote {
+  color: #6a737d;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: #d73a49;
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag {
+  color: #032f62;
+}
+.hljs-number,
+.hljs-literal {
+  color: #005cc5;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #6f42c1;
+}
+.hljs-type,
+.hljs-class .hljs-title {
+  color: #e36209;
+}
+.hljs-tag,
+.hljs-name {
+  color: #22863a;
+}

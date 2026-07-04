@@ -43,6 +43,7 @@ const GROUP_BY_OP: Record<string, Group> = {
   // wiki (first-class pages)
   wiki_save_page: "wiki",
   wiki_get_page: "wiki",
+  wiki_page_history: "wiki",
   wiki_list_pages: "wiki",
   wiki_move_page: "wiki",
   wiki_delete_page: "wiki",

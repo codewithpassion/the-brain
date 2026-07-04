@@ -13,6 +13,7 @@ import type {
   WikiListEntry,
   WikiMoveResult,
   WikiPageDetail,
+  WikiPageHistory,
   WikiSavePageInput,
   WikiSavePageResult,
   WikiStore,
@@ -25,6 +26,18 @@ const DocLinkSchema = z.object({
   toId: z.string(),
   linkType: z.string(),
   context: z.string(),
+  // Source page slug/title — present on backlinks (navigable), absent on outbound resolved links.
+  fromSlug: z.string().optional(),
+  fromTitle: z.string().optional(),
+})
+
+const WikiRevisionFullSchema = z.object({
+  revisionId: z.number().int(),
+  version: z.number().int(),
+  reason: z.string().nullable(),
+  authorUserId: z.string().nullable(),
+  createdAt: z.string(),
+  body: z.string(),
 })
 
 const WikiPageDetailSchema = z.object({
@@ -93,6 +106,7 @@ const WikiListEntrySchema = z.object({
   ingestedVia: z.string().nullable(),
   updatedAt: z.string(),
   childCount: z.number().int(),
+  draft: z.boolean(),
 })
 
 // ── Op contracts ──────────────────────────────────────────────────────────────────────
@@ -126,6 +140,10 @@ export const WIKI_SAVE_PAGE_OP = defineOp({
     visibility: VISIBILITY.optional().describe(
       "'world' (whole tenant, default) | 'team' | 'private' (you only).",
     ),
+    draft: z
+      .boolean()
+      .optional()
+      .describe("Mark the page an unpublished draft (frontmatter `draft`) — shown under Drafts."),
   }),
   output: z.object({
     slug: z.string(),
@@ -150,6 +168,29 @@ export const WIKI_GET_PAGE_OP = defineOp({
     target: z.string().min(1).describe("Page slug or id."),
   }),
   output: z.object({ page: WikiPageDetailSchema.nullable() }),
+})
+
+/** `wiki_page_history` — a page's revision snapshots WITH bodies, for the history/diff view. */
+export const WIKI_PAGE_HISTORY_OP = defineOp({
+  name: "wiki_page_history",
+  description:
+    "Load a page's revision history WITH full body snapshots (newest-first), for a diff view. " +
+    "Visibility-gated exactly like wiki_get_page: a page the caller can't see returns revisions:null " +
+    "(no bodies leak). Serves any visible page — wiki or entity (entity pages carry dream-authored " +
+    "history). Memory pages keep memory_history as their lane but are also visible here.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    target: z.string().min(1).describe("Page slug or id."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe("Max revisions, newest-first (1–200, default 50)."),
+  }),
+  output: z.object({ revisions: z.array(WikiRevisionFullSchema).nullable() }),
 })
 
 /** `wiki_list_pages` — a tree-shaped listing for a sidebar (includes memory-provenance pages). */
@@ -210,6 +251,7 @@ export const WIKI_DELETE_PAGE_OP = defineOp({
 export const WIKI_OPS: readonly AnyOpDef[] = [
   WIKI_SAVE_PAGE_OP,
   WIKI_GET_PAGE_OP,
+  WIKI_PAGE_HISTORY_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_DELETE_PAGE_OP,
@@ -230,6 +272,12 @@ export const saveWikiPage = (
 
 export const getWikiPage = (store: WikiStore, target: string): Promise<WikiPageDetail | null> =>
   store.getPage(target)
+
+export const getWikiPageHistory = (
+  store: WikiStore,
+  target: string,
+  limit?: number,
+): Promise<WikiPageHistory> => store.pageHistory(target, limit)
 
 export const listWikiPages = (
   store: WikiStore,

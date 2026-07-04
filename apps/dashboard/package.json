@@ -17,7 +17,6 @@
   "dependencies": {
     "@brain/shared": "workspace:*",
     "@clerk/tanstack-react-start": "^1.2.5",
-    "react-force-graph-2d": "^1.27.1",
     "@radix-ui/react-slot": "^1.1.2",
     "@tanstack/react-router": "^1.132.0",
     "@tanstack/react-start": "^1.132.0",
@@ -26,9 +25,16 @@
     "@trpc/server": "^11.18.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "highlight.js": "^11.11.1",
+    "mermaid": "^11.16.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "tailwind-merge": "^3.6.0"
+    "react-force-graph-2d": "^1.27.1",
+    "react-markdown": "^10.1.0",
+    "rehype-slug": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@brain/tsconfig": "workspace:*",

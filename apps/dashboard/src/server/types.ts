@@ -523,3 +523,98 @@ export interface SessionContextResult {
   contextSnapshot?: string | null
   memories?: SessionContextMemory[]
 }
+
+// --- Wiki (WIKI_GET_PAGE_OP / WIKI_LIST_PAGES_OP output; v3/W4a) ---
+
+/** A JSON value — serializable frontmatter (server fns forbid `unknown` in their return types). */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue }
+
+/** A doc-graph link edge (resolved outbound/backlink). Mirrors `DocLinkSchema`. */
+export interface WikiDocLink {
+  fromId: string
+  toId: string
+  linkType: string
+  context: string
+  /** Source page slug/title — present on backlinks (navigable), absent on outbound links. */
+  fromSlug?: string
+  fromTitle?: string
+}
+
+/** A revision snapshot WITH its body (from `wiki_page_history`), for the diff view. */
+export interface WikiRevisionFull {
+  revisionId: number
+  version: number
+  reason: string | null
+  authorUserId: string | null
+  createdAt: string
+  body: string
+}
+
+export interface WikiTimelineItem {
+  id: string
+  date: string
+  summary: string
+  detail: string
+  source: string
+}
+
+export interface WikiRevisionMeta {
+  revisionId: number
+  version: number
+  reason: string | null
+  authorUserId: string | null
+  createdAt: string
+}
+
+export interface WikiEntityRelation {
+  direction: "out" | "in"
+  kind: string
+  entityId: string
+  name: string
+  slug: string
+}
+
+export interface WikiEntitySection {
+  entityId: string
+  kind: string
+  canonicalName: string
+  mentions: { sourceKind: string; sourceId: string }[]
+  relations: WikiEntityRelation[]
+}
+
+/** Full page detail from `wiki_get_page`. `stub` = an entity slug with no page yet (empty id). */
+export interface WikiPageDetail {
+  page: {
+    id: string
+    slug: string
+    title: string
+    type: string
+    visibility: string
+    ingestedVia: string | null
+    entityId: string | null
+    createdAt: string
+    updatedAt: string
+  }
+  body: string
+  frontmatter: Record<string, JsonValue>
+  backlinks: WikiDocLink[]
+  tags: string[]
+  timeline: WikiTimelineItem[]
+  revisions: WikiRevisionMeta[]
+  links: { resolved: WikiDocLink[]; pending: string[] }
+  entity?: WikiEntitySection
+  stub?: boolean
+}
+
+/** One row of the sidebar tree listing from `wiki_list_pages`. */
+export interface WikiListEntry {
+  slug: string
+  title: string
+  type: string
+  visibility: string
+  ingestedVia: string | null
+  updatedAt: string
+  childCount: number
+  /** Unpublished draft (frontmatter `draft`) → routed to the sidebar's Drafts section. */
+  draft: boolean
+}

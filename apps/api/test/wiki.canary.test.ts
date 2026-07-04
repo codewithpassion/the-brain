@@ -352,3 +352,132 @@ describe("provenance lanes stay clean — memory ⟂ wiki", () => {
     ).rejects.toThrow(/non-memory page/)
   })
 })
+
+describe("wiki_page_history — bodies + visibility gate (W4a / Option B)", () => {
+  test("history returns full body snapshots newest-first for a visible page", async () => {
+    const w = wiki({ tenantId: "wh", userId: "u1" })
+    await w.savePage({ slug: "notes/h", type: "note", title: "H", body: "body one" })
+    await w.savePage({ slug: "notes/h", type: "note", title: "H", body: "body two" })
+    const hist = await w.pageHistory("notes/h")
+    expect(hist.revisions).not.toBeNull()
+    const revs = hist.revisions ?? []
+    expect(revs.length).toBe(2)
+    // newest-first
+    expect(revs[0]?.version).toBe(2)
+    expect(revs[0]?.body).toBe("body two")
+    expect(revs[1]?.version).toBe(1)
+    expect(revs[1]?.body).toBe("body one")
+    expect(revs[0]?.authorUserId).toBe("u1")
+  })
+
+  test("a system/dream-authored revision surfaces author=system", async () => {
+    const sys = wiki({ tenantId: "wh2", userId: "system" })
+    await sys.savePage({ slug: "entities/person/ada", type: "entity", body: "agent summary" })
+    const hist = await sys.pageHistory("entities/person/ada")
+    expect(hist.revisions?.[0]?.authorUserId).toBe("system")
+  })
+
+  test("a cross-user PRIVATE page's history is denied (revisions:null); the author sees it", async () => {
+    const u1 = wiki({ tenantId: "wh3", userId: "u1" })
+    await u1.savePage({
+      slug: "secret/plan",
+      type: "note",
+      body: "top secret",
+      visibility: "private",
+    })
+    // same tenant, different user → gated out
+    const u2 = wiki({ tenantId: "wh3", userId: "u2" })
+    expect((await u2.pageHistory("secret/plan")).revisions).toBeNull()
+    // the author still sees the bodies
+    expect((await u1.pageHistory("secret/plan")).revisions?.[0]?.body).toBe("top secret")
+    // another tenant → gated out
+    expect(
+      (await wiki({ tenantId: "wOther", userId: "u1" }).pageHistory("secret/plan")).revisions,
+    ).toBeNull()
+  })
+})
+
+describe("navigable backlinks — fromSlug/fromTitle, gated (W4a / Option B)", () => {
+  test("a backlink carries the source slug+title from the gated join", async () => {
+    const w = wiki({ tenantId: "bl", userId: "u1" })
+    await w.savePage({ slug: "target", type: "note", title: "Target", body: "the target page" })
+    await w.savePage({ slug: "source", type: "note", title: "Source Page", body: "see [[target]]" })
+    const got = await w.getPage("target")
+    const back = got?.backlinks ?? []
+    expect(back.length).toBe(1)
+    expect(back[0]?.fromSlug).toBe("source")
+    expect(back[0]?.fromTitle).toBe("Source Page")
+  })
+
+  test("a backlink from a source the caller can't see is excluded (no slug/title leak)", async () => {
+    const u1 = wiki({ tenantId: "bl2", userId: "u1" })
+    await u1.savePage({
+      slug: "target",
+      type: "note",
+      title: "T",
+      body: "world target",
+      visibility: "world",
+    })
+    // u1's PRIVATE source links to the world target
+    await u1.savePage({
+      slug: "secret-source",
+      type: "note",
+      title: "Secret Source",
+      body: "see [[target]]",
+      visibility: "private",
+    })
+    // author sees the backlink...
+    const u1back = (await u1.getPage("target"))?.backlinks ?? []
+    expect(u1back.some((b) => b.fromSlug === "secret-source")).toBe(true)
+    // ...another user does NOT (source gated out — no title/slug leak)
+    const u2back =
+      (await wiki({ tenantId: "bl2", userId: "u2" }).getPage("target"))?.backlinks ?? []
+    expect(u2back.some((b) => b.fromSlug === "secret-source")).toBe(false)
+    expect(u2back.some((b) => b.fromTitle === "Secret Source")).toBe(false)
+  })
+})
+
+describe("drafts flag on wiki_list_pages (W4a / Option B item 3)", () => {
+  test("a page saved with draft:true carries draft in the listing; a normal page does not", async () => {
+    const w = wiki({ tenantId: "dr", userId: "u1" })
+    await w.savePage({ slug: "published", type: "note", body: "live" })
+    await w.savePage({ slug: "wip", type: "note", body: "half-written", draft: true })
+    const bySlug = new Map((await w.listPages()).map((e) => [e.slug, e.draft]))
+    expect(bySlug.get("published")).toBe(false)
+    expect(bySlug.get("wip")).toBe(true)
+  })
+
+  test("clearing the draft flag on a later save flips it back to published", async () => {
+    const w = wiki({ tenantId: "dr2", userId: "u1" })
+    await w.savePage({ slug: "toggle", type: "note", body: "v1", draft: true })
+    expect((await w.listPages()).find((e) => e.slug === "toggle")?.draft).toBe(true)
+    await w.savePage({ slug: "toggle", type: "note", body: "v2", draft: false })
+    expect((await w.listPages()).find((e) => e.slug === "toggle")?.draft).toBe(false)
+  })
+})
+
+describe("link extraction excludes code + images (W4a fix round, item 3)", () => {
+  test("a [[link]] in a code fence / inline code / image target does NOT become a doc edge or red link", async () => {
+    const w = wiki({ tenantId: "lx", userId: "u1" })
+    const body = [
+      "See [[real-target]] here.",
+      "",
+      "```",
+      "example: [[fenced-fake]] should not link",
+      "```",
+      "",
+      "Inline `[[inline-fake]]` too, and an image ![alt](img/pic.png).",
+      "Also a normal [doc](/docs/guide) link.",
+    ].join("\n")
+    await w.savePage({ slug: "notes/links", type: "note", body })
+    const got = await w.getPage("notes/links")
+    const pending = new Set(got?.links.pending ?? [])
+    // real-target + docs/guide are unresolved red links; the code/image ones are NOT extracted.
+    expect(pending.has("real-target")).toBe(true)
+    expect(pending.has("docs/guide")).toBe(true)
+    expect(pending.has("fenced-fake")).toBe(false)
+    expect(pending.has("inline-fake")).toBe(false)
+    expect(pending.has("img/pic.png")).toBe(false)
+    expect(pending.has("img/pic")).toBe(false)
+  })
+})

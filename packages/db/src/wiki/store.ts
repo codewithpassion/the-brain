@@ -17,7 +17,13 @@ import { and, eq, isNull, like, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import type { DocLinkRow, TimelineRow } from "../graph/scoped-graph"
 import { ScopedGraph } from "../graph/scoped-graph"
-import { contentHash, type ExistingPageRow, PageStore, parseFrontmatter } from "../pages/store"
+import {
+  contentHash,
+  type ExistingPageRow,
+  type PageRevisionFull,
+  PageStore,
+  parseFrontmatter,
+} from "../pages/store"
 import { docLinks, pageRevisions, pages, tags } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
@@ -34,6 +40,8 @@ export interface WikiSavePageInput {
   description?: string
   tags?: string[]
   visibility?: "private" | "team" | "world"
+  /** Unpublished flag → frontmatter `draft`; surfaces the page in the sidebar's Drafts section. */
+  draft?: boolean
 }
 
 export interface WikiSavePageResult {
@@ -53,6 +61,8 @@ export interface WikiListEntry {
   updatedAt: string
   /** How many pages live under `<slug>/…` (the subtree size, for tree expansion). */
   childCount: number
+  /** True when the page carries a frontmatter `draft` flag (→ the sidebar's Drafts section). */
+  draft: boolean
 }
 
 /** A page's full detail (the `wiki_get_page` payload). */
@@ -96,6 +106,11 @@ export interface WikiMoveResult {
   fromSlug: string
   toSlug: string
   pageId: string
+}
+
+/** `wiki_page_history` payload: full revision snapshots (newest-first), or null when not visible. */
+export interface WikiPageHistory {
+  revisions: PageRevisionFull[] | null
 }
 
 export class WikiStore {
@@ -166,6 +181,7 @@ export class WikiStore {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        ...(input.draft !== undefined ? { draft: input.draft } : {}),
       },
       auditAction: "wiki.save",
     })
@@ -396,6 +412,25 @@ export class WikiStore {
   }
 
   /**
+   * A page's revision history WITH body snapshots (for the diff view), gated EXACTLY like `getPage`:
+   * `resolveNodeId` applies the tenant + scope + visibility predicates, so a page the caller can't
+   * see resolves to null → `{ revisions: null }` (no revision bodies leak cross-user). Serves any
+   * visible page (wiki OR entity — entity pages' dream-authored history is the W2 payoff); memory
+   * pages keep their own `memory_history` lane but are also visible here (a page is a page).
+   *
+   * PUBLISH SEMANTICS (deliberate, W4a fix round): gating is on the page's CURRENT tier, not per
+   * revision — so once a page is world, its FULL history is readable, including bodies of revisions
+   * made while it was private. This is intentional MediaWiki-style behavior and matches
+   * `memory_history` (which likewise returns all versions once the item is visible). Publishing a
+   * page publishes its history; keep a revision private by keeping the page private.
+   */
+  async pageHistory(slugOrId: string, limit?: number): Promise<WikiPageHistory> {
+    const pageId = await this.graph.resolveNodeId(DOC_GRAPH, slugOrId)
+    if (pageId === null) return { revisions: null }
+    return { revisions: await this.pages.getRevisionsWithBodies(pageId, limit) }
+  }
+
+  /**
    * Lazy-mint stub (W2): an `entities/<kind>/<name>` slug with a live entity but NO page yet returns
    * a synthesizable stub — the entity's live sections + the would-be page fields, no body/revisions —
    * so the UI can offer "create this page". Read-only (never writes). Null for a non-entity miss.
@@ -481,6 +516,7 @@ export class WikiStore {
         visibility: wp.visibility,
         ingestedVia: wp.ingestedVia,
         updatedAt: wp.updatedAt,
+        frontmatter: wp.frontmatter,
         childCount,
       })
       .from(wp)
@@ -506,6 +542,7 @@ export class WikiStore {
       ingestedVia: row.ingestedVia,
       updatedAt: row.updatedAt,
       childCount: Number(row.childCount ?? 0),
+      draft: parseFrontmatter(row.frontmatter).draft === true,
     }))
   }
 }

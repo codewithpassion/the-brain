@@ -62,6 +62,9 @@ import type {
   TraversalResult,
   UpdateDocumentResult,
   UpdateMemberResult,
+  WikiListEntry,
+  WikiPageDetail,
+  WikiRevisionFull,
 } from "./types"
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -1040,6 +1043,55 @@ export const getSessionContext = createServerFn({ method: "POST" })
     try {
       const out = await brainCall<SessionContextResult>("get_session_context", true, {
         brainSessionId: data.brainSessionId,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+// --- Wiki (v3/W4a — view mode) ---
+
+/** `wiki_get_page` — full page detail (body, links, backlinks, tags, timeline, revisions, entity). */
+export const wikiGetPage = createServerFn({ method: "POST" })
+  .validator((d: { target: string }) => d)
+  .handler(async ({ data }): Promise<Result<{ page: WikiPageDetail | null }>> => {
+    try {
+      const out = await brainCall<{ page: WikiPageDetail | null }>("wiki_get_page", true, {
+        target: data.target,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `wiki_page_history` — a page's revision snapshots WITH bodies (for the history/diff panel). */
+export const wikiPageHistory = createServerFn({ method: "POST" })
+  .validator((d: { target: string; limit?: number }) => d)
+  .handler(async ({ data }): Promise<Result<{ revisions: WikiRevisionFull[] | null }>> => {
+    try {
+      const out = await brainCall<{ revisions: WikiRevisionFull[] | null }>(
+        "wiki_page_history",
+        true,
+        { target: data.target, ...(data.limit ? { limit: data.limit } : {}) },
+      )
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/** `wiki_list_pages` — tree-shaped sidebar listing (namespaces + memory + entities). */
+export const wikiListPages = createServerFn({ method: "POST" })
+  .validator((d: { namespacePrefix?: string; type?: string; tag?: string; limit?: number }) => d)
+  .handler(async ({ data }): Promise<Result<{ pages: WikiListEntry[] }>> => {
+    try {
+      const out = await brainCall<{ pages: WikiListEntry[] }>("wiki_list_pages", true, {
+        ...(data.namespacePrefix ? { namespacePrefix: data.namespacePrefix } : {}),
+        ...(data.type ? { type: data.type } : {}),
+        ...(data.tag ? { tag: data.tag } : {}),
+        limit: data.limit ?? 500,
       })
       return { ok: true, data: out }
     } catch (error) {
