@@ -12,3 +12,10 @@ export const slugify = (name: string, fallback = "item"): string => {
     .slice(0, 48)
   return s.length > 0 ? s : fallback
 }
+
+/**
+ * The canonical entity-page slug for an entity (D5: `entities/<kind>/<slugified name>`). One shared
+ * home so the store's minting, the dashboard's @mention/[[link]] autocomplete, and Cmd+K cannot drift.
+ */
+export const entityPageSlug = (kind: string, canonicalName: string): string =>
+  `entities/${slugify(kind, "kind")}/${slugify(canonicalName, "entity")}`

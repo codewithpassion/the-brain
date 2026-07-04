@@ -65,6 +65,7 @@ import type {
   WikiListEntry,
   WikiPageDetail,
   WikiRevisionFull,
+  WikiSavePageResult,
 } from "./types"
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -1059,6 +1060,43 @@ export const wikiGetPage = createServerFn({ method: "POST" })
     try {
       const out = await brainCall<{ page: WikiPageDetail | null }>("wiki_get_page", true, {
         target: data.target,
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+/**
+ * `wiki_save_page` — create/update a wiki page (versioned; W1 PageStore contract).
+ * VISIBILITY INVARIANT: `visibility` is sent ONLY when the caller explicitly set it (the payload
+ * omits it otherwise), so an edit that doesn't touch the tier keeps it and a new page defaults to the
+ * op's safe default — never a silent escalation. `buildWikiSavePayload` enforces this on the client.
+ */
+export const wikiSavePage = createServerFn({ method: "POST" })
+  .validator(
+    (d: {
+      slug: string
+      type: string
+      body: string
+      title?: string
+      description?: string
+      tags?: string[]
+      visibility?: string
+      draft?: boolean
+    }) => d,
+  )
+  .handler(async ({ data }): Promise<Result<WikiSavePageResult>> => {
+    try {
+      const out = await brainCall<WikiSavePageResult>("wiki_save_page", false, {
+        slug: data.slug,
+        type: data.type,
+        body: data.body,
+        ...(data.title !== undefined ? { title: data.title } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.tags !== undefined ? { tags: data.tags } : {}),
+        ...(data.visibility !== undefined ? { visibility: data.visibility } : {}),
+        ...(data.draft !== undefined ? { draft: data.draft } : {}),
       })
       return { ok: true, data: out }
     } catch (error) {

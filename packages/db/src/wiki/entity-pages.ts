@@ -13,7 +13,7 @@
  * Live sections (mentions / relations) are computed at read time (NOT stored in the body) so the
  * page shows the graph live while the body stays human/agent prose.
  */
-import { type Principal, slugify } from "@brain/shared"
+import { entityPageSlug, type Principal, slugify } from "@brain/shared"
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { PageStore } from "../pages/store"
 import {
@@ -32,9 +32,8 @@ import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
 export const SYSTEM_AUTHOR = "system"
 export const ENTITY_INGESTED_VIA = "entity"
 
-/** The canonical entity-page slug for an entity (D5: `entities/<kind>/<slugified name>`). */
-export const entityPageSlug = (kind: string, canonicalName: string): string =>
-  `entities/${slugify(kind, "kind")}/${slugify(canonicalName, "entity")}`
+/** The canonical entity-page slug (D5) — re-exported from `@brain/shared` so client + store agree. */
+export { entityPageSlug }
 
 /** The minimal live entity a page is built from (scoped + {world,team}-gated by the caller). */
 export interface EntityForPage {

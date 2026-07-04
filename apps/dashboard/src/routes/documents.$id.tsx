@@ -4,6 +4,7 @@
  */
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
+import { Markdown } from "../components/Markdown"
 import { RequireAuth } from "../components/RequireAuth"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
@@ -239,14 +240,10 @@ function DocumentDetailPage() {
                 </Button>
               </div>
             </div>
+          ) : doc.body !== "" ? (
+            <Markdown body={doc.body} pending={[]} />
           ) : (
-            <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-neutral-100 bg-neutral-50 p-4 font-mono text-sm leading-relaxed">
-              {doc.body !== "" ? (
-                doc.body
-              ) : (
-                <span className="text-neutral-300">No body content.</span>
-              )}
-            </pre>
+            <p className="text-neutral-300 text-sm">No body content.</p>
           )}
         </CardContent>
       </Card>

@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
+import { CommandPalette } from "../components/CommandPalette"
 import { NavMenu } from "../components/NavMenu"
 import { OrgSwitcher } from "../components/OrgSwitcher"
 import { TenantIndicator } from "../components/TenantIndicator"
@@ -199,6 +200,7 @@ function RootDocument({ children }: { children: ReactNode }) {
           )}
         </header>
         <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+        <CommandPalette />
         <Toaster />
         <Scripts />
       </body>

@@ -149,6 +149,14 @@ export function WikiSidebar({ pages }: { pages: WikiListEntry[] }) {
       >
         🏠 Wiki home
       </Link>
+      <Link
+        to="/wiki/$"
+        params={{ _splat: "untitled" }}
+        search={{ new: true }}
+        className="mb-3 block rounded border border-neutral-200 px-2 py-1 text-center text-neutral-600 text-xs hover:bg-neutral-100"
+      >
+        + New page
+      </Link>
       {pages.length === 0 ? (
         <p className="px-1 text-neutral-400 text-xs">No pages yet.</p>
       ) : (

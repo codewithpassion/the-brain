@@ -9,17 +9,63 @@
  *    "Create this page" affordance. Never treats the empty id as a real page (no backlinks on "");
  *  • not found (`page:null`) → a not-found notice.
  */
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
+import { WikiEditor, type WikiEditorInitial } from "../components/editor/WikiEditor"
 import { Markdown } from "../components/Markdown"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { diffLines } from "../lib/linediff"
-import { wikiGetPage, wikiPageHistory } from "../server/fns"
+import { wikiGetPage, wikiPageHistory, wikiSavePage } from "../server/fns"
 import type { WikiEntitySection, WikiPageDetail, WikiRevisionFull } from "../server/types"
 
+/** Editor initial state from an existing page's detail (edit mode). */
+const editInitial = (detail: WikiPageDetail): WikiEditorInitial => ({
+  slug: detail.page.slug,
+  type: detail.page.type,
+  title: detail.page.title,
+  tags: detail.tags,
+  body: detail.body,
+  visibility: detail.page.visibility,
+  draft: detail.frontmatter?.draft === true,
+})
+
+/**
+ * Entity pages are minted through the entity path (inheriting the entity's `{world,team}` tier +
+ * graph linkage) — creating one ad-hoc through the generic editor would write a `private`,
+ * `entity_id`-less page at an `entities/…` slug (a W2 violation that collides with later minting).
+ * So the generic create flow is refused for `entities/…` slugs, both here and on the not-found path.
+ */
+const isEntitySlug = (slug: string) => slug.startsWith("entities/")
+
+/** Page metadata carried into the History panel so a rollback re-save preserves it (never wipes it). */
+interface PageMetaSnapshot {
+  title: string
+  tags: string[]
+  draft: boolean
+  description?: string
+}
+
+/** Editor initial state for a brand-new page at `slug` (create mode). */
+const createInitial = (slug: string, detail: WikiPageDetail | null): WikiEditorInitial => {
+  const isEntity = slug.startsWith("entities/")
+  const last = slug.split("/").filter(Boolean).pop() ?? slug
+  return {
+    slug,
+    type: isEntity ? "entity" : "note",
+    title: detail?.entity?.canonicalName ?? last,
+    tags: [],
+    body: "",
+    visibility: "private", // create defaults to private (WikiEditor omits unless changed)
+    draft: false,
+  }
+}
+
 export const Route = createFileRoute("/wiki/$")({
+  validateSearch: (s: Record<string, unknown>): { new?: boolean } => ({
+    new: s.new === true || s.new === "1" || s.new === 1,
+  }),
   loader: async ({ params }) => ({
     result: await wikiGetPage({ data: { target: params._splat ?? "" } }),
   }),
@@ -29,6 +75,8 @@ export const Route = createFileRoute("/wiki/$")({
 function WikiPageView() {
   const slug = Route.useParams()._splat ?? ""
   const { result } = Route.useLoaderData()
+  const search = Route.useSearch()
+  const [mode, setMode] = useState<"view" | "edit" | "create">(search.new ? "create" : "view")
 
   if (!result.ok) {
     return (
@@ -39,32 +87,97 @@ function WikiPageView() {
     )
   }
   const detail = result.data.page
+  const isStub = detail !== null && (detail.stub === true || detail.page.id === "")
+
+  // ── Create / edit modes ──
+  if (mode === "create") {
+    return (
+      <div className="flex min-w-0 flex-col gap-4">
+        <Breadcrumbs slug={slug} />
+        <h1 className="font-semibold text-xl tracking-tight">Create page</h1>
+        {isEntitySlug(slug) ? (
+          <Card>
+            <CardContent className="py-6">
+              <EntityMintNote />
+            </CardContent>
+          </Card>
+        ) : (
+          <WikiEditor
+            mode="create"
+            initial={createInitial(slug, detail)}
+            onCancel={() => setMode("view")}
+            onSaved={() => setMode("view")}
+          />
+        )}
+      </div>
+    )
+  }
+  if (mode === "edit" && detail !== null && !isStub) {
+    return (
+      <div className="flex min-w-0 flex-col gap-4">
+        <Breadcrumbs slug={slug} />
+        <h1 className="font-semibold text-xl tracking-tight">
+          Editing <span className="font-mono text-base">{detail.page.slug}</span>
+        </h1>
+        <WikiEditor
+          mode="edit"
+          initial={editInitial(detail)}
+          onCancel={() => setMode("view")}
+          onSaved={() => setMode("view")}
+        />
+      </div>
+    )
+  }
+
+  // ── View modes ──
   if (detail === null) {
     return (
       <div className="flex flex-col gap-4">
         <Breadcrumbs slug={slug} />
         <Card>
-          <CardContent className="py-8">
+          <CardContent className="flex flex-col items-start gap-3 py-8">
             <p className="text-neutral-600 text-sm">
               Page <span className="font-mono">{slug}</span> not found.
             </p>
+            {isEntitySlug(slug) ? (
+              <EntityMintNote />
+            ) : (
+              <Button onClick={() => setMode("create")}>+ Create this page</Button>
+            )}
           </CardContent>
         </Card>
       </div>
     )
   }
-  const isStub = detail.stub === true || detail.page.id === ""
   return isStub ? (
     <StubView slug={slug} detail={detail} />
   ) : (
-    <PageView slug={slug} detail={detail} />
+    <PageView slug={slug} detail={detail} onEdit={() => setMode("edit")} />
   )
 }
 
 // ── Real page ──────────────────────────────────────────────────────────────────────────
 
-function PageView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
+function PageView({
+  slug,
+  detail,
+  onEdit,
+}: {
+  slug: string
+  detail: WikiPageDetail
+  onEdit: () => void
+}) {
   const { page, body, tags, backlinks, timeline, revisions, links, entity } = detail
+  // Only wiki-lane pages are editable here (memory pages edit via the Memory screen).
+  const editable = page.ingestedVia === "wiki" || page.ingestedVia === "entity"
+  // Snapshot of the current metadata so a rollback re-save preserves title/tags/draft/description.
+  const description = detail.frontmatter?.description
+  const currentMeta: PageMetaSnapshot = {
+    title: page.title,
+    tags,
+    draft: detail.frontmatter?.draft === true,
+    ...(typeof description === "string" ? { description } : {}),
+  }
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div>
@@ -77,6 +190,11 @@ function PageView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
           </Badge>
           {page.ingestedVia && page.ingestedVia !== "wiki" && (
             <Badge variant="outline">{page.ingestedVia}</Badge>
+          )}
+          {editable && (
+            <Button variant="outline" size="sm" className="ml-auto" onClick={onEdit}>
+              Edit
+            </Button>
           )}
         </div>
         {tags.length > 0 && (
@@ -108,7 +226,13 @@ function PageView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
       {entity && <EntitySections entity={entity} />}
       <Backlinks backlinks={backlinks} pending={links.pending} />
       <Timeline timeline={timeline} />
-      <History slug={page.slug} revisions={revisions} />
+      <History
+        slug={page.slug}
+        pageType={page.type}
+        editable={editable}
+        revisions={revisions}
+        current={currentMeta}
+      />
     </div>
   )
 }
@@ -128,18 +252,28 @@ function StubView({ slug, detail }: { slug: string; detail: WikiPageDetail }) {
         </p>
       </div>
       <Card>
-        <CardContent className="flex flex-col items-start gap-3 py-6">
+        <CardContent className="flex flex-col items-start gap-2 py-6">
           <p className="text-neutral-600 text-sm">
-            Create a page to add an agent- or human-authored summary. (Editing lands in the next
-            phase; for now this is a read-only view.)
+            This entity's live graph sections are shown below.
           </p>
-          <span className="cursor-not-allowed rounded-md bg-neutral-200 px-4 py-2 font-medium text-neutral-500 text-sm">
-            + Create this page (coming in edit mode)
-          </span>
+          <p className="text-neutral-400 text-xs">
+            Authoring a dedicated entity page (with the entity's tier + linkage) lands via the
+            entity-mint path — creating one here would produce a mis-scoped, unlinked page.
+          </p>
         </CardContent>
       </Card>
       {detail.entity && <EntitySections entity={detail.entity} />}
     </div>
+  )
+}
+
+/** Why the generic create flow is refused for an `entities/…` slug (shown on create + not-found). */
+function EntityMintNote() {
+  return (
+    <p className="text-neutral-500 text-sm">
+      Entity pages are authored via the entity-mint path — inheriting the entity's tier and graph
+      linkage. Creating one here would produce a mis-scoped, unlinked page.
+    </p>
   )
 }
 
@@ -277,9 +411,23 @@ function AuthorBadge({ authorUserId }: { authorUserId: string | null }) {
  * "Load diffs" fetches `wiki_page_history` (bodies) once, then each revision (except the oldest) can
  * expand to a unified line-diff vs the version before it. Bodies stay gated server-side.
  */
-function History({ slug, revisions }: { slug: string; revisions: WikiPageDetail["revisions"] }) {
+function History({
+  slug,
+  pageType,
+  editable,
+  revisions,
+  current,
+}: {
+  slug: string
+  pageType: string
+  editable: boolean
+  revisions: WikiPageDetail["revisions"]
+  current: PageMetaSnapshot
+}) {
+  const router = useRouter()
   const [bodies, setBodies] = useState<WikiRevisionFull[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [restoring, setRestoring] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
 
@@ -291,6 +439,29 @@ function History({ slug, revisions }: { slug: string; revisions: WikiPageDetail[
     if (!res.ok) return setError(res.error)
     if (res.data.revisions === null) return setError("History is not available for this page.")
     setBodies(res.data.revisions)
+  }
+
+  // Rollback = save an older revision's body as a NEW revision (client-side; no rollback op needed).
+  // `wiki_save_page` is a full upsert, so we MUST resend the page's current metadata — title, tags,
+  // draft, description — or they'd be wiped. Visibility is OMITTED so the page keeps its current tier.
+  const restore = async (version: number, body: string) => {
+    setRestoring(version)
+    setError(null)
+    const res = await wikiSavePage({
+      data: {
+        slug,
+        type: pageType,
+        body,
+        title: current.title,
+        tags: current.tags,
+        draft: current.draft,
+        ...(current.description !== undefined ? { description: current.description } : {}),
+      },
+    })
+    setRestoring(null)
+    if (!res.ok) return setError(res.error)
+    await router.invalidate()
+    setBodies(null) // force a fresh diff load against the new head
   }
 
   const bodyByVersion = new Map<number, string>((bodies ?? []).map((r) => [r.version, r.body]))
@@ -338,6 +509,16 @@ function History({ slug, revisions }: { slug: string; revisions: WikiPageDetail[
                         className="shrink-0 text-blue-700 text-xs hover:underline"
                       >
                         {isOpen ? "hide diff" : "diff"}
+                      </button>
+                    )}
+                    {editable && thisBody !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => restore(r.version, thisBody)}
+                        disabled={restoring !== null}
+                        className="shrink-0 text-neutral-500 text-xs hover:text-neutral-900 hover:underline"
+                      >
+                        {restoring === r.version ? "restoring…" : "restore"}
                       </button>
                     )}
                   </div>

@@ -606,6 +606,14 @@ export interface WikiPageDetail {
   stub?: boolean
 }
 
+/** `wiki_save_page` result. */
+export interface WikiSavePageResult {
+  slug: string
+  pageId: string
+  version: number
+  changed: boolean
+}
+
 /** One row of the sidebar tree listing from `wiki_list_pages`. */
 export interface WikiListEntry {
   slug: string
