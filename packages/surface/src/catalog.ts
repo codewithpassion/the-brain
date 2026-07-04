@@ -31,6 +31,7 @@ import {
   createSnapshot,
   DELETE_DOCUMENT_OP,
   DREAM_NOW_OP,
+  deleteWikiPage,
   dispatchDreamRun,
   exportOkfBundle,
   FINALIZE_SESSION_OP,
@@ -45,6 +46,7 @@ import {
   getContextSnapshot,
   getMemory,
   getSessionContext,
+  getWikiPage,
   INGEST_DOCUMENT_OP,
   importOkfBundle,
   LIST_PENDING_REVIEWS_OP,
@@ -53,6 +55,7 @@ import {
   listMemory,
   listPendingReviews,
   listSnapshots,
+  listWikiPages,
   MEMORY_FORGET_OP,
   MEMORY_GET_OP,
   MEMORY_HISTORY_OP,
@@ -64,6 +67,7 @@ import {
   makeBudgetPort,
   makeRecallSink,
   memoryHistory,
+  moveWikiPage,
   NOTION_OPS,
   normalizePath,
   OKF_EXPORT_OP,
@@ -84,6 +88,7 @@ import {
   runSessionPromote,
   type ScopedServices,
   type SearchDeps,
+  saveWikiPage,
   searchOp,
   setMemory,
   submitMemoryReview,
@@ -92,6 +97,12 @@ import {
   UPDATE_DOCUMENT_OP,
   VAULT_OPS,
   VAULT_WRITEBACK_OP,
+  WIKI_DELETE_PAGE_OP,
+  WIKI_GET_PAGE_OP,
+  WIKI_LIST_PAGES_OP,
+  WIKI_MOVE_PAGE_OP,
+  WIKI_SAVE_PAGE_OP,
+  type WikiSavePageInput,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
@@ -396,6 +407,55 @@ const okfImportSurfaceOp: SurfaceOp = {
   invoke: (ctx, input) => {
     const { files } = OKF_IMPORT_OP.input.parse(input)
     return importOkfBundle(memoryStore(ctx), files)
+  },
+}
+
+// ── Wiki family (wiki_save_page / get / list / move / delete) ─────────────────
+// First-class wiki pages on the shared `pages` layer; the WikiStore enforces the same
+// tenant/scope/visibility isolation + in-batch audit as memory (docs/v3-implementation-plan.md W1).
+const wikiStore = (ctx: SurfaceContext) => createScopedServices(ctx.env, ctx.principal).wiki
+
+const wikiSavePageSurfaceOp: SurfaceOp = {
+  def: WIKI_SAVE_PAGE_OP,
+  invoke: (ctx, input) =>
+    saveWikiPage(wikiStore(ctx), WIKI_SAVE_PAGE_OP.input.parse(input) as WikiSavePageInput),
+}
+
+const wikiGetPageSurfaceOp: SurfaceOp = {
+  def: WIKI_GET_PAGE_OP,
+  invoke: async (ctx, input) => {
+    const { target } = WIKI_GET_PAGE_OP.input.parse(input)
+    return { page: await getWikiPage(wikiStore(ctx), target) }
+  },
+}
+
+const wikiListPagesSurfaceOp: SurfaceOp = {
+  def: WIKI_LIST_PAGES_OP,
+  invoke: async (ctx, input) => {
+    const parsed = WIKI_LIST_PAGES_OP.input.parse(input)
+    const pages = await listWikiPages(wikiStore(ctx), {
+      limit: parsed.limit,
+      ...(parsed.namespacePrefix !== undefined ? { namespacePrefix: parsed.namespacePrefix } : {}),
+      ...(parsed.type !== undefined ? { type: parsed.type } : {}),
+      ...(parsed.tag !== undefined ? { tag: parsed.tag } : {}),
+    })
+    return { pages }
+  },
+}
+
+const wikiMovePageSurfaceOp: SurfaceOp = {
+  def: WIKI_MOVE_PAGE_OP,
+  invoke: (ctx, input) => {
+    const { fromSlug, toSlug } = WIKI_MOVE_PAGE_OP.input.parse(input)
+    return moveWikiPage(wikiStore(ctx), fromSlug, toSlug)
+  },
+}
+
+const wikiDeletePageSurfaceOp: SurfaceOp = {
+  def: WIKI_DELETE_PAGE_OP,
+  invoke: (ctx, input) => {
+    const { slug } = WIKI_DELETE_PAGE_OP.input.parse(input)
+    return deleteWikiPage(wikiStore(ctx), slug)
   },
 }
 
@@ -921,6 +981,11 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   memoryForgetSurfaceOp,
   okfExportSurfaceOp,
   okfImportSurfaceOp,
+  wikiSavePageSurfaceOp,
+  wikiGetPageSurfaceOp,
+  wikiListPagesSurfaceOp,
+  wikiMovePageSurfaceOp,
+  wikiDeletePageSurfaceOp,
   memoryReviewSurfaceOp,
   breakGlassReadSurfaceOp,
   auditExportSurfaceOp,

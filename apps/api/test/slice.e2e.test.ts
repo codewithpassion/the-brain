@@ -8,6 +8,7 @@ import {
   ScopedR2,
   type ScopedServices,
   ScopedVectorize,
+  WikiStore,
 } from "@brain/db"
 import type { Principal } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
@@ -116,6 +117,7 @@ const makeServices = (e: BrainBindings, principal: Principal): ScopedServices =>
   vectors: new ScopedVectorize(fakeVectorize.index, principal),
   entityVectors: new ScopedVectorize(fakeVectorize.index, principal),
   graph: new ScopedGraph(drizzle(e.DB), principal),
+  wiki: new WikiStore(drizzle(e.DB), principal),
   blobs: new ScopedR2(e.BODIES, principal),
   ai: aiStub,
 })

@@ -160,6 +160,9 @@ describe("tags + links reconcile from the concept", () => {
     ).toBe(2) // de-duped x,y
     // only the existing 'target' resolves; 'missing' is silently skipped
     expect(rowCount(sqlite, "SELECT count(*) AS n FROM doc_links WHERE link_source='okf'")).toBe(1)
+    // the memory lane is resolved-only: an unresolved link NEVER becomes a pending (red) row
+    // (red links are a wiki-lane feature; memory's contract is byte-identical to pre-v3).
+    expect(rowCount(sqlite, "SELECT count(*) AS n FROM pending_links")).toBe(0)
   })
 })
 

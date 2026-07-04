@@ -11,6 +11,7 @@ import {
   ScopedR2,
   ScopedVectorize,
   selectReflectionTargets,
+  WikiStore,
 } from "@brain/db"
 import type { Principal } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
@@ -60,6 +61,7 @@ const reflectServices = (
     vectors: new ScopedVectorize(fakeIndex(matches), p),
     entityVectors: new ScopedVectorize(fakeIndex([]), p),
     graph: new ScopedGraph(rawDb, p),
+    wiki: new WikiStore(rawDb, p),
     blobs: new ScopedR2(env_.BODIES, p),
     ai: {
       embed: async () => [vec1024()],

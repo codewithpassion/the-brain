@@ -20,6 +20,7 @@ import {
   type ScopedServices,
   ScopedVectorize,
   TranscriptionError,
+  WikiStore,
 } from "@brain/db"
 import { AUDIO_MAX_BYTES, MAX_BODY_BYTES, type Principal, WHISPER_MODEL } from "@brain/shared"
 import { drizzle } from "drizzle-orm/d1"
@@ -71,6 +72,7 @@ const makeServices = (e: BrainBindings, principal: Principal): ScopedServices =>
   vectors: new ScopedVectorize(fakeVectorize, principal),
   entityVectors: new ScopedVectorize(fakeVectorize, principal),
   graph: new ScopedGraph(drizzle(e.DB), principal),
+  wiki: new WikiStore(drizzle(e.DB), principal),
   blobs: new ScopedR2(e.BODIES, principal),
   ai: {
     embed: async (texts) => texts.map(() => vec1024()),

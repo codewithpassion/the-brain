@@ -18,6 +18,7 @@ import { ScopedGraph } from "./graph/scoped-graph"
 import { type BreakGlassAudit, ScopedDB } from "./scoped/db"
 import { ScopedR2 } from "./scoped/r2"
 import { ScopedVectorize } from "./scoped/vectorize"
+import { WikiStore } from "./wiki/store"
 
 /** The per-request, tenant-scoped service bundle. */
 export interface ScopedServices {
@@ -27,6 +28,8 @@ export interface ScopedServices {
   entityVectors: ScopedVectorize
   /** Graph node-space read/write chokepoint (pages/entities/links; Phase 4). */
   graph: ScopedGraph
+  /** First-class wiki pages on the shared `pages` layer (v3/W1). */
+  wiki: WikiStore
   blobs: ScopedR2
   ai: {
     /** READ path — `null` ⇒ degrade to keyword-only. */
@@ -77,6 +80,7 @@ export const createScopedServices = (
     vectors: new ScopedVectorize(env.CHUNK_INDEX, principal),
     entityVectors: new ScopedVectorize(env.ENTITY_INDEX, principal),
     graph: new ScopedGraph(db, principal),
+    wiki: new WikiStore(db, principal),
     blobs: new ScopedR2(env.BODIES, principal),
     ai: {
       embed: (texts) => embed(aiDeps, texts),

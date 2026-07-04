@@ -14,6 +14,7 @@ import {
   registerSearchOps,
   registerSessionOps,
   registerVaultOps,
+  registerWikiOps,
 } from "@brain/db"
 import { OpRegistry } from "@brain/shared"
 
@@ -23,6 +24,7 @@ export const buildRegistry = (): OpRegistry => {
   registerGraphOps(registry)
   registerSessionOps(registry)
   registerMemoryOps(registry)
+  registerWikiOps(registry)
   registerGovernanceOps(registry)
   registerAdminOps(registry)
   registerVaultOps(registry)

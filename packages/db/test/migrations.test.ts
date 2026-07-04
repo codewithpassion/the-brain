@@ -54,6 +54,7 @@ const BASE_TABLES = [
   "chunks",
   "pages",
   "doc_links",
+  "pending_links",
   "tags",
   "timeline_entries",
   "page_versions",
@@ -94,6 +95,7 @@ describe("migrations apply cleanly", () => {
       "0007_entities_merged_into.sql",
       "0008_snapshots_session_context.sql",
       "0009_notion_connections.sql",
+      "0010_wiki_pages.sql",
     ])
   })
 

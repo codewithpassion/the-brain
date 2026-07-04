@@ -11,7 +11,7 @@
  */
 
 /** Help-section order (only sections with at least one generated command are rendered). */
-export const GROUP_ORDER = ["search", "graph", "session", "facts", "key", "admin"] as const
+export const GROUP_ORDER = ["search", "graph", "wiki", "session", "facts", "key", "admin"] as const
 
 export type Group = (typeof GROUP_ORDER)[number]
 
@@ -40,6 +40,12 @@ const GROUP_BY_OP: Record<string, Group> = {
   add_link: "graph",
   add_tag: "graph",
   add_timeline_entry: "graph",
+  // wiki (first-class pages)
+  wiki_save_page: "wiki",
+  wiki_get_page: "wiki",
+  wiki_list_pages: "wiki",
+  wiki_move_page: "wiki",
+  wiki_delete_page: "wiki",
   // session
   capture_turn: "session",
   finalize_session: "session",

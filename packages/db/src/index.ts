@@ -29,6 +29,8 @@ export * from "./ingest"
 export * from "./memory"
 // ── Notion connection store + ops (notion-integration-plan.md) ────────────────
 export * from "./notion"
+// ── Shared page-CRUD core (memory + wiki drive it) (v3/W1) ────────────────────
+export * from "./pages"
 export * as schema from "./schema"
 export * from "./schema"
 export * from "./scoped"
@@ -39,3 +41,5 @@ export { createScopedServices } from "./services"
 export * from "./sessions"
 // ── Vault WebDAV credential store + ops (r2-facade-plan.md) ──────────────────
 export * from "./vault"
+// ── First-class wiki pages on the pages layer (v3/W1) ─────────────────────────
+export * from "./wiki"

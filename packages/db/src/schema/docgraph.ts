@@ -37,6 +37,7 @@ export const pages = sqliteTable(
     frontmatter: text("frontmatter").notNull().default("{}"),
     contentHash: text("content_hash"), // skip-unchanged gate
     documentId: text("document_id"), // the backing document, when created by ingest
+    entityId: text("entity_id"), // the entity this page IS about (W2 entity pages); nullable
     sourceId: text("source_id"),
     sourceKind: text("source_kind"),
     sourceUri: text("source_uri"),
@@ -54,6 +55,30 @@ export const pages = sqliteTable(
     index("ix_pages_tenant_type").on(t.tenantId, t.type),
     index("ix_pages_tenant_updated").on(t.tenantId, t.updatedAt),
     index("ix_pages_source").on(t.tenantId, t.sourceId, t.ingestedVia, t.deletedAt),
+    index("ix_pages_entity").on(t.tenantId, t.entityId), // W2 entity-page lookup
+  ],
+)
+
+/**
+ * `pending_links` — UNRESOLVED wikilinks ("red links"): an in-body `[[slug]]`/markdown link
+ * whose target page does not yet exist (or is not visible). Recorded here instead of dropped
+ * (v3/W1); when a page is later created at `target_slug`, `PageStore` resolves the row into a
+ * real `doc_links` edge and deletes it. `link_source` is carried so the recreated edge matches
+ * the origin page's provenance (`okf` for memory pages, `wiki` for wiki pages).
+ */
+export const pendingLinks = sqliteTable(
+  "pending_links",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    fromPageId: text("from_page_id").notNull(), // ALWAYS a pages.id (the page that authored the link)
+    targetSlug: text("target_slug").notNull(), // the slug the link points at (no page yet)
+    linkSource: text("link_source").notNull().default("wiki"),
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (t) => [
+    unique().on(t.tenantId, t.fromPageId, t.targetSlug), // idempotent per (page, target)
+    index("ix_pending_links_target").on(t.tenantId, t.targetSlug), // retroactive resolution lookup
   ],
 )
 
