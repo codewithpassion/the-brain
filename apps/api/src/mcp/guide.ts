@@ -47,6 +47,7 @@ The Brain is a persistent, multi-tenant memory platform. You reach it over MCP; 
 | **Content** (semantic) | \`search\` (passages), \`think\` (cited answer) | \`ingest_document\` | you want what *the documents* say |
 | **Facts** (hot memory) | \`recall\` | (auto from sessions), \`forget_fact\` to retract | "what do I know about X / the user" |
 | **Agent memory** (addressable) | \`memory_get\`, \`memory_list\` | \`memory_set\`, \`memory_rollback\`, \`memory_forget\` | a preference/decision/instruction to recall verbatim |
+| **Wiki** (linked knowledge) | \`wiki_get_page\` (start at \`index\`), \`wiki_list_pages\`, \`get_backlinks\` | \`wiki_save_page\` | durable, explained knowledge you \`[[link]]\` and browse |
 | **Graph** (relations) | \`traverse_graph\`, \`get_links\`, \`get_backlinks\` | (derived from ingest) | how entities connect |
 | **Sessions** (episodic) | \`get_session_context\` | \`capture_turn\`, \`finalize_session\` | start/record a conversation |
 
@@ -66,6 +67,26 @@ The distinction that matters most: **memory vs content vs facts.**
   \`revisionId\` (NOT the version number) and appends the old content as a new version (forward-only —
   history is never rewritten). \`memory_forget\` soft-deletes; the history is retained.
 - **Bulk interchange:** \`okf_export\` / \`okf_import\` round-trip the whole memory as an OKF bundle.
+
+## The wiki (durable, linked knowledge)
+
+The wiki is the same \`pages\` layer as memory, but browsable and interlinked — entities and ideas
+each get a real page, connected by \`[[wikilinks]]\` + backlinks. Read: \`wiki_get_page\`,
+\`wiki_list_pages\`, \`get_backlinks\`. Write: \`wiki_save_page\`.
+
+- **Save durable learnings as pages.** When you work something out that is reusable beyond this
+  conversation — how a system fits together, a decision and its rationale, a concept worth a
+  canonical explanation — \`wiki_save_page\` it and \`[[link]]\` the related concepts. (Verbatim
+  preferences/instructions still go to \`memory_set\`; the wiki is for explained, linked knowledge.)
+- **Progressive disclosure — don't list everything.** Auto-maintained \`index\` pages give you two
+  layers: \`wiki_get_page('index')\` is the root (namespaces + top-level pages); each \`<ns>/index\`
+  lists that section. Read the index, then drill into the pages you need — cheaper than
+  \`wiki_list_pages\` over a large wiki.
+- **Entity/idea pages are agent-maintained.** The dream engine keeps \`entities/<kind>/<name>\` pages
+  and idea pages current; you can read and extend them like any page.
+- **Sharing:** \`wiki_export_bundle\` packages a namespace as an OKF bundle (zip); \`wiki_import_bundle\`
+  ingests one under \`imported/<namespace>/…\` as **private drafts, kept out of search** until a human
+  reviews + publishes them (imported content is untrusted).
 
 ## Facts & sessions
 
