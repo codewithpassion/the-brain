@@ -48,7 +48,7 @@ export interface DreamJobResult {
 
 export interface DreamJobSpec<Item> {
   runId: string
-  kind: "consolidation" | "reflection" | "dedup" | "hygiene"
+  kind: "consolidation" | "reflection" | "dedup" | "hygiene" | "entitypages"
   /** Per-run neuron cap; effective threshold = min(10% remaining ceiling, this). */
   maxNeurons?: number
   /** The window's spend so far (neurons) — read once, before selection (finding: budget-first). */

@@ -56,8 +56,23 @@ describe("dreamStepPlan — the shared kind→steps mapping", () => {
     expect(dreamStepPlan("base", "all").some((s) => s.group === "hygiene")).toBe(true)
   })
 
+  test("'entitypages' → only the entity-page backfill step (suffixed run id); NOT part of 'all'", () => {
+    expect(dreamStepPlan("base", "entitypages")).toEqual([
+      { group: "entitypages", runId: "base-entitypages" },
+    ])
+    // Standalone graph-hygiene sweep (like dedup), deliberately excluded from the nightly 'all'.
+    expect(dreamStepPlan("base", "all").some((s) => s.group === "entitypages")).toBe(false)
+  })
+
   test("DREAM_KINDS is the single kind set", () => {
-    expect([...DREAM_KINDS]).toEqual(["consolidation", "reflection", "dedup", "hygiene", "all"])
+    expect([...DREAM_KINDS]).toEqual([
+      "consolidation",
+      "reflection",
+      "dedup",
+      "hygiene",
+      "entitypages",
+      "all",
+    ])
   })
 })
 

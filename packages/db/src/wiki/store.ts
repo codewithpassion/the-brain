@@ -21,6 +21,7 @@ import { contentHash, type ExistingPageRow, PageStore, parseFrontmatter } from "
 import { docLinks, pageRevisions, pages, tags } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import { EntityPageStore, type EntitySections } from "./entity-pages"
 
 const WIKI_INGESTED_VIA = "wiki"
 
@@ -85,6 +86,10 @@ export interface WikiPageDetail {
     /** Unresolved (red) outbound link target slugs — no page there yet. */
     pending: string[]
   }
+  /** Live (unstored) entity sections when this page IS about an entity (mentions/relations). */
+  entity?: EntitySections
+  /** True for a synthesizable entity-page STUB — the entity exists but has no page yet (lazy mint). */
+  stub?: boolean
 }
 
 export interface WikiMoveResult {
@@ -98,12 +103,14 @@ export class WikiStore {
   private readonly p: Principal
   private readonly pages: PageStore
   private readonly graph: ScopedGraph
+  private readonly entityPages: EntityPageStore
 
   constructor(db: BrainDrizzle, principal: Principal) {
     this.db = db
     this.p = principal
     this.pages = new PageStore(db, principal)
     this.graph = new ScopedGraph(db, principal)
+    this.entityPages = new EntityPageStore(db, principal)
   }
 
   // ── authorization ──────────────────────────────────────────────────────────────────
@@ -346,7 +353,7 @@ export class WikiStore {
   /** Load a page's full detail by slug-or-id (visibility-gated). Null when absent / not visible. */
   async getPage(slugOrId: string): Promise<WikiPageDetail | null> {
     const pageId = await this.graph.resolveNodeId(DOC_GRAPH, slugOrId)
-    if (pageId === null) return null
+    if (pageId === null) return this.entityStub(slugOrId) // maybe an un-minted entity page (lazy)
     const row = await this.pages.getPageRow(pageId)
     if (row === null) return null
     const [backlinks, pageTags, timeline, revisions, pending, resolved] = await Promise.all([
@@ -357,6 +364,12 @@ export class WikiStore {
       this.pages.getPendingOutbound(pageId),
       this.graph.getLinks(pageId),
     ])
+    // Live entity sections when this page IS about an entity (computed, never stored).
+    let entity: EntitySections | undefined
+    if (row.entityId !== null) {
+      const ent = await this.entityPages.getEntity(row.entityId)
+      if (ent !== null) entity = await this.entityPages.sectionsFor(ent)
+    }
     return {
       page: {
         id: row.id,
@@ -376,6 +389,40 @@ export class WikiStore {
       timeline,
       revisions,
       links: { resolved, pending },
+      ...(entity !== undefined ? { entity } : {}),
+    }
+  }
+
+  /**
+   * Lazy-mint stub (W2): an `entities/<kind>/<name>` slug with a live entity but NO page yet returns
+   * a synthesizable stub — the entity's live sections + the would-be page fields, no body/revisions —
+   * so the UI can offer "create this page". Read-only (never writes). Null for a non-entity miss.
+   */
+  private async entityStub(slug: string): Promise<WikiPageDetail | null> {
+    const ent = await this.entityPages.findEntityBySlug(slug)
+    if (ent === null) return null
+    const sections = await this.entityPages.sectionsFor(ent)
+    return {
+      page: {
+        id: "",
+        slug,
+        title: ent.canonicalName,
+        type: "entity",
+        visibility: ent.visibility,
+        ingestedVia: "entity",
+        entityId: ent.id,
+        createdAt: "",
+        updatedAt: "",
+      },
+      body: "",
+      frontmatter: { type: "entity", title: ent.canonicalName, entity_kind: ent.kind },
+      backlinks: [],
+      tags: [],
+      timeline: [],
+      revisions: [],
+      links: { resolved: [], pending: [] },
+      entity: sections,
+      stub: true,
     }
   }
 

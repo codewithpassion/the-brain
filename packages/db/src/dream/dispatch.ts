@@ -26,6 +26,7 @@ import { createSessionServices } from "../sessions/services"
 import { refreshSessionContextSnapshot } from "../sessions/snapshot"
 import { createDreamDedupServices, runDreamDedup } from "./dedup"
 import { createDreamDigestServices, runDreamDigest } from "./digest"
+import { createDreamEntityPagesServices, runDreamEntityPages } from "./entitypages"
 import { createDreamHygieneServices, runDreamHygiene } from "./hygiene"
 import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
 import { createDreamReflectServices, runDreamReflection } from "./reflect"
@@ -140,6 +141,17 @@ export const dispatchDreamRun = async (
           statuses.push(r.status)
         } catch (err) {
           console.error("dream hygiene failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "entitypages":
+        try {
+          const r = await runDreamEntityPages(createDreamEntityPagesServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream entitypages failed", step.runId, err)
           statuses.push("failure")
         }
         break

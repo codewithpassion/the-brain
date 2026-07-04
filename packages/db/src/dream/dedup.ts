@@ -37,10 +37,11 @@ import {
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import type { DedupEntity, ScopedGraph } from "../graph/scoped-graph"
-import type { ScopedDB } from "../scoped/db"
+import type { BrainDrizzle, ScopedDB } from "../scoped/db"
 import type { ScopedVectorize } from "../scoped/vectorize"
 import { estimateEmbedNeurons, estimateGenNeurons, monthlyWindow } from "../search/ports"
 import { createScopedServices, type ScopedServices } from "../services"
+import { EntityPageStore } from "../wiki/entity-pages"
 import { runDreamJob } from "./job"
 import { dedupRunId } from "./plan"
 import { dreamRunId } from "./run"
@@ -61,6 +62,8 @@ export interface DreamDedupServices {
   ai: Pick<ScopedServices["ai"], "embed" | "gen">
   runs: DreamRunStore
   principal: Principal
+  /** Raw handle for the D4 entity-page re-point follow-on (W2) — legal inside `@brain/db`. */
+  raw: BrainDrizzle
 }
 
 export interface DreamDedupOptions {
@@ -147,6 +150,7 @@ export const runDreamDedup = async (
   const window = monthlyWindow(new Date(now))
   const { graph, entityVectors, ai, db } = services
   const pageSize = opts?.pageSize ?? DEDUP_PAGE_SIZE
+  const entityPages = new EntityPageStore(services.raw, services.principal)
 
   // ── Item 6: sweep-start vector reconciliation (only on a FRESH start, not a resume/continue). ──
   // Self-heals a failed best-effort per-merge vector delete so a stranded loser vector can't keep
@@ -272,6 +276,13 @@ export const runDreamDedup = async (
         if ((winner.scope ?? null) !== (loser.scope ?? null)) continue // never merge across scopes
         await graph.mergeEntities(winner.id, loser.id)
         mergedThisRun.add(loser.id)
+        // W2 D4 follow-on: if the loser entity had a page, redirect it to the winner's entity page.
+        // Best-effort + non-fatal (a separate write from the merge batch) — the merge is authoritative.
+        try {
+          await entityPages.repointMergedPage(loser.id, winner.id)
+        } catch (err) {
+          console.error("dedup: entity-page repoint failed", loser.id, winner.id, err)
+        }
         // Drop the loser's stale vector so it can't resurface as a future candidate (best-effort).
         try {
           await entityVectors.deleteVectors([loser.id])
@@ -327,12 +338,14 @@ export const createDreamDedupServices = (
   principal: Principal,
 ): DreamDedupServices => {
   const base = createScopedServices(env, principal)
+  const raw = drizzle(env.DB)
   return {
     db: base.db,
     graph: base.graph,
     entityVectors: base.entityVectors,
     ai: { embed: base.ai.embed, gen: base.ai.gen },
-    runs: new DreamRunStore(drizzle(env.DB), principal),
+    runs: new DreamRunStore(raw, principal),
     principal,
+    raw,
   }
 }

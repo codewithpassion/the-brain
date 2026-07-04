@@ -2,6 +2,15 @@
  * `@brain/db` wiki sub-barrel (v3/W1) — first-class wiki pages on the shared `pages` layer:
  * the `WikiStore` chokepoint, the `wiki_*` op contracts + their coordination fns.
  */
+
+export type {
+  EntityForPage,
+  EntityRelationSection,
+  EntitySections,
+  MintOrUpdateResult,
+} from "./entity-pages"
+export { EntityPageStore, entityPageSlug } from "./entity-pages"
+export { mintInsightPage } from "./insight-pages"
 export {
   deleteWikiPage,
   getWikiPage,

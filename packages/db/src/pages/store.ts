@@ -158,6 +158,8 @@ export interface PageUpsertInput {
    * it, preserving memory's exact pre-v3 behavior. `scope` is ALWAYS immutable on update (both lanes).
    */
   writeTeamIdOnUpdate: boolean
+  /** The entity this page IS about (W2 entity pages) — written on INSERT only; immutable after. */
+  entityId?: string | null
   /** Provenance: `'memory'` | `'wiki'` | … — forced onto `ingested_via` + `source_kind`. */
   ingestedVia: string
   sourceKind: string
@@ -528,6 +530,7 @@ export class PageStore {
         contentHash: hash,
         sourceKind: input.sourceKind,
         ingestedVia: input.ingestedVia,
+        entityId: input.entityId ?? null,
         ingestedAt: now,
         createdAt: now,
         updatedAt: now,

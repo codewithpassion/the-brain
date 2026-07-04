@@ -27,6 +27,13 @@ export {
   isDuplicateInstanceError,
 } from "./dispatch"
 export {
+  createDreamEntityPagesServices,
+  type DreamEntityPagesOptions,
+  type DreamEntityPagesResult,
+  type DreamEntityPagesServices,
+  runDreamEntityPages,
+} from "./entitypages"
+export {
   createDreamHygieneServices,
   type DreamHygieneOptions,
   type DreamHygieneResult,
@@ -49,6 +56,7 @@ export {
   type DreamKind,
   type DreamStep,
   dreamStepPlan,
+  entitypagesRunId,
   worstStatus,
 } from "./plan"
 export {

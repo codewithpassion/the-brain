@@ -198,6 +198,7 @@ const dedupServices = (
     ai: { embed: embedStub, gen },
     runs: new DreamRunStore(rawDb, p),
     principal: p,
+    raw: rawDb,
   }
 }
 

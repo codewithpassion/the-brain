@@ -116,3 +116,15 @@ export const DOC_ORIGIN_DREAM = "dream" as const
  */
 export const notDreamOrigin = (originColumn: AnySQLiteColumn): SQL =>
   sql`(${originColumn} IS NULL OR ${originColumn} <> ${DOC_ORIGIN_DREAM})`
+
+/** The `pages.ingested_via` provenance values that are AGENT-authored (W2 anti-loop, W-i4). */
+export const AGENT_PAGE_PROVENANCE = ["entity", "insight"] as const
+
+/**
+ * Anti-loop gate (W-i4): a page whose provenance is NOT agent-authored (`entity`/`insight`), or the
+ * NULL join (a non-page-sourced mention). Provenance — not per-revision authorship — is the stable
+ * discriminator: a dream-maintained entity/insight page is treated exactly like an `origin='dream'`
+ * document, so it never feeds reflection; human `wiki`/`memory` pages remain legitimate input.
+ */
+export const notAgentAuthoredPage = (ingestedViaColumn: AnySQLiteColumn): SQL =>
+  sql`(${ingestedViaColumn} IS NULL OR ${ingestedViaColumn} NOT IN ('entity', 'insight'))`

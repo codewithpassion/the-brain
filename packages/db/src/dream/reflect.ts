@@ -25,11 +25,12 @@ import { and, asc, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import type { BrainBindings } from "../env"
 import { runBatchIngestCore } from "../ingest"
-import { chunks, documents, dreamRuns, entities, entityMentions } from "../schema"
+import { chunks, documents, dreamRuns, entities, entityMentions, pages } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import {
   DOC_ORIGIN_DREAM,
   liveEntityPredicate,
+  notAgentAuthoredPage,
   notDreamOrigin,
   scopePredicate,
 } from "../scoped/predicates"
@@ -37,6 +38,8 @@ import { thinkOp } from "../search/ops"
 import { makeBudgetPort, monthlyWindow, recordThinkSpend } from "../search/ports"
 import type { RecallSink, SearchDeps } from "../search/types"
 import { createScopedServices, type ScopedServices } from "../services"
+import { EntityPageStore } from "../wiki/entity-pages"
+import { mintInsightPage } from "../wiki/insight-pages"
 import { runDreamJob } from "./job"
 import { reflectionRunId } from "./plan"
 import { dreamRunId } from "./run"
@@ -81,6 +84,8 @@ interface ReflectionTarget {
   slugKey: string
   /** The retrieval query (carries the distinctive term so the pipeline grounds its evidence). */
   query: string
+  /** Set for ENTITY targets — the entity whose page the dream also maintains (W2 deliverable 3). */
+  entityId?: string
 }
 
 /** Reflection never writes recall traces (it is not a user read). */
@@ -149,11 +154,23 @@ export const selectReflectionTargets = async (
         ),
       ),
     )
+    // W2 anti-loop (W-i4): a mention sourced from an AGENT-authored page (entity/insight) must not
+    // count toward reflection growth — else a dream-maintained page would feed the dream that wrote
+    // it. Non-page mentions leave this join NULL (kept); human wiki/memory page mentions are kept.
+    .leftJoin(
+      pages,
+      and(
+        eq(entityMentions.sourceKind, "page"),
+        eq(pages.id, entityMentions.sourceId),
+        eq(pages.tenantId, entityMentions.tenantId),
+      ),
+    )
     .where(
       and(
         eq(entityMentions.tenantId, principal.tenantId),
         opts.since ? gte(entityMentions.createdAt, opts.since) : undefined,
         notDreamOrigin(documents.origin),
+        notAgentAuthoredPage(pages.ingestedVia),
         isNull(documents.deletedAt), // a NULL join (session/page source) keeps the mention
         liveEntityPredicate(entities.mergedInto), // never reflect on a D4 dedup loser
         scopePredicate(principal, entities.scope),
@@ -167,6 +184,7 @@ export const selectReflectionTargets = async (
     label: row.name,
     slugKey: slugify(row.name, "insight"),
     query: row.name,
+    entityId: row.id,
   }))
 
   // ── Namespaces (documents grouped by path; origin='dream' + the insights namespace excluded) ──
@@ -320,6 +338,27 @@ const reflectTarget = async (
   })
   // D-i1: pin the insight at draft trust (never reads above draft).
   await services.db.upsertMemoryPolicy(documentId, { trustGrade: "draft", scopes: [] })
+
+  // W2: promote the insight to a first-class PAGE (Sources [[slug]] → real doc_links), and for an
+  // ENTITY target ALSO maintain the entity's page (dream-authored, versioned, don't-clobber). These
+  // are SECONDARY artifacts — a failure here must not fail the run (the insight doc already landed).
+  try {
+    await mintInsightPage(services.raw, services.principal, {
+      slugKey: target.slugKey,
+      title: target.label,
+      body,
+    })
+    if (target.entityId !== undefined) {
+      // Dream-maintained = the body is REPLACED with the latest synthesis each run (not accumulated);
+      // a human's edits are protected by the don't-clobber gate (a system write is skipped when the
+      // page's latest revision is human-authored), and every version is retained + rollback-able.
+      const entityStore = new EntityPageStore(services.raw, services.principal)
+      const entityBody = `# ${target.label}\n\n${result.answer}\n\n## Insights\n- [[insights/${target.slugKey}]]\n`
+      await entityStore.mintOrUpdate(target.entityId, { body: entityBody, systemAuthored: true })
+    }
+  } catch (err) {
+    console.error("reflect: entity/insight page maintenance failed", target.key, err)
+  }
   return { documentId, neurons }
 }
 

@@ -7,11 +7,18 @@
  */
 import type { DreamRunStatus } from "./runs"
 
-/** Which dream step groups to run. `dedup` is a STANDALONE sweep (not part of `all`). */
-export type DreamKind = "consolidation" | "reflection" | "dedup" | "hygiene" | "all"
+/** Which dream step groups to run. `dedup`/`entitypages` are STANDALONE sweeps (not part of `all`). */
+export type DreamKind = "consolidation" | "reflection" | "dedup" | "hygiene" | "entitypages" | "all"
 
 /** The `kind` enum values — one source (op zod + dispatch default read from here). */
-export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "hygiene", "all"] as const
+export const DREAM_KINDS = [
+  "consolidation",
+  "reflection",
+  "dedup",
+  "hygiene",
+  "entitypages",
+  "all",
+] as const
 
 /**
  * One step group in a dream run. `consolidation`/`reflection`/`hygiene` drive a `dream_runs` row
@@ -19,7 +26,14 @@ export const DREAM_KINDS = ["consolidation", "reflection", "dedup", "hygiene", "
  * `agent/digest/daily`), so its `runId` is the base run id it summarizes.
  */
 export interface DreamStep {
-  group: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene" | "snapshot"
+  group:
+    | "consolidation"
+    | "reflection"
+    | "digest"
+    | "dedup"
+    | "hygiene"
+    | "entitypages"
+    | "snapshot"
   runId: string
 }
 
@@ -29,6 +43,8 @@ export const reflectionRunId = (baseRunId: string): string => `${baseRunId}-refl
 export const dedupRunId = (baseRunId: string): string => `${baseRunId}-dedup`
 /** The hygiene run id — the dispatch run id + a `-hygiene` suffix (its own `dream_runs` row). */
 export const hygieneRunId = (baseRunId: string): string => `${baseRunId}-hygiene`
+/** The entity-page backfill run id — the dispatch run id + an `-entitypages` suffix (its own row). */
+export const entitypagesRunId = (baseRunId: string): string => `${baseRunId}-entitypages`
 
 /**
  * The ordered step groups for a `kind`, each with its run id derived from the SINGLE dispatch
@@ -47,6 +63,7 @@ export const hygieneRunId = (baseRunId: string): string => `${baseRunId}-hygiene
 export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] => {
   if (kind === "dedup") return [{ group: "dedup", runId: dedupRunId(baseRunId) }]
   if (kind === "hygiene") return [{ group: "hygiene", runId: hygieneRunId(baseRunId) }]
+  if (kind === "entitypages") return [{ group: "entitypages", runId: entitypagesRunId(baseRunId) }]
   const steps: DreamStep[] = []
   if (kind !== "reflection") steps.push({ group: "consolidation", runId: baseRunId })
   if (kind !== "consolidation")

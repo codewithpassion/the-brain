@@ -65,6 +65,24 @@ const WikiPageDetailSchema = z.object({
     resolved: z.array(DocLinkSchema),
     pending: z.array(z.string()),
   }),
+  entity: z
+    .object({
+      entityId: z.string(),
+      kind: z.string(),
+      canonicalName: z.string(),
+      mentions: z.array(z.object({ sourceKind: z.string(), sourceId: z.string() })),
+      relations: z.array(
+        z.object({
+          direction: z.enum(["out", "in"]),
+          kind: z.string(),
+          entityId: z.string(),
+          name: z.string(),
+          slug: z.string(),
+        }),
+      ),
+    })
+    .optional(),
+  stub: z.boolean().optional(),
 })
 
 const WikiListEntrySchema = z.object({
@@ -121,7 +139,10 @@ export const WIKI_GET_PAGE_OP = defineOp({
   name: "wiki_get_page",
   description:
     "Load a wiki page in full by slug or id: body, frontmatter, backlinks, tags, timeline, revision " +
-    "history, and outbound links (resolved + pending red links). Surfaces memory-provenance pages too.",
+    "history, and outbound links (resolved + pending red links). Surfaces memory-provenance pages too. " +
+    "For an ENTITY page, also returns live `entity` sections (mentions + relations → other entity pages). " +
+    "For an 'entities/<kind>/<name>' slug with no page yet, returns a `stub:true` result with the entity " +
+    "sections and an EMPTY page.id — treat that as 'create this entity page', never as a real page id.",
   capability: "read",
   readOnly: true,
   input: z.object({

@@ -13,6 +13,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import {
   createDreamDedupServices,
   createDreamDigestServices,
+  createDreamEntityPagesServices,
   createDreamHygieneServices,
   createDreamReflectServices,
   createDreamServices,
@@ -25,6 +26,7 @@ import {
   runDreamConsolidation,
   runDreamDedup,
   runDreamDigest,
+  runDreamEntityPages,
   runDreamHygiene,
   runDreamReflection,
   worstStatus,
@@ -171,6 +173,35 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
             })
             last = dd
             if (dd.stopReason !== "page") break // success / budget / failure → done looping
+          }
+          statuses.push(last.status)
+          break
+        }
+        case "entitypages": {
+          // Entity-page backfill: like dedup, CHUNKED across step.do calls (each ≤ EP_STEP_ITEMS
+          // entities, reporting a stopReason). Loop while it stops on 'page'; 'budget'/'success'/
+          // 'failure' ends the loop. EP is LLM-free, so 'budget' is rare (only a fully-spent tenant).
+          const EP_STEP_ITEMS = 100
+          const MAX_EP_STEPS = 200
+          let last: { status: DreamRunStatus; stopReason: "budget" | "page" | null } = {
+            status: "success",
+            stopReason: null,
+          }
+          for (let i = 0; i < MAX_EP_STEPS; i++) {
+            const ep = await step.do(`dream-entitypages-${i}`, async () => {
+              try {
+                const res = await runDreamEntityPages(
+                  createDreamEntityPagesServices(this.env, principal),
+                  { runId: planStep.runId, maxItemsPerInvocation: EP_STEP_ITEMS },
+                )
+                return { status: res.status, stopReason: res.stopReason }
+              } catch (err) {
+                console.error("dream entitypages failed", planStep.runId, err)
+                return { status: "failure" as DreamRunStatus, stopReason: null }
+              }
+            })
+            last = ep
+            if (ep.stopReason !== "page") break
           }
           statuses.push(last.status)
           break
