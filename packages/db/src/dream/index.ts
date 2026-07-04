@@ -40,6 +40,13 @@ export {
   type DreamHygieneServices,
   runDreamHygiene,
 } from "./hygiene"
+export {
+  createDreamIndexesServices,
+  type DreamIndexesOptions,
+  type DreamIndexesResult,
+  type DreamIndexesServices,
+  runDreamIndexes,
+} from "./indexes"
 export { type DreamJobResult, type DreamJobSpec, type ProcessResult, runDreamJob } from "./job"
 export { type DreamAction, type DreamVerdict, type JudgeAi, judgeCluster } from "./judge"
 export {

@@ -80,6 +80,7 @@ export const dreamRuns = sqliteTable(
         "dedup",
         "hygiene",
         "entitypages",
+        "indexes",
       ]),
     ),
     check(

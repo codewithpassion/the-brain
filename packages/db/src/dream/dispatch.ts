@@ -28,6 +28,7 @@ import { createDreamDedupServices, runDreamDedup } from "./dedup"
 import { createDreamDigestServices, runDreamDigest } from "./digest"
 import { createDreamEntityPagesServices, runDreamEntityPages } from "./entitypages"
 import { createDreamHygieneServices, runDreamHygiene } from "./hygiene"
+import { createDreamIndexesServices, runDreamIndexes } from "./indexes"
 import { type DreamKind, dreamStepPlan, worstStatus } from "./plan"
 import { createDreamReflectServices, runDreamReflection } from "./reflect"
 import { createDreamServices, dreamRunId, runDreamConsolidation } from "./run"
@@ -152,6 +153,17 @@ export const dispatchDreamRun = async (
           statuses.push(r.status)
         } catch (err) {
           console.error("dream entitypages failed", step.runId, err)
+          statuses.push("failure")
+        }
+        break
+      case "indexes":
+        try {
+          const r = await runDreamIndexes(createDreamIndexesServices(env, principal), {
+            runId: step.runId,
+          })
+          statuses.push(r.status)
+        } catch (err) {
+          console.error("dream indexes failed", step.runId, err)
           statuses.push("failure")
         }
         break

@@ -71,7 +71,7 @@ export const CLAIMABLE_FROM: readonly DreamRunStatus[] = ["queued", "paused", "f
 /** `createRun` input — `tenantId` is NEVER accepted; the store forces it. */
 export interface CreateDreamRunInput {
   id: string
-  kind: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene" | "entitypages"
+  kind: "consolidation" | "reflection" | "digest" | "dedup" | "hygiene" | "entitypages" | "indexes"
 }
 
 export const ZERO_DREAM_STATS: DreamRunStats = {

@@ -15,6 +15,7 @@ import {
   createDreamDigestServices,
   createDreamEntityPagesServices,
   createDreamHygieneServices,
+  createDreamIndexesServices,
   createDreamReflectServices,
   createDreamServices,
   createScopedServices,
@@ -28,6 +29,7 @@ import {
   runDreamDigest,
   runDreamEntityPages,
   runDreamHygiene,
+  runDreamIndexes,
   runDreamReflection,
   worstStatus,
 } from "@brain/db"
@@ -129,6 +131,23 @@ export class DreamWorkflow extends WorkflowEntrypoint<ApiBindings, DreamWorkflow
             }
           })
           statuses.push(h.status)
+          break
+        }
+        case "indexes": {
+          // LLM-free, deterministic index regeneration (root + per-namespace) — single durable step;
+          // namespaces are few, so unlike dedup/entitypages it needs no chunk loop.
+          const ix = await step.do("dream-indexes", async () => {
+            try {
+              const res = await runDreamIndexes(createDreamIndexesServices(this.env, principal), {
+                runId: planStep.runId,
+              })
+              return { status: res.status }
+            } catch (err) {
+              console.error("dream indexes failed", planStep.runId, err)
+              return { status: "failure" as DreamRunStatus }
+            }
+          })
+          statuses.push(ix.status)
           break
         }
         case "digest": {

@@ -26,6 +26,22 @@ import { selectClusters } from "./select"
 export const dreamRunId = (tenantId: string, now: Date = new Date()): string =>
   `dream-${tenantId}-${now.toISOString().slice(0, 10).replace(/-/g, "")}`
 
+/**
+ * A per-tenant SYSTEM principal — `userId:'system'`, no teams → `visibilityPredicate` collapses to
+ * WORLD-only. The SINGLE home for this identity: dream steps that author or aggregate tenant-wide
+ * content (digest, indexes) MUST force it, ignoring the dispatcher's identity, so the `dream_now`
+ * admin op can never make the run read/write under the caller's own team/private tier.
+ */
+export const systemPrincipal = (tenantId: string): Principal => ({
+  tenantId,
+  userId: "system",
+  teamIds: [],
+  role: "admin",
+  allowedScopes: "*",
+  capabilities: ["read", "write", "admin"],
+  readOnly: false,
+})
+
 /** The tenant-scoped bundle `runDreamConsolidation` needs (built by `createDreamServices`). */
 export interface DreamServices {
   /** For the budget read + spend attribution (`readWindowSpendNeurons` / `recordSpend`). */

@@ -8,7 +8,14 @@
 import type { DreamRunStatus } from "./runs"
 
 /** Which dream step groups to run. `dedup`/`entitypages` are STANDALONE sweeps (not part of `all`). */
-export type DreamKind = "consolidation" | "reflection" | "dedup" | "hygiene" | "entitypages" | "all"
+export type DreamKind =
+  | "consolidation"
+  | "reflection"
+  | "dedup"
+  | "hygiene"
+  | "entitypages"
+  | "indexes"
+  | "all"
 
 /** The `kind` enum values — one source (op zod + dispatch default read from here). */
 export const DREAM_KINDS = [
@@ -17,6 +24,7 @@ export const DREAM_KINDS = [
   "dedup",
   "hygiene",
   "entitypages",
+  "indexes",
   "all",
 ] as const
 
@@ -33,6 +41,7 @@ export interface DreamStep {
     | "dedup"
     | "hygiene"
     | "entitypages"
+    | "indexes"
     | "snapshot"
   runId: string
 }
@@ -45,6 +54,8 @@ export const dedupRunId = (baseRunId: string): string => `${baseRunId}-dedup`
 export const hygieneRunId = (baseRunId: string): string => `${baseRunId}-hygiene`
 /** The entity-page backfill run id — the dispatch run id + an `-entitypages` suffix (its own row). */
 export const entitypagesRunId = (baseRunId: string): string => `${baseRunId}-entitypages`
+/** The index-regeneration run id — the dispatch run id + an `-indexes` suffix (its own row). */
+export const indexesRunId = (baseRunId: string): string => `${baseRunId}-indexes`
 
 /**
  * The ordered step groups for a `kind`, each with its run id derived from the SINGLE dispatch
@@ -64,6 +75,7 @@ export const dreamStepPlan = (baseRunId: string, kind: DreamKind): DreamStep[] =
   if (kind === "dedup") return [{ group: "dedup", runId: dedupRunId(baseRunId) }]
   if (kind === "hygiene") return [{ group: "hygiene", runId: hygieneRunId(baseRunId) }]
   if (kind === "entitypages") return [{ group: "entitypages", runId: entitypagesRunId(baseRunId) }]
+  if (kind === "indexes") return [{ group: "indexes", runId: indexesRunId(baseRunId) }]
   const steps: DreamStep[] = []
   if (kind !== "reflection") steps.push({ group: "consolidation", runId: baseRunId })
   if (kind !== "consolidation")

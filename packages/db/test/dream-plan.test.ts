@@ -64,6 +64,11 @@ describe("dreamStepPlan — the shared kind→steps mapping", () => {
     expect(dreamStepPlan("base", "all").some((s) => s.group === "entitypages")).toBe(false)
   })
 
+  test("'indexes' → only the index-regeneration step (suffixed run id); NOT part of 'all'", () => {
+    expect(dreamStepPlan("base", "indexes")).toEqual([{ group: "indexes", runId: "base-indexes" }])
+    expect(dreamStepPlan("base", "all").some((s) => s.group === "indexes")).toBe(false)
+  })
+
   test("DREAM_KINDS is the single kind set", () => {
     expect([...DREAM_KINDS]).toEqual([
       "consolidation",
@@ -71,6 +76,7 @@ describe("dreamStepPlan — the shared kind→steps mapping", () => {
       "dedup",
       "hygiene",
       "entitypages",
+      "indexes",
       "all",
     ])
   })

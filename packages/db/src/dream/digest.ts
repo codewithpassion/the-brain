@@ -41,6 +41,7 @@ import {
 import { estimateGenNeurons, MONTHLY_NEURON_CEILING, monthlyWindow } from "../search/ports"
 import { createScopedServices } from "../services"
 import { hygieneRunId } from "./plan"
+import { systemPrincipal } from "./run"
 import { DreamRunStore } from "./runs"
 
 /** The addressable memory slug the daily digest is versioned at. */
@@ -382,17 +383,6 @@ export const runDreamDigest = async (
     throw err
   }
 }
-
-/** A per-tenant SYSTEM principal — world-only visibility, stable `'system'` page ownership. */
-const systemPrincipal = (tenantId: string): Principal => ({
-  tenantId,
-  userId: "system",
-  teamIds: [],
-  role: "admin",
-  allowedScopes: "*",
-  capabilities: ["read", "write", "admin"],
-  readOnly: false,
-})
 
 /**
  * `createDreamDigestServices(env, principal)` — the digest bundle. It FORCES a system principal
