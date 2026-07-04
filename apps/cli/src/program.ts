@@ -8,6 +8,7 @@ import { Command } from "commander"
 import { registerAuthCommands } from "./commands/auth"
 import { registerGeneratedCommands } from "./commands/generated"
 import { registerHookCommands } from "./commands/hooks"
+import { registerWikiCommands } from "./commands/wiki"
 import type { CliDeps } from "./deps"
 import { addGlobalFlags } from "./flags"
 
@@ -19,6 +20,7 @@ export const buildProgram = (deps: CliDeps): Command => {
   addGlobalFlags(program)
   registerAuthCommands(program, deps)
   registerHookCommands(program, deps) // hand-written hook kit (context / capture / hooks install)
+  registerWikiCommands(program, deps) // hand-written `wiki import <path>` (reads a bundle client-side)
   registerGeneratedCommands(program, deps)
   return program
 }

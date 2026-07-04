@@ -38,6 +38,7 @@ const LOCAL = new Set([
   "context",
   "capture",
   "hooks",
+  "wiki", // hand-written `wiki import <path>` (reads a bundle client-side; not an op-registry command)
 ])
 
 const generatedNames = (program: Command): string[] =>
