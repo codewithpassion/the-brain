@@ -36,6 +36,7 @@ import {
   deleteWikiPage,
   dispatchDreamRun,
   exportOkfBundle,
+  exportWikiBundle,
   FINALIZE_SESSION_OP,
   FORGET_FACT_OP,
   forgetFact,
@@ -102,6 +103,7 @@ import {
   VAULT_OPS,
   VAULT_WRITEBACK_OP,
   WIKI_DELETE_PAGE_OP,
+  WIKI_EXPORT_BUNDLE_OP,
   WIKI_GET_PAGE_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
@@ -487,6 +489,17 @@ const wikiPageHistorySurfaceOp: SurfaceOp = {
   invoke: async (ctx, input) => {
     const { target, limit } = WIKI_PAGE_HISTORY_OP.input.parse(input)
     return getWikiPageHistory(wikiStore(ctx), target, limit)
+  },
+}
+
+const wikiExportBundleSurfaceOp: SurfaceOp = {
+  def: WIKI_EXPORT_BUNDLE_OP,
+  invoke: async (ctx, input) => {
+    const { namespace, prefix } = WIKI_EXPORT_BUNDLE_OP.input.parse(input)
+    return exportWikiBundle(wikiStore(ctx), {
+      prefix,
+      ...(namespace !== undefined ? { namespace } : {}),
+    })
   },
 }
 
@@ -1058,6 +1071,7 @@ export const buildCatalog = (): readonly SurfaceOp[] => [
   wikiSavePageSurfaceOp,
   wikiGetPageSurfaceOp,
   wikiPageHistorySurfaceOp,
+  wikiExportBundleSurfaceOp,
   wikiListPagesSurfaceOp,
   wikiMovePageSurfaceOp,
   wikiDeletePageSurfaceOp,

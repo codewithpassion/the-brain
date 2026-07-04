@@ -16,8 +16,9 @@ import { Markdown } from "../components/Markdown"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
+import { downloadBundle } from "../lib/download-bundle"
 import { diffLines } from "../lib/linediff"
-import { wikiGetPage, wikiPageHistory, wikiSavePage } from "../server/fns"
+import { wikiExportBundle, wikiGetPage, wikiPageHistory, wikiSavePage } from "../server/fns"
 import type { WikiEntitySection, WikiPageDetail, WikiRevisionFull } from "../server/types"
 
 /** Editor initial state from an existing page's detail (edit mode). */
@@ -191,11 +192,14 @@ function PageView({
           {page.ingestedVia && page.ingestedVia !== "wiki" && (
             <Badge variant="outline">{page.ingestedVia}</Badge>
           )}
-          {editable && (
-            <Button variant="outline" size="sm" className="ml-auto" onClick={onEdit}>
-              Edit
-            </Button>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            <ExportBundleButton namespace={slug.split("/")[0] ?? ""} />
+            {editable && (
+              <Button variant="outline" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+            )}
+          </div>
         </div>
         {tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -234,6 +238,34 @@ function PageView({
         current={currentMeta}
       />
     </div>
+  )
+}
+
+/** "Share as bundle" — export a namespace as OKF and zip+download it client-side (W5/2a). */
+function ExportBundleButton({ namespace }: { namespace: string }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = async () => {
+    setBusy(true)
+    setError(null)
+    const res = await wikiExportBundle({ data: namespace ? { namespace } : {} })
+    setBusy(false)
+    if (!res.ok) return setError(res.error)
+    downloadBundle(res.data.files, namespace || "wiki")
+  }
+  return (
+    <span className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={run}
+        disabled={busy}
+        title="Export this namespace as an OKF bundle (.zip)"
+      >
+        {busy ? "Exporting…" : "Export bundle"}
+      </Button>
+      {error !== null && <span className="text-red-600 text-xs">{error}</span>}
+    </span>
   )
 }
 

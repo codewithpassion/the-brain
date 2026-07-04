@@ -9,6 +9,7 @@
  */
 import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
+import type { OkfExportResult } from "../memory/okf"
 import type {
   WikiListEntry,
   WikiMoveResult,
@@ -221,6 +222,36 @@ export const WIKI_LIST_PAGES_OP = defineOp({
   output: z.object({ pages: z.array(WikiListEntrySchema) }),
 })
 
+/** `wiki_export_bundle` — package a wiki namespace/subtree as an OKF bundle for download (read-only). */
+export const WIKI_EXPORT_BUNDLE_OP = defineOp({
+  name: "wiki_export_bundle",
+  description:
+    "Export a wiki namespace (or the whole wiki) as an OKF bundle: a reserved index.md + one .md per " +
+    "page (frontmatter carries type/title/tags/visibility) + a log.md of revision history. Returns the " +
+    "files for the caller to package (e.g. a zip). Read-only; scoped to what YOU can see (your team/" +
+    "private pages are included, each keeping its visibility for round-trip). Includes all provenances " +
+    "(memory/entity/insight/index pages under the namespace).",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    namespace: z
+      .string()
+      .optional()
+      .describe("Namespace/subtree to export, e.g. 'guides'. Omit to export the whole wiki."),
+    prefix: z
+      .boolean()
+      .default(true)
+      .describe(
+        "When true (default), include everything under 'namespace/'; false = exact slug only.",
+      ),
+  }),
+  output: z.object({
+    okfVersion: z.string(),
+    count: z.number().int(),
+    files: z.array(z.object({ path: z.string(), content: z.string() })),
+  }),
+})
+
 /** `wiki_move_page` — rename a wiki page, re-pointing links + leaving a redirect stub (wiki-only). */
 export const WIKI_MOVE_PAGE_OP = defineOp({
   name: "wiki_move_page",
@@ -253,6 +284,7 @@ export const WIKI_OPS: readonly AnyOpDef[] = [
   WIKI_GET_PAGE_OP,
   WIKI_PAGE_HISTORY_OP,
   WIKI_LIST_PAGES_OP,
+  WIKI_EXPORT_BUNDLE_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_DELETE_PAGE_OP,
 ]
@@ -278,6 +310,11 @@ export const getWikiPageHistory = (
   target: string,
   limit?: number,
 ): Promise<WikiPageHistory> => store.pageHistory(target, limit)
+
+export const exportWikiBundle = (
+  store: WikiStore,
+  opts: { namespace?: string; prefix?: boolean },
+): Promise<OkfExportResult> => store.exportBundle(opts)
 
 export const listWikiPages = (
   store: WikiStore,

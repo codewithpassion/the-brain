@@ -1120,6 +1120,31 @@ export const wikiPageHistory = createServerFn({ method: "POST" })
     }
   })
 
+/** `wiki_export_bundle` — package a namespace/subtree as OKF files (client zips + downloads them). */
+export const wikiExportBundle = createServerFn({ method: "POST" })
+  .validator((d: { namespace?: string; prefix?: boolean }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<
+      Result<{ okfVersion: string; count: number; files: { path: string; content: string }[] }>
+    > => {
+      try {
+        const out = await brainCall<{
+          okfVersion: string
+          count: number
+          files: { path: string; content: string }[]
+        }>("wiki_export_bundle", true, {
+          prefix: data.prefix ?? true,
+          ...(data.namespace ? { namespace: data.namespace } : {}),
+        })
+        return { ok: true, data: out }
+      } catch (error) {
+        return fail(error)
+      }
+    },
+  )
+
 /** `wiki_list_pages` — tree-shaped sidebar listing (namespaces + memory + entities). */
 export const wikiListPages = createServerFn({ method: "POST" })
   .validator((d: { namespacePrefix?: string; type?: string; tag?: string; limit?: number }) => d)

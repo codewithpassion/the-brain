@@ -13,10 +13,11 @@
  * (W-i3), never the original creator.
  */
 import { DOC_GRAPH, type Principal } from "@brain/shared"
-import { and, eq, isNull, like, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, like, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import type { DocLinkRow, TimelineRow } from "../graph/scoped-graph"
 import { ScopedGraph } from "../graph/scoped-graph"
+import type { OkfExportResult } from "../memory/okf"
 import {
   contentHash,
   type ExistingPageRow,
@@ -28,6 +29,8 @@ import { docLinks, pageRevisions, pages, tags } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
 import { EntityPageStore, type EntitySections } from "./entity-pages"
+import { INDEX_INGESTED_VIA } from "./index-pages"
+import { type BundlePage, type BundleRevision, buildWikiBundle } from "./okf-bundle"
 
 const WIKI_INGESTED_VIA = "wiki"
 
@@ -428,6 +431,100 @@ export class WikiStore {
     const pageId = await this.graph.resolveNodeId(DOC_GRAPH, slugOrId)
     if (pageId === null) return { revisions: null }
     return { revisions: await this.pages.getRevisionsWithBodies(pageId, limit) }
+  }
+
+  /**
+   * Export a namespace/subtree as an OKF bundle (W5/2a). Read-only + CALLER-scoped: pages are read
+   * through the SAME `scope`+`visibility` predicates every gated read uses (NO system coercion — this
+   * returns a download to the person who already sees these pages, so their own team/private pages
+   * belong in it, each carrying its `visibility` in frontmatter for round-trip). Includes ALL
+   * provenances the caller can see (memory/entity/insight/index pages come along naturally). Two
+   * queries (bodies, then all revisions) — never a per-page fan-out.
+   */
+  async exportBundle(
+    opts: { namespace?: string; prefix?: boolean } = {},
+  ): Promise<OkfExportResult> {
+    const usePrefix = opts.prefix ?? true
+    const nsClause =
+      opts.namespace !== undefined && opts.namespace.length > 0
+        ? usePrefix
+          ? or(eq(pages.slug, opts.namespace), like(pages.slug, `${opts.namespace}/%`))
+          : eq(pages.slug, opts.namespace)
+        : undefined
+
+    const rows = await this.db
+      .select({
+        id: pages.id,
+        slug: pages.slug,
+        type: pages.type,
+        title: pages.title,
+        frontmatter: pages.frontmatter,
+        body: pages.compiledTruth,
+        visibility: pages.visibility,
+      })
+      .from(pages)
+      .where(
+        and(
+          eq(pages.tenantId, this.p.tenantId),
+          isNull(pages.deletedAt),
+          nsClause,
+          // Exclude auto-generated index pages: their slugs (`index`, `<ns>/index`) serialize to
+          // `index.md`, which collides with the bundle's reserved structural `index.md` (a duplicate
+          // zip entry AND skipped as reserved on re-import). They're regenerable nav, not source.
+          or(isNull(pages.ingestedVia), ne(pages.ingestedVia, INDEX_INGESTED_VIA)),
+          scopePredicate(this.p, pages.scope),
+          visibilityPredicate(this.p, {
+            visibility: pages.visibility,
+            teamId: pages.teamId,
+            userId: pages.userId,
+          }),
+        ),
+      )
+      .orderBy(asc(pages.slug))
+
+    const revisionsBySlug = new Map<string, BundleRevision[]>()
+    if (rows.length > 0) {
+      const idToSlug = new Map(rows.map((r) => [r.id, r.slug]))
+      const revs = await this.db
+        .select({
+          pageId: pageRevisions.pageId,
+          version: pageRevisions.version,
+          reason: pageRevisions.reason,
+          createdAt: pageRevisions.createdAt,
+        })
+        .from(pageRevisions)
+        .where(
+          and(
+            eq(pageRevisions.tenantId, this.p.tenantId),
+            inArray(
+              pageRevisions.pageId,
+              rows.map((r) => r.id),
+            ),
+          ),
+        )
+        .orderBy(asc(pageRevisions.pageId), asc(pageRevisions.version))
+      for (const rev of revs) {
+        const slug = idToSlug.get(rev.pageId)
+        if (slug === undefined) continue
+        const list = revisionsBySlug.get(slug) ?? []
+        list.push({ version: rev.version, reason: rev.reason, createdAt: rev.createdAt })
+        revisionsBySlug.set(slug, list)
+      }
+    }
+
+    const bundlePages: BundlePage[] = rows.map((r) => {
+      const fm = parseFrontmatter(r.frontmatter)
+      const tags = Array.isArray(fm.tags) ? (fm.tags as unknown[]).map((t) => String(t)) : []
+      return {
+        slug: r.slug,
+        type: r.type,
+        title: r.title,
+        tags,
+        visibility: r.visibility,
+        body: r.body,
+      }
+    })
+    return buildWikiBundle(bundlePages, revisionsBySlug)
   }
 
   /**

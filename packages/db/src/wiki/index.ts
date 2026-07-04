@@ -13,6 +13,7 @@ export { EntityPageStore, entityPageSlug } from "./entity-pages"
 export { mintInsightPage } from "./insight-pages"
 export {
   deleteWikiPage,
+  exportWikiBundle,
   getWikiPage,
   getWikiPageHistory,
   listWikiPages,
@@ -20,6 +21,7 @@ export {
   registerWikiOps,
   saveWikiPage,
   WIKI_DELETE_PAGE_OP,
+  WIKI_EXPORT_BUNDLE_OP,
   WIKI_GET_PAGE_OP,
   WIKI_LIST_PAGES_OP,
   WIKI_MOVE_PAGE_OP,
