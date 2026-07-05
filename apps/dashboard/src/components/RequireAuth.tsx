@@ -25,7 +25,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
             <Link
               to="/sign-in/$"
               params={{ _splat: "" }}
-              className="rounded-ui bg-accent px-4 py-2 font-medium text-accent-ink text-sm hover:opacity-90"
+              className="rounded-btn bg-accent px-4 py-2 font-medium text-accent-ink text-sm hover:opacity-90"
             >
               Sign in
             </Link>

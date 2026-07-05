@@ -6,14 +6,14 @@
  */
 
 export const THEMES = [
+  { id: "harbor", label: "Harbor", hint: "emerald · glow" },
   { id: "carbon", label: "Carbon", hint: "dark · iris" },
   { id: "paper", label: "Paper", hint: "light · editorial" },
-  { id: "terminal", label: "Terminal", hint: "phosphor · mono" },
 ] as const
 
 export type ThemeId = (typeof THEMES)[number]["id"]
 
-export const DEFAULT_THEME: ThemeId = "carbon"
+export const DEFAULT_THEME: ThemeId = "harbor"
 const STORAGE_KEY = "brain-theme"
 
 const isThemeId = (v: string | null): v is ThemeId => THEMES.some((t) => t.id === v)
@@ -42,4 +42,4 @@ export const setTheme = (id: ThemeId): void => {
 /** Pre-paint boot script (inlined in <head>): applies the stored theme before first render. */
 export const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
   STORAGE_KEY,
-)});if(t==="carbon"||t==="paper"||t==="terminal"){document.documentElement.dataset.theme=t}}catch(e){}})()`
+)});if(t==="harbor"||t==="carbon"||t==="paper"){document.documentElement.dataset.theme=t}}catch(e){}})()`

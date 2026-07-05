@@ -4,12 +4,13 @@
  * ONE component system, THREE complete visual identities, switched by `data-theme` on <html>
  * (persisted in localStorage("brain-theme"); a pre-paint inline script in __root.tsx prevents FOUC):
  *
- *   carbon   — the Linear homage: near-black layered surfaces, hairline borders, iris accent,
- *              Instrument Sans, compact 6px radii.
- *   paper    — light editorial: warm paper ground, ink text, oxblood accent, Newsreader serif
- *              display, soft diffuse shadows, faint grain.
- *   terminal — industrial phosphor: green-black CRT ground, phosphor accent, IBM Plex Mono
- *              display, square corners, scanline texture.
+ *   carbon — the Linear homage, with atmosphere: near-black layered surfaces under a soft iris
+ *            glow, milled inner-highlight cards, hairline borders, electric iris accent,
+ *            Instrument Sans, compact 6px radii.
+ *   paper  — light editorial: creamy paper ground, ink text, oxblood accent, Newsreader serif
+ *            display, deep soft shadows, faint grain.
+ *   harbor — atmospheric emerald: deep blue-charcoal ground under a radial mint glow and a faint
+ *            blueprint grid, Hanken Grotesk type, pill buttons, emerald-tinted shadows.
  *
  * Components consume ONLY the semantic tokens below (via the Tailwind utilities generated from
  * `@theme inline`): bg / surface / raised, border / edge, ink / muted / faint, accent / accent-ink,
@@ -19,6 +20,7 @@
 
 /* Self-hosted fonts (bundled woff2 — no CDN, Workers-friendly). */
 @import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/hanken-grotesk";
 @import "@fontsource-variable/newsreader/opsz.css";
 @import "@fontsource-variable/newsreader/opsz-italic.css";
 @import "@fontsource/ibm-plex-mono/400.css";
@@ -29,28 +31,35 @@
 
 /* ── Theme identities ─────────────────────────────────────────────────────────────────── */
 
-/* Carbon (default) — Linear-esque dark. */
+/* Carbon (default) — Linear-esque dark, under a soft iris glow. */
 :root,
 [data-theme="carbon"] {
   color-scheme: dark;
-  --t-bg: #0d0e13;
+  --t-bg: #0c0d12;
+  --t-bg-image: radial-gradient(
+    80rem 42rem at 50% -16rem,
+    rgba(130, 140, 248, 0.09),
+    transparent 62%
+  );
   --t-surface: #13141b;
-  --t-raised: #1b1d26;
-  --t-border: rgba(255, 255, 255, 0.07);
-  --t-edge: rgba(255, 255, 255, 0.15);
-  --t-ink: #e8eaf2;
+  --t-raised: #1e2029;
+  --t-border: rgba(255, 255, 255, 0.08);
+  --t-edge: rgba(255, 255, 255, 0.16);
+  --t-ink: #e9ebf4;
   --t-muted: #9aa1b5;
-  --t-faint: #616880;
-  --t-accent: #7c86ee;
+  --t-faint: #61687f;
+  --t-accent: #828cf8;
   --t-accent-ink: #ffffff;
   --t-ok: #46c28e;
   --t-warn: #d9a13c;
   --t-danger: #e5646c;
   --t-radius-ui: 6px;
+  --t-radius-btn: 6px;
   --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --t-font-display: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --t-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.02);
+  /* The "milled" Linear card: a 1px inner top-highlight over a soft drop. */
+  --t-shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.35);
   --t-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --hl-comment: #6b7289;
   --hl-kw: #b58ef0;
@@ -64,25 +73,27 @@
 /* Paper — light editorial. */
 [data-theme="paper"] {
   color-scheme: light;
-  --t-bg: #f5f3ec;
-  --t-surface: #fdfcf8;
-  --t-raised: #edeade;
-  --t-border: #e2ddce;
-  --t-edge: #cbc4af;
+  --t-bg: #f6f3ea;
+  --t-bg-image: none;
+  --t-surface: #fffdf7;
+  --t-raised: #ece7d8;
+  --t-border: #e3ddca;
+  --t-edge: #c9c1aa;
   --t-ink: #23201a;
   --t-muted: #6e675a;
   --t-faint: #a49c8a;
   --t-accent: #a63d2f;
-  --t-accent-ink: #fdfcf8;
+  --t-accent-ink: #fffdf7;
   --t-ok: #3e7a4f;
   --t-warn: #9c6410;
   --t-danger: #b3362c;
   --t-radius-ui: 10px;
+  --t-radius-btn: 10px;
   --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --t-font-display: "Newsreader Variable", ui-serif, Georgia, serif;
   --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --t-shadow-card: 0 1px 2px rgba(35, 32, 26, 0.05), 0 4px 18px rgba(35, 32, 26, 0.05);
-  --t-shadow-pop: 0 8px 40px rgba(35, 32, 26, 0.16), 0 0 0 1px rgba(35, 32, 26, 0.05);
+  --t-shadow-card: 0 1px 2px rgba(35, 32, 26, 0.06), 0 10px 32px rgba(35, 32, 26, 0.06);
+  --t-shadow-pop: 0 12px 48px rgba(35, 32, 26, 0.18), 0 0 0 1px rgba(35, 32, 26, 0.05);
   --hl-comment: #8d8574;
   --hl-kw: #8f3b93;
   --hl-str: #34605c;
@@ -92,35 +103,52 @@
   --hl-tag: #2f6b3f;
 }
 
-/* Terminal — industrial phosphor. */
-[data-theme="terminal"] {
+/* Harbor — atmospheric emerald: mint glow + blueprint grid over deep blue-charcoal. */
+[data-theme="harbor"] {
   color-scheme: dark;
-  --t-bg: #080c09;
-  --t-surface: #0d130e;
-  --t-raised: #141d15;
-  --t-border: rgba(142, 220, 170, 0.13);
-  --t-edge: rgba(142, 220, 170, 0.3);
-  --t-ink: #cfe8d4;
-  --t-muted: #7ea88a;
-  --t-faint: #4d6a55;
-  --t-accent: #3ecf7e;
-  --t-accent-ink: #06130a;
-  --t-ok: #3ecf7e;
-  --t-warn: #d7b043;
-  --t-danger: #e0584f;
-  --t-radius-ui: 2px;
-  --t-font-body: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
-  --t-font-display: "IBM Plex Mono", ui-monospace, monospace;
+  --t-bg: #0a0f14;
+  --t-bg-image:
+    radial-gradient(90rem 50rem at 50% -18rem, rgba(52, 211, 153, 0.13), transparent 62%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(148, 201, 180, 0.045) 0,
+      rgba(148, 201, 180, 0.045) 1px,
+      transparent 1px,
+      transparent 56px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(148, 201, 180, 0.045) 0,
+      rgba(148, 201, 180, 0.045) 1px,
+      transparent 1px,
+      transparent 56px
+    );
+  --t-surface: #0e151c;
+  --t-raised: #172230;
+  --t-border: rgba(255, 255, 255, 0.07);
+  --t-edge: rgba(255, 255, 255, 0.16);
+  --t-ink: #e9f2ee;
+  --t-muted: #98aca6;
+  --t-faint: #5b6f68;
+  --t-accent: #34d399;
+  --t-accent-ink: #052e1f;
+  --t-ok: #34d399;
+  --t-warn: #e0b84c;
+  --t-danger: #f0635c;
+  --t-radius-ui: 10px;
+  --t-radius-btn: 999px;
+  --t-font-body: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --t-font-display: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
   --t-font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --t-shadow-card: 0 0 0 1px rgba(62, 207, 126, 0.04);
-  --t-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(142, 220, 170, 0.16);
-  --hl-comment: #567a61;
-  --hl-kw: #6fd9a0;
-  --hl-str: #b7d98a;
-  --hl-num: #67c4d1;
-  --hl-title: #9be3b8;
-  --hl-type: #d7b043;
-  --hl-tag: #6fd9a0;
+  --t-shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 3px rgba(2, 12, 8, 0.4);
+  --t-shadow-pop: 0 16px 48px rgba(2, 14, 9, 0.6), 0 0 0 1px rgba(52, 211, 153, 0.1);
+  --hl-comment: #5b6f68;
+  --hl-kw: #57d9b2;
+  --hl-str: #a5d98a;
+  --hl-num: #58b8d9;
+  --hl-title: #7fe3c0;
+  --hl-type: #e0b84c;
+  --hl-tag: #57d9b2;
 }
 
 /* ── Tailwind semantic utilities (inline so runtime theme switching works) ────────────── */
@@ -140,6 +168,7 @@
   --color-warn: var(--t-warn);
   --color-danger: var(--t-danger);
   --radius-ui: var(--t-radius-ui);
+  --radius-btn: var(--t-radius-btn);
   --font-body: var(--t-font-body);
   --font-display: var(--t-font-display);
   --font-mono: var(--t-font-mono);
@@ -150,7 +179,7 @@
 /* ── Base ─────────────────────────────────────────────────────────────────────────────── */
 
 html {
-  background: var(--t-bg);
+  background-color: var(--t-bg);
   color: var(--t-ink);
   font-family: var(--t-font-body);
 }
@@ -158,6 +187,11 @@ body {
   margin: 0;
   font-size: 0.9375rem;
   -webkit-font-smoothing: antialiased;
+  /* The theme's ATMOSPHERE layer (Carbon's iris glow; Harbor's mint glow + blueprint grid). It
+     lives on <body> — whose Tailwind `bg-bg` supplies only background-COLOR — so the image always
+     renders above the ground color yet behind all content; fixed so it doesn't scroll away. */
+  background-image: var(--t-bg-image, none);
+  background-attachment: fixed;
 }
 ::selection {
   background: color-mix(in oklab, var(--t-accent) 30%, transparent);
@@ -167,28 +201,15 @@ body {
   scrollbar-color: color-mix(in oklab, var(--t-ink) 18%, transparent) transparent;
 }
 
-/* Paper grain + Terminal scanlines: a fixed, non-interactive texture pass per identity. */
-[data-theme="paper"] body::after,
-[data-theme="terminal"] body::after {
+/* Paper grain — a fixed, non-interactive texture pass over the editorial identity. */
+[data-theme="paper"] body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 200;
-}
-[data-theme="paper"] body::after {
   opacity: 0.3;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
-}
-[data-theme="terminal"] body::after {
-  opacity: 0.5;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.16) 0px,
-    rgba(0, 0, 0, 0.16) 1px,
-    transparent 1px,
-    transparent 3px
-  );
 }
 
 h1,
@@ -198,15 +219,15 @@ h4 {
   font-family: var(--t-font-display);
 }
 
-/* Terminal renders headings in mono with tightened tracking. */
-[data-theme="terminal"] h1,
-[data-theme="terminal"] h2,
-[data-theme="terminal"] h3 {
-  letter-spacing: -0.02em;
-}
 /* Paper gives display headings the Newsreader optical treatment. */
 [data-theme="paper"] h1 {
   font-weight: 500;
+}
+/* Harbor headings carry Hanken's confident weight. */
+[data-theme="harbor"] h1,
+[data-theme="harbor"] h2 {
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 /* ── Wiki markdown prose (tokenized — correct in every theme) ─────────────────────────── */

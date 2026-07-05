@@ -8,9 +8,9 @@ import { getTheme, setTheme, THEME_EVENT, THEMES, type ThemeId } from "../lib/th
 
 /** A small swatch that previews each identity using ITS variables, not the active theme's. */
 const SWATCH: Record<ThemeId, { bg: string; fg: string }> = {
-  carbon: { bg: "#13141b", fg: "#7c86ee" },
-  paper: { bg: "#fdfcf8", fg: "#a63d2f" },
-  terminal: { bg: "#0d130e", fg: "#3ecf7e" },
+  harbor: { bg: "#0e151c", fg: "#34d399" },
+  carbon: { bg: "#13141b", fg: "#828cf8" },
+  paper: { bg: "#fffdf7", fg: "#a63d2f" },
 }
 
 export function ThemeSwitcher() {
