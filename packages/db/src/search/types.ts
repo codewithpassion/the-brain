@@ -154,7 +154,7 @@ export interface SearchHit {
 export interface ThinkResult {
   answer: string
   evidence: SearchHit[]
-  citations: { slug: string; chunkId: string }[]
+  citations: { slug: string; chunkId: string; documentId: string; url?: string }[]
   gaps: string[]
   warnings: string[]
 }

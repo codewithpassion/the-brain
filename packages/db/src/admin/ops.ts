@@ -292,6 +292,8 @@ export const LIST_DOCUMENTS_OP = defineOp({
         createdAt: z.string().nullable(),
         tags: z.array(z.string()),
         path: z.string().nullable(),
+        /** Dashboard deep link to this document — present when DASHBOARD_URL is configured. */
+        url: z.string().optional(),
       }),
     ),
   }),
@@ -401,6 +403,8 @@ export const LIST_SESSIONS_OP = defineOp({
         userId: z.string(), // authorship — the user who owns the session
         lastActivityAt: z.string(),
         startedAt: z.string(),
+        /** Dashboard deep link to this session — present when DASHBOARD_URL is configured. */
+        url: z.string().optional(),
       }),
     ),
   }),
@@ -1556,6 +1560,8 @@ export const GET_DOCUMENT_OP = defineOp({
     scope: z.string().nullable(),
     createdAt: z.string().nullable(),
     updatedAt: z.string().nullable(),
+    /** Dashboard deep link to this document — present when DASHBOARD_URL is configured. */
+    url: z.string().optional(),
   }),
 })
 

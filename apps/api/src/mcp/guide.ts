@@ -30,6 +30,7 @@ CONVENTIONS:
 - slug = a stable path id; slashes allowed (agent/<area>/<topic>); it is the key across versions.
 - memory items need a non-empty type (OKF): preference | decision | note | ...
 - visibility: world (whole tenant) | team | private (you only).
+- read results include a \`url\` deep link into the dashboard; share it when a human will want to open the item.
 - memory_set no-ops when unchanged and appends a version on change; forget_* is a soft delete; memory_rollback takes the revisionId from memory_history (not the version number).
 
 For the full manual read the brain://guide resource; for the tool catalog grouped by purpose read brain://ops.`

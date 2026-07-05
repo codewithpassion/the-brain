@@ -10,7 +10,8 @@
   "scripts": {
     "check": "biome check . && tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "test": "bun test"
   },
   "dependencies": {
     "zod": "^3.25.76"

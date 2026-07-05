@@ -98,6 +98,8 @@ const WikiPageDetailSchema = z.object({
     })
     .optional(),
   stub: z.boolean().optional(),
+  /** Dashboard deep link to this page — present when DASHBOARD_URL is configured. */
+  url: z.string().optional(),
 })
 
 const WikiListEntrySchema = z.object({
@@ -109,6 +111,8 @@ const WikiListEntrySchema = z.object({
   updatedAt: z.string(),
   childCount: z.number().int(),
   draft: z.boolean(),
+  /** Dashboard deep link to this page — present when DASHBOARD_URL is configured. */
+  url: z.string().optional(),
 })
 
 // ── Op contracts ──────────────────────────────────────────────────────────────────────

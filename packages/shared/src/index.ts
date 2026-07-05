@@ -32,6 +32,8 @@ export {
   VECTORIZE_TOPK_MAX,
   WHISPER_MODEL,
 } from "./constants"
+// ── Dashboard deep-link builders (read-op results → URLs into the frontend) ──
+export { type BrainDeepLinks, brainDeepLinks } from "./deep-links"
 export type { Capability, EntityVisibility, Role, TrustGrade, Visibility } from "./enums"
 // ── Enums / unions (governance + identity axes) ──────────────────────────────
 export {

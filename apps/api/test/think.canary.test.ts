@@ -135,7 +135,9 @@ describe("think pipeline isolation canary (invariant 3) — real local D1 in wor
     // Evidence + citations reference ONLY tenant-A content.
     expect(out.evidence.map((e) => e.id)).toEqual([CHUNK_A])
     expect(out.evidence.every((e) => e.id !== CHUNK_B)).toBe(true)
-    expect(out.citations).toEqual([{ slug: "needle-doc-a", chunkId: CHUNK_A }])
+    expect(out.citations).toEqual([
+      { slug: "needle-doc-a", chunkId: CHUNK_A, documentId: "think-doc-A" },
+    ])
     expect(out.citations.every((c) => c.slug !== "needle-doc-b")).toBe(true)
 
     // B's unique marker leaked NOWHERE: not evidence, not citations, not the synthesis prompt.

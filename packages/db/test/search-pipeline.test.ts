@@ -174,7 +174,7 @@ describe("think handler (PRD §5.5 envelope)", () => {
     expect(out.evidence.map((e) => e.slug)).toEqual(["needle-doc"])
     expect(out.evidence[0]?.id).toBe("chunk-1")
     expect(out.evidence[0]?.score).toBeGreaterThan(0) // fusion score, not the reranker's 0
-    expect(out.citations).toEqual([{ slug: "needle-doc", chunkId: "chunk-1" }])
+    expect(out.citations).toEqual([{ slug: "needle-doc", chunkId: "chunk-1", documentId: "doc-1" }])
     // recall written off the read path, keyed by the HYDRATED chunk id.
     expect(rec.seen).toHaveLength(1)
     expect(rec.seen[0]?.hits).toEqual([{ chunkId: "chunk-1", score: out.evidence[0]?.score ?? -1 }])

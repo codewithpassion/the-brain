@@ -120,6 +120,8 @@ const SearchHitSchema = z.object({
   slug: z.string(),
   score: z.number(),
   snippet: z.string(),
+  /** Dashboard deep link to the source document — present when DASHBOARD_URL is configured. */
+  url: z.string().optional(),
 })
 
 /** `search` — hybrid keyword+vector RRF (expansion off). */
@@ -199,7 +201,15 @@ export const THINK_OP = defineOp({
   output: z.object({
     answer: z.string(),
     evidence: z.array(SearchHitSchema),
-    citations: z.array(z.object({ slug: z.string(), chunkId: z.string() })),
+    citations: z.array(
+      z.object({
+        slug: z.string(),
+        chunkId: z.string(),
+        documentId: z.string(),
+        /** Dashboard deep link to the cited document — present when DASHBOARD_URL is configured. */
+        url: z.string().optional(),
+      }),
+    ),
     gaps: z.array(z.string()),
     warnings: z.array(z.string()),
   }),

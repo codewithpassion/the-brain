@@ -24,6 +24,8 @@ const MemorySchema = z.object({
   version: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Dashboard deep link to this memory item — present when DASHBOARD_URL is configured. */
+  url: z.string().optional(),
 })
 
 const RevisionSchema = z.object({

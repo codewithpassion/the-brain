@@ -71,6 +71,8 @@ const EntityHitSchema = z.object({
   scope: z.string().nullable(),
   visibility: z.string(),
   teamId: z.string().nullable(),
+  /** Dashboard deep link to this entity's wiki page — present when DASHBOARD_URL is configured. */
+  url: z.string().optional(),
 })
 
 const anchorInput = z.object({
@@ -189,6 +191,8 @@ export const LIST_ENTITIES_OP = defineOp({
         visibility: z.string(),
         teamId: z.string().nullable(),
         mentionCount: z.number().int(),
+        /** Dashboard deep link to this entity's wiki page — present when DASHBOARD_URL is configured. */
+        url: z.string().optional(),
       }),
     ),
   }),

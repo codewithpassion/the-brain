@@ -140,7 +140,11 @@ export const thinkOp: BoundOp<RetrievalInput, ThinkResult> = {
     await writeRecall(ctx, input.query, ranked)
 
     const evidence = ranked.map(toHit)
-    const citations = ranked.map((r) => ({ slug: r.candidate.slug, chunkId: r.candidate.chunkId }))
+    const citations = ranked.map((r) => ({
+      slug: r.candidate.slug,
+      chunkId: r.candidate.chunkId,
+      documentId: r.candidate.documentId,
+    }))
 
     if (ranked.length === 0) {
       return {

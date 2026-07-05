@@ -115,6 +115,7 @@ import {
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
+import { type BrainDeepLinks, brainDeepLinks } from "@brain/shared"
 import type { SurfaceContext } from "./context"
 
 /** One op exposed to the surface layer: its frozen contract + a surface-agnostic invoker. */
@@ -1049,56 +1050,144 @@ const vaultWritebackSurfaceOp: SurfaceOp = {
   },
 }
 
+// ── Deep-link decoration ──────────────────────────────────────────────────────
+// Every read result that names a retrievable thing gains a `url` deep link into the dashboard,
+// built from ctx.env.DASHBOARD_URL. Applied as one post-invoke wrapper over the WHOLE catalog
+// (keyed by op name) so no individual invoker changes and the generic GRAPH_OPS/ADMIN_OPS wrappers
+// stay untouched. When DASHBOARD_URL is unset the output is byte-identical (no `url` key emitted).
+
+/** Attach `url` to an object only when defined (keeps outputs byte-identical when the base is unset). */
+const withUrl = <T extends object>(item: T, url: string | undefined): T =>
+  url === undefined ? item : { ...item, url }
+
+/**
+ * Decorate a read op's output with dashboard deep links; unknown ops pass through unchanged.
+ * Exported for unit testing (the sibling `deep-links.decorate.test.ts`); not part of the public
+ * `@brain/surface` surface.
+ */
+export const decorateWithUrls = (name: string, out: unknown, links: BrainDeepLinks): unknown => {
+  if (out === null || typeof out !== "object") return out
+  switch (name) {
+    // `query` shares SEARCH_OP.output (same schema object), so it decorates identically.
+    case "query":
+    case "search": {
+      const o = out as { hits: { documentId: string }[] }
+      return { ...o, hits: o.hits.map((h) => withUrl(h, links.document(h.documentId))) }
+    }
+    case "think": {
+      // The cited documents (brief: think → each citation .url); evidence rides SearchHitSchema too
+      // but stays undecorated (search already covers that shape).
+      const o = out as { citations: { documentId: string }[] }
+      return { ...o, citations: o.citations.map((c) => withUrl(c, links.document(c.documentId))) }
+    }
+    case "get_document": {
+      const o = out as { id: string }
+      return withUrl(o, links.document(o.id))
+    }
+    case "list_documents": {
+      const o = out as { documents: { id: string }[] }
+      return { ...o, documents: o.documents.map((d) => withUrl(d, links.document(d.id))) }
+    }
+    case "wiki_get_page": {
+      const o = out as { page: ({ page: { slug: string } } & object) | null }
+      return o.page === null ? o : { ...o, page: withUrl(o.page, links.wikiPage(o.page.page.slug)) }
+    }
+    case "wiki_list_pages": {
+      const o = out as { pages: { slug: string }[] }
+      return { ...o, pages: o.pages.map((p) => withUrl(p, links.wikiPage(p.slug))) }
+    }
+    case "memory_get": {
+      const o = out as { memory: ({ slug: string } & object) | null }
+      return o.memory === null
+        ? o
+        : { ...o, memory: withUrl(o.memory, links.memory(o.memory.slug)) }
+    }
+    case "memory_list": {
+      const o = out as { memories: { slug: string }[] }
+      return { ...o, memories: o.memories.map((m) => withUrl(m, links.memory(m.slug))) }
+    }
+    case "search_entities": {
+      // hits[].name is the entity's canonicalName (searchEntities maps row.canonicalName → name).
+      const o = out as { hits: { kind: string; name: string }[] }
+      return { ...o, hits: o.hits.map((h) => withUrl(h, links.entity(h.kind, h.name))) }
+    }
+    case "list_entities": {
+      const o = out as { entities: { kind: string; canonicalName: string }[] }
+      return {
+        ...o,
+        entities: o.entities.map((e) => withUrl(e, links.entity(e.kind, e.canonicalName))),
+      }
+    }
+    case "list_sessions": {
+      const o = out as { sessions: { id: string }[] }
+      return { ...o, sessions: o.sessions.map((s) => withUrl(s, links.session(s.id))) }
+    }
+    default:
+      return out
+  }
+}
+
+/** Wrap a SurfaceOp so its output carries dashboard deep links (see `decorateWithUrls`). */
+const withDeepLinks = (op: SurfaceOp): SurfaceOp => ({
+  def: op.def,
+  invoke: async (ctx, input) => {
+    const out = await op.invoke(ctx, input)
+    return decorateWithUrls(op.def.name, out, brainDeepLinks(ctx.env.DASHBOARD_URL))
+  },
+})
+
 /**
  * The full surface catalog (search → graph → session → governance → ingest → admin). The order is
  * purely cosmetic; the generators key off `def.surfaces` / `def.name`, and the drift test asserts
- * every registry op is present here.
+ * every registry op is present here. Every op is wrapped with `withDeepLinks` so read results carry
+ * dashboard `url`s (a no-op for ops `decorateWithUrls` doesn't recognise).
  */
-export const buildCatalog = (): readonly SurfaceOp[] => [
-  searchSurfaceOp(searchOp),
-  searchSurfaceOp(queryOp),
-  searchSurfaceOp(thinkOp),
-  ...(GRAPH_OPS as unknown as readonly ErasedGraphOp[]).map(graphSurfaceOp),
-  captureTurnSurfaceOp,
-  finalizeSessionSurfaceOp,
-  getSessionContextSurfaceOp,
-  recallSurfaceOp,
-  forgetFactSurfaceOp,
-  reviveFactSurfaceOp,
-  createSnapshotSurfaceOp,
-  getContextSnapshotSurfaceOp,
-  listSnapshotsSurfaceOp,
-  dreamNowSurfaceOp,
-  adminSurfaceOp(listDreamRunsOp as unknown as AdminBoundOp<unknown, unknown>),
-  memorySetSurfaceOp,
-  memoryGetSurfaceOp,
-  memoryListSurfaceOp,
-  memoryHistorySurfaceOp,
-  memoryRollbackSurfaceOp,
-  memoryForgetSurfaceOp,
-  okfExportSurfaceOp,
-  okfImportSurfaceOp,
-  wikiSavePageSurfaceOp,
-  wikiGetPageSurfaceOp,
-  wikiPageHistorySurfaceOp,
-  wikiExportBundleSurfaceOp,
-  wikiImportBundleSurfaceOp,
-  wikiListPagesSurfaceOp,
-  wikiMovePageSurfaceOp,
-  wikiDeletePageSurfaceOp,
-  memoryReviewSurfaceOp,
-  breakGlassReadSurfaceOp,
-  auditExportSurfaceOp,
-  listPendingReviewsSurfaceOp,
-  resolveContradictionSurfaceOp,
-  ingestDocumentSurfaceOp,
-  addThoughtSurfaceOp,
-  deleteDocumentSurfaceOp,
-  getDocumentSurfaceOp,
-  reprocessDocumentSurfaceOp,
-  updateDocumentSurfaceOp,
-  vaultWritebackSurfaceOp,
-  ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
-  ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
-  ...(NOTION_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
-]
+export const buildCatalog = (): readonly SurfaceOp[] =>
+  [
+    searchSurfaceOp(searchOp),
+    searchSurfaceOp(queryOp),
+    searchSurfaceOp(thinkOp),
+    ...(GRAPH_OPS as unknown as readonly ErasedGraphOp[]).map(graphSurfaceOp),
+    captureTurnSurfaceOp,
+    finalizeSessionSurfaceOp,
+    getSessionContextSurfaceOp,
+    recallSurfaceOp,
+    forgetFactSurfaceOp,
+    reviveFactSurfaceOp,
+    createSnapshotSurfaceOp,
+    getContextSnapshotSurfaceOp,
+    listSnapshotsSurfaceOp,
+    dreamNowSurfaceOp,
+    adminSurfaceOp(listDreamRunsOp as unknown as AdminBoundOp<unknown, unknown>),
+    memorySetSurfaceOp,
+    memoryGetSurfaceOp,
+    memoryListSurfaceOp,
+    memoryHistorySurfaceOp,
+    memoryRollbackSurfaceOp,
+    memoryForgetSurfaceOp,
+    okfExportSurfaceOp,
+    okfImportSurfaceOp,
+    wikiSavePageSurfaceOp,
+    wikiGetPageSurfaceOp,
+    wikiPageHistorySurfaceOp,
+    wikiExportBundleSurfaceOp,
+    wikiImportBundleSurfaceOp,
+    wikiListPagesSurfaceOp,
+    wikiMovePageSurfaceOp,
+    wikiDeletePageSurfaceOp,
+    memoryReviewSurfaceOp,
+    breakGlassReadSurfaceOp,
+    auditExportSurfaceOp,
+    listPendingReviewsSurfaceOp,
+    resolveContradictionSurfaceOp,
+    ingestDocumentSurfaceOp,
+    addThoughtSurfaceOp,
+    deleteDocumentSurfaceOp,
+    getDocumentSurfaceOp,
+    reprocessDocumentSurfaceOp,
+    updateDocumentSurfaceOp,
+    vaultWritebackSurfaceOp,
+    ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
+    ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
+    ...(NOTION_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
+  ].map(withDeepLinks)
