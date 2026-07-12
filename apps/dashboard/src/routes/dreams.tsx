@@ -89,10 +89,10 @@ function DreamsPage() {
             value={kind}
             onChange={(e) => setKind(e.target.value as DreamKind)}
             disabled={dreaming}
-            className="rounded border border-border bg-transparent px-2 py-1 text-ink text-sm disabled:opacity-40"
+            className="rounded border border-border bg-raised px-2 py-1 text-ink text-sm disabled:opacity-40"
           >
             {DREAM_KINDS.map((k) => (
-              <option key={k} value={k}>
+              <option key={k} value={k} className="bg-raised text-ink">
                 {k}
               </option>
             ))}
