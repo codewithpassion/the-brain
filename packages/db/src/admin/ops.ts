@@ -1613,6 +1613,87 @@ export const UPDATE_DOCUMENT_OP = defineOp({
   }),
 })
 
+// ── PROPOSE_CORRECTIONS_OP / APPLY_CORRECTIONS_OP ─────────────────────────────
+
+/** 'document' targets an ingested doc by id; 'wiki' targets a page by slug/id. */
+const CorrectionTargetSchema = z.enum(["document", "wiki"])
+
+/**
+ * `propose_corrections` — DRY-RUN. Runs one LLM pass over a document/wiki body with the caller's
+ * instruction and returns anchored before/after changes (each anchor verbatim + validated to occur
+ * exactly once) plus a `skipped` list for ambiguous/not-found anchors. Writes nothing. Handler in
+ * the surface catalog (needs ScopedServices for blobs/wiki/ai).
+ */
+export const PROPOSE_CORRECTIONS_OP = defineOp({
+  name: "propose_corrections",
+  description:
+    "Propose text corrections for a document or wiki page WITHOUT changing anything. Runs an LLM pass " +
+    "over the body using your instruction and returns anchored before/after changes (each anchor is a " +
+    "verbatim snippet that matches exactly once) plus a diff preview and a 'skipped' list for ambiguous " +
+    "anchors. Review the changes, then pass the approved subset to apply_corrections. Nothing is written.",
+  capability: "read",
+  readOnly: true,
+  input: z.object({
+    targetType: CorrectionTargetSchema.describe(
+      "'document' (an ingested doc id) or 'wiki' (a page slug/id).",
+    ),
+    target: z.string().min(1).describe("Document id (from list_documents) or wiki page slug/id."),
+    instruction: z
+      .string()
+      .min(1)
+      .describe(
+        "What to correct, e.g. \"fix speech-to-text errors where 'Claude' was transcribed as 'Cloud' or 'Claw'; leave 'Cloudflare' and 'Cloud Con' unchanged\".",
+      ),
+  }),
+  output: z.object({
+    targetType: CorrectionTargetSchema,
+    target: z.string(),
+    changes: z.array(
+      z.object({
+        id: z.number().int(),
+        before: z.string(),
+        after: z.string(),
+        reason: z.string(),
+        preview: z.string(),
+      }),
+    ),
+    skipped: z.array(
+      z.object({ before: z.string(), after: z.string(), reason: z.string(), why: z.string() }),
+    ),
+  }),
+})
+
+/**
+ * `apply_corrections` — apply an approved subset of anchored before/after changes to a document/wiki
+ * body, then reprocess. Each anchor must match EXACTLY ONCE against the current body or the whole op
+ * fails with nothing written (atomic, fail-closed — never a global replace). Handler in the catalog.
+ */
+export const APPLY_CORRECTIONS_OP = defineOp({
+  name: "apply_corrections",
+  description:
+    "Apply approved anchored before/after corrections to a document or wiki page, then reprocess it. " +
+    "Each 'before' anchor MUST match exactly once in the current body or the whole op fails with no " +
+    "changes written (atomic, fail-closed — never a global replace). Get the changes from propose_corrections.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    targetType: CorrectionTargetSchema,
+    target: z.string().min(1).describe("Document id or wiki page slug/id."),
+    changes: z
+      .array(z.object({ before: z.string().min(1), after: z.string() }))
+      .min(1)
+      .describe(
+        "Approved anchored replacements. Each 'before' must occur exactly once in the current body.",
+      ),
+  }),
+  output: z.object({
+    targetType: CorrectionTargetSchema,
+    target: z.string(),
+    applied: z.number().int(),
+    status: z.string(),
+  }),
+})
+
 // ── VAULT_WRITEBACK_OP ────────────────────────────────────────────────────────
 
 /**
@@ -1677,5 +1758,7 @@ export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   registry.register(GET_DOCUMENT_OP)
   registry.register(REPROCESS_DOCUMENT_OP)
   registry.register(UPDATE_DOCUMENT_OP)
+  registry.register(PROPOSE_CORRECTIONS_OP)
+  registry.register(APPLY_CORRECTIONS_OP)
   return registry
 }

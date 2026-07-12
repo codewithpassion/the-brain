@@ -16,6 +16,7 @@ import {
   ADD_THOUGHT_OP,
   ADMIN_OPS,
   type AdminBoundOp,
+  APPLY_CORRECTIONS_OP,
   AUDIT_EXPORT_OP,
   auditExport,
   type BatchIngestParams,
@@ -77,6 +78,7 @@ import {
   normalizePath,
   OKF_EXPORT_OP,
   OKF_IMPORT_OP,
+  PROPOSE_CORRECTIONS_OP,
   queryOp,
   RECALL_OP,
   REPROCESS_DOCUMENT_OP,
@@ -117,6 +119,13 @@ import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
 import { type BrainDeepLinks, brainDeepLinks } from "@brain/shared"
 import type { SurfaceContext } from "./context"
+import {
+  applyAnchoredChanges,
+  buildProposePrompt,
+  PROPOSE_CORRECTIONS_SYSTEM,
+  parseProposedChanges,
+  validateProposedChanges,
+} from "./corrections"
 
 /** One op exposed to the surface layer: its frozen contract + a surface-agnostic invoker. */
 export interface SurfaceOp {
@@ -943,10 +952,72 @@ const reprocessDocumentSurfaceOp: SurfaceOp = {
 // ── Update document ───────────────────────────────────────────────────────────
 
 /**
- * `update_document` — replaces the document body in R2, hard-deletes old chunks (freeing
- * deterministic PKs for re-use), removes their Vectorize vectors, then supersedes the
- * document row (new fingerprint + status `pending`) via `updateDocumentForSupersede` and
- * re-dispatches the full BATCH_INGEST workflow.  Slug and id are preserved.
+ * Replace a document's body in-place and re-drive the full ingest pipeline: write the new body to R2,
+ * hard-delete old chunks (freeing deterministic PKs) + their Vectorize vectors + the old part family's
+ * KG mentions (privacy: never orphan mentions of deleted parts), supersede the row (new fingerprint +
+ * status `pending`) via `updateDocumentForSupersede`, then re-dispatch BATCH_INGEST (inline when the
+ * workflow binding is absent). Shared by `update_document` and `apply_corrections` — this sequence is
+ * privacy-sensitive, so it lives in ONE place. `markdown` is the final stored body; id/slug preserved.
+ */
+const reingestDocumentBody = async (
+  ctx: SurfaceContext,
+  services: ScopedServices,
+  doc: { id: string; bodyR2Key: string | null; scope: string | null; path: string | null },
+  markdown: string,
+  contentType: string,
+  instancePrefix: string,
+): Promise<{ documentId: string; status: string }> => {
+  const documentId = doc.id
+  const r2Key = doc.bodyR2Key ?? `documents/${documentId}`
+
+  // Write new body to R2 first (cheap rollback: old content is still in R2 until overwrite).
+  await services.blobs.put(r2Key, markdown)
+
+  const fp = await fingerprint(markdown)
+
+  const { chunkIds: oldChunkIds, partDocumentIds: oldPartIds } =
+    await services.db.hardDeleteDocumentChunks(documentId)
+  if (oldChunkIds.length > 0) {
+    await services.vectors.deleteVectors(oldChunkIds)
+  }
+  await services.graph.clearExtractionForFamily([documentId, ...oldPartIds])
+
+  await services.db.updateDocumentForSupersede(documentId, {
+    fingerprint: fp,
+    bodyR2Key: r2Key,
+    deletedAt: null,
+    contentType,
+  })
+
+  const ingestParams = {
+    documentId,
+    r2Key,
+    contentType: "text/markdown",
+    scope: doc.scope ?? null,
+    ...(doc.path !== null ? { path: doc.path } : {}),
+  }
+
+  const workflow = ctx.env.BATCH_INGEST
+  if (workflow) {
+    const nonce = crypto.randomUUID()
+    const instanceId = await workflowInstanceId(
+      `${instancePrefix}-${ctx.principal.tenantId}-${documentId}-${nonce}`,
+    )
+    await workflow.create({
+      id: instanceId,
+      params: { principal: ctx.principal, ingest: ingestParams },
+    })
+    return { documentId, status: "pending" }
+  }
+
+  const result = await runBatchIngestCore(services, ingestParams)
+  return { documentId, status: result.status }
+}
+
+/**
+ * `update_document` — replaces the document body (from raw `content`) and re-runs ingest via the
+ * shared `reingestDocumentBody`. The new body clears any stale 'voice' origin marker (the body is no
+ * longer a transcript once the caller replaces it with text).
  */
 const updateDocumentSurfaceOp: SurfaceOp = {
   def: UPDATE_DOCUMENT_OP,
@@ -956,66 +1027,114 @@ const updateDocumentSurfaceOp: SurfaceOp = {
       content: string
       contentType: "text/markdown" | "text/plain"
     }
-    const { documentId } = parsed
     const services = createScopedServices(ctx.env, ctx.principal)
-    const doc = await services.db.getDocumentById(documentId)
+    const doc = await services.db.getDocumentById(parsed.documentId)
     if (doc === null) {
-      throw new Error(`update_document: document ${documentId} not found`)
+      throw new Error(`update_document: document ${parsed.documentId} not found`)
     }
-
     const markdown = toMarkdown(parsed.content, parsed.contentType)
-    const r2Key = doc.bodyR2Key ?? `documents/${documentId}`
+    return reingestDocumentBody(ctx, services, doc, markdown, parsed.contentType, "update")
+  },
+}
 
-    // Write new body to R2 first (cheap rollback: old content is still in R2 until overwrite).
-    await services.blobs.put(r2Key, markdown)
+// ── Propose / apply corrections ───────────────────────────────────────────────
 
-    // Compute new fingerprint from the new content.
-    const fp = await fingerprint(markdown)
-
-    // Hard-delete old chunks (frees deterministic PKs for the re-ingest) + drop their vectors, AND
-    // remove old child part rows (§4.3, W4.5).
-    const { chunkIds: oldChunkIds, partDocumentIds: oldPartIds } =
-      await services.db.hardDeleteDocumentChunks(documentId)
-    if (oldChunkIds.length > 0) {
-      await services.vectors.deleteVectors(oldChunkIds)
+/** Load the current body of a correction target (document R2 body or wiki page body). */
+const loadCorrectionBody = async (
+  services: ScopedServices,
+  targetType: "document" | "wiki",
+  target: string,
+): Promise<string> => {
+  if (targetType === "wiki") {
+    const detail = await getWikiPage(services.wiki, target)
+    if (detail === null || detail.page.id === "") {
+      throw new Error(`propose_corrections: wiki page ${target} not found`)
     }
-    // Clear the OLD part family's KG mentions before re-ingest re-extracts — the old child part ids
-    // are deleted by the hard-delete above, so their mentions would otherwise orphan (privacy leak).
-    await services.graph.clearExtractionForFamily([documentId, ...oldPartIds])
+    return detail.body
+  }
+  const doc = await services.db.getDocumentById(target)
+  if (doc === null) throw new Error(`propose_corrections: document ${target} not found`)
+  if (doc.bodyR2Key === null) return ""
+  const obj = await services.blobs.get(doc.bodyR2Key)
+  return obj === null ? "" : await obj.text()
+}
 
-    // Supersede the document row: new fingerprint + status → pending + clear deletedAt. The new body
-    // sets content_type from the replacement content — clearing any stale 'voice' origin marker
-    // (the body is no longer a transcript once the caller replaces it with text).
-    await services.db.updateDocumentForSupersede(documentId, {
-      fingerprint: fp,
-      bodyR2Key: r2Key,
-      deletedAt: null,
-      contentType: parsed.contentType,
-    })
+/**
+ * `propose_corrections` — DRY-RUN. One `genExtract` pass over the target body → anchored before/after
+ * changes, validated so only anchors that occur EXACTLY ONCE are `applicable`; ambiguous/not-found
+ * ones are reported in `skipped`. Writes nothing. `genExtract` never throws (returns null → no changes).
+ */
+const proposeCorrectionsSurfaceOp: SurfaceOp = {
+  def: PROPOSE_CORRECTIONS_OP,
+  invoke: async (ctx, input) => {
+    const { targetType, target, instruction } = PROPOSE_CORRECTIONS_OP.input.parse(input)
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const body = await loadCorrectionBody(services, targetType, target)
+    if (body.length === 0) return { targetType, target, changes: [], skipped: [] }
+    const raw = await services.ai.genExtract(
+      buildProposePrompt(instruction, body),
+      PROPOSE_CORRECTIONS_SYSTEM,
+    )
+    const { changes, skipped } = validateProposedChanges(body, parseProposedChanges(raw))
+    return { targetType, target, changes, skipped }
+  },
+}
 
-    const ingestParams = {
-      documentId,
-      r2Key,
-      contentType: "text/markdown",
-      scope: doc.scope ?? null,
-      ...(doc.path !== null ? { path: doc.path } : {}),
-    }
+/**
+ * `apply_corrections` — apply approved anchored changes atomically (each `before` must match exactly
+ * once or the whole op throws with nothing written), then reprocess: documents via the shared
+ * `reingestDocumentBody`, wiki pages via `saveWikiPage` (+ backing-doc sync), preserving type/tier.
+ */
+const applyCorrectionsSurfaceOp: SurfaceOp = {
+  def: APPLY_CORRECTIONS_OP,
+  invoke: async (ctx, input) => {
+    const { targetType, target, changes } = APPLY_CORRECTIONS_OP.input.parse(input)
+    const services = createScopedServices(ctx.env, ctx.principal)
 
-    const workflow = ctx.env.BATCH_INGEST
-    if (workflow) {
-      const nonce = crypto.randomUUID()
-      const instanceId = await workflowInstanceId(
-        `update-${ctx.principal.tenantId}-${documentId}-${nonce}`,
-      )
-      await workflow.create({
-        id: instanceId,
-        params: { principal: ctx.principal, ingest: ingestParams },
+    if (targetType === "wiki") {
+      const detail = await getWikiPage(services.wiki, target)
+      if (detail === null || detail.page.id === "") {
+        throw new Error(`apply_corrections: wiki page ${target} not found`)
+      }
+      const { body: newBody, applied } = applyAnchoredChanges(detail.body, changes)
+      if (applied === 0 || newBody === detail.body) {
+        return { targetType, target, applied: 0, status: "unchanged" }
+      }
+      // saveWikiPage REBUILDS frontmatter from what's passed, so re-supply the page's existing
+      // title/tags/description/draft (else they'd blank) and OMIT visibility to preserve the tier.
+      const fm = detail.frontmatter
+      const result = await saveWikiPage(services.wiki, {
+        slug: detail.page.slug,
+        type: detail.page.type,
+        title: detail.page.title,
+        body: newBody,
+        ...(detail.tags.length > 0 ? { tags: detail.tags } : {}),
+        ...(typeof fm.description === "string" ? { description: fm.description } : {}),
+        ...(typeof fm.draft === "boolean" ? { draft: fm.draft } : {}),
       })
-      return { documentId, status: "pending" }
+      backgroundSync(ctx, services, result.pageId)
+      return { targetType, target, applied, status: "saved" }
     }
 
-    const result = await runBatchIngestCore(services, ingestParams)
-    return { documentId, status: result.status }
+    const doc = await services.db.getDocumentById(target)
+    if (doc === null) throw new Error(`apply_corrections: document ${target} not found`)
+    let currentBody = ""
+    if (doc.bodyR2Key !== null) {
+      const obj = await services.blobs.get(doc.bodyR2Key)
+      if (obj !== null) currentBody = await obj.text()
+    }
+    if (currentBody.length === 0) {
+      throw new Error(`apply_corrections: document ${target} has no body to edit`)
+    }
+    const { body: newBody, applied } = applyAnchoredChanges(currentBody, changes)
+    if (applied === 0 || newBody === currentBody) {
+      return { targetType, target, applied: 0, status: "unchanged" }
+    }
+    // Stored body is always markdown (a 'voice' doc's body is its transcript) — reingest as markdown.
+    const contentType =
+      doc.contentType === "voice" ? "text/markdown" : (doc.contentType ?? "text/markdown")
+    const res = await reingestDocumentBody(ctx, services, doc, newBody, contentType, "correct")
+    return { targetType, target, applied, status: res.status }
   },
 }
 
@@ -1186,6 +1305,8 @@ export const buildCatalog = (): readonly SurfaceOp[] =>
     getDocumentSurfaceOp,
     reprocessDocumentSurfaceOp,
     updateDocumentSurfaceOp,
+    proposeCorrectionsSurfaceOp,
+    applyCorrectionsSurfaceOp,
     vaultWritebackSurfaceOp,
     ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
     ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),

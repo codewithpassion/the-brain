@@ -27,6 +27,8 @@ const GROUP_BY_OP: Record<string, Group> = {
   update_document: "search",
   delete_document: "search",
   reprocess_document: "search",
+  propose_corrections: "search",
+  apply_corrections: "search",
   // graph
   traverse_graph: "graph",
   get_links: "graph",
