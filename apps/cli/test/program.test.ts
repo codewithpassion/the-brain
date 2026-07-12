@@ -39,6 +39,7 @@ const LOCAL = new Set([
   "capture",
   "hooks",
   "wiki", // hand-written `wiki import <path>` (reads a bundle client-side; not an op-registry command)
+  "dream", // hand-written `dream [kind]` alias for the generated `dream_now` op
 ])
 
 const generatedNames = (program: Command): string[] =>

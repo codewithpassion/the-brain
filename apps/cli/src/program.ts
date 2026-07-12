@@ -6,6 +6,7 @@
  */
 import { Command } from "commander"
 import { registerAuthCommands } from "./commands/auth"
+import { registerDreamCommands } from "./commands/dream"
 import { registerGeneratedCommands } from "./commands/generated"
 import { registerHookCommands } from "./commands/hooks"
 import { registerWikiCommands } from "./commands/wiki"
@@ -21,6 +22,7 @@ export const buildProgram = (deps: CliDeps): Command => {
   registerAuthCommands(program, deps)
   registerHookCommands(program, deps) // hand-written hook kit (context / capture / hooks install)
   registerWikiCommands(program, deps) // hand-written `wiki import <path>` (reads a bundle client-side)
+  registerDreamCommands(program, deps) // hand-written `dream [kind]` (ergonomic alias for `dream_now`)
   registerGeneratedCommands(program, deps)
   return program
 }

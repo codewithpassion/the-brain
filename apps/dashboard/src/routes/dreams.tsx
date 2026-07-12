@@ -3,20 +3,21 @@
  * latest daily digest (agent/digest/daily), pending contradictions with an inline resolve flow,
  * and the generated insights list. Read-only loads + a minimal write (resolve_contradiction).
  */
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
 import { RequireAuth } from "../components/RequireAuth"
 import { toast } from "../components/Toaster"
 import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import {
+  dreamNow,
   getDocuments,
   getDreamRuns,
   getPendingReviews,
   memoryGet,
   resolveContradiction,
 } from "../server/fns"
-import type { PendingReview } from "../server/types"
+import { DREAM_KINDS, type DreamKind, type PendingReview } from "../server/types"
 
 export const Route = createFileRoute("/dreams")({
   loader: async () => ({
@@ -41,7 +42,22 @@ function runStatusVariant(s: string): "default" | "secondary" | "outline" | "war
 
 function DreamsPage() {
   const { runs, digest, reviews, insights } = Route.useLoaderData()
+  const router = useRouter()
   const [pending, setPending] = useState<PendingReview[]>(reviews.ok ? reviews.data.reviews : [])
+  const [kind, setKind] = useState<DreamKind>("all")
+  const [dreaming, setDreaming] = useState(false)
+
+  const runDream = async () => {
+    setDreaming(true)
+    const res = await dreamNow({ data: { kind } })
+    setDreaming(false)
+    if (res.ok) {
+      toast(`Dream '${kind}' dispatched — run ${res.data.runId} (${res.data.status}).`)
+      await router.invalidate() // re-run the loader so the runs table shows the new run
+    } else {
+      toast(`Dream failed: ${res.error}`)
+    }
+  }
 
   const resolve = async (
     reviewId: string,
@@ -61,11 +77,35 @@ function DreamsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="font-semibold text-2xl tracking-tight">Dreams</h1>
-        <p className="text-muted text-sm">
-          Nightly consolidation, reflection, and the daily digest.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-semibold text-2xl tracking-tight">Dreams</h1>
+          <p className="text-muted text-sm">
+            Nightly consolidation, reflection, and the daily digest.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as DreamKind)}
+            disabled={dreaming}
+            className="rounded border border-border bg-transparent px-2 py-1 text-ink text-sm disabled:opacity-40"
+          >
+            {DREAM_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => void runDream()}
+            disabled={dreaming}
+            className="rounded border border-accent/30 px-3 py-1 text-accent text-sm hover:bg-accent/10 disabled:opacity-40"
+          >
+            {dreaming ? "Dreaming…" : "Dream now"}
+          </button>
+        </div>
       </header>
 
       {/* Latest digest */}

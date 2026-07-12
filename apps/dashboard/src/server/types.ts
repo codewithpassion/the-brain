@@ -219,6 +219,28 @@ export interface ListDreamRunsResult {
   runs: DreamRun[]
 }
 
+/**
+ * Dream sweep kinds — mirrors `DREAM_KINDS` in @brain/db (the server op zod-validates `kind`, so this
+ * client-side copy is only for the UI selector). `all` first = the default nightly-equivalent sweep.
+ */
+export const DREAM_KINDS = [
+  "all",
+  "consolidation",
+  "reflection",
+  "hygiene",
+  "dedup",
+  "entitypages",
+  "indexes",
+] as const
+
+export type DreamKind = (typeof DREAM_KINDS)[number]
+
+/** Result of `dream_now` — the dispatched run id + its status. */
+export interface DreamNowResult {
+  runId: string
+  status: string
+}
+
 // --- Org management ---
 
 export interface OrgRow {

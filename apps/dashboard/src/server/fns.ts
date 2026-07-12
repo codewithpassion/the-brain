@@ -22,6 +22,8 @@ import type {
   DerivedDocument,
   DisconnectNotionResult,
   DocumentDetail,
+  DreamKind,
+  DreamNowResult,
   FactsBrowseResult,
   FindOrphansResult,
   ForgetFactResult,
@@ -350,6 +352,18 @@ export const getDreamRuns = createServerFn({ method: "GET" }).handler(
     }
   },
 )
+
+/** `dream_now` — trigger a Dream sweep for the active tenant (admin). Returns the new run id. */
+export const dreamNow = createServerFn({ method: "POST" })
+  .validator((d: { kind: DreamKind }) => d)
+  .handler(async ({ data }): Promise<Result<DreamNowResult>> => {
+    try {
+      const out = await brainCall<DreamNowResult>("dream_now", false, { kind: data.kind })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
 
 /** `list_pending_reviews` — Dream contradictions awaiting human review (with hydrated facts). */
 export const getPendingReviews = createServerFn({ method: "GET" }).handler(
