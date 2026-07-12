@@ -11,6 +11,7 @@ import { Badge } from "../components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import {
   dreamNow,
+  getBackfillRuns,
   getDocuments,
   getDreamRuns,
   getPendingReviews,
@@ -22,6 +23,7 @@ import { DREAM_KINDS, type DreamKind, type PendingReview } from "../server/types
 export const Route = createFileRoute("/dreams")({
   loader: async () => ({
     runs: await getDreamRuns(),
+    backfills: await getBackfillRuns(),
     digest: await memoryGet({ data: { slug: "agent/digest/daily" } }),
     reviews: await getPendingReviews(),
     insights: await getDocuments({ data: { path: "/brain/insights" } }),
@@ -40,8 +42,20 @@ function runStatusVariant(s: string): "default" | "secondary" | "outline" | "war
   return "outline"
 }
 
+/** Compact "in Xh Ym" until the next 03:00 UTC nightly Dream sweep (recomputed each render). */
+function nextNightlySweepLabel(): string {
+  const now = new Date()
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 3, 0, 0),
+  )
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1)
+  const mins = Math.round((next.getTime() - now.getTime()) / 60000)
+  const h = Math.floor(mins / 60)
+  return h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`
+}
+
 function DreamsPage() {
-  const { runs, digest, reviews, insights } = Route.useLoaderData()
+  const { runs, backfills, digest, reviews, insights } = Route.useLoaderData()
   const router = useRouter()
   const [pending, setPending] = useState<PendingReview[]>(reviews.ok ? reviews.data.reviews : [])
   const [kind, setKind] = useState<DreamKind>("all")
@@ -75,6 +89,13 @@ function DreamsPage() {
   // The op already returns only the /brain/insights namespace.
   const insightDocs = insights.ok ? insights.data.documents : []
 
+  // "Running now" = in-flight work across both job tables (dream runs + backfill/re-embed jobs).
+  const activeDreams = runs.ok ? runs.data.runs.filter((r) => r.status === "running") : []
+  const activeBackfills = backfills.ok
+    ? backfills.data.runs.filter((r) => r.status === "running" || r.status === "queued")
+    : []
+  const nothingRunning = activeDreams.length === 0 && activeBackfills.length === 0
+
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -107,6 +128,62 @@ function DreamsPage() {
           </button>
         </div>
       </header>
+
+      {/* Activity — what's running now + the fixed cron schedule */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Activity</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          <div>
+            <h3 className="mb-2 font-medium text-faint text-xs uppercase tracking-wide">
+              Running now
+            </h3>
+            {nothingRunning ? (
+              <p className="text-muted text-sm">Nothing running.</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {activeDreams.map((r) => (
+                  <li key={r.id} className="flex items-center gap-2 text-sm">
+                    <span className="w-16 shrink-0 font-mono text-faint text-xs">dream</span>
+                    <span className="text-ink">{r.kind}</span>
+                    <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
+                  </li>
+                ))}
+                {activeBackfills.map((r) => (
+                  <li key={r.id} className="flex items-center gap-2 text-sm">
+                    <span className="w-16 shrink-0 font-mono text-faint text-xs">backfill</span>
+                    <span className="text-ink">
+                      {r.kind} · {r.direction}
+                    </span>
+                    <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 font-medium text-faint text-xs uppercase tracking-wide">
+              Scheduled
+            </h3>
+            <ul className="flex flex-col gap-1 text-sm">
+              <li className="flex items-center justify-between gap-3">
+                <span className="text-muted">Nightly Dream sweep · 03:00 UTC</span>
+                <span className="text-faint">in {nextNightlySweepLabel()}</span>
+              </li>
+              <li className="flex items-center justify-between gap-3">
+                <span className="text-muted">Idle &amp; session sweeps</span>
+                <span className="text-faint">every 5 min</span>
+              </li>
+              <li className="flex items-center justify-between gap-3">
+                <span className="text-muted">Backfill / re-embed</span>
+                <span className="text-faint">on demand</span>
+              </li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Latest digest */}
       <Card>
