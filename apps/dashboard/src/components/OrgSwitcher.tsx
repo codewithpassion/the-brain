@@ -115,7 +115,7 @@ export function OrgSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 bottom-full z-50 mb-1 min-w-[180px] rounded-ui border border-border bg-surface py-1 shadow-pop">
+        <div className="absolute left-0 bottom-full z-50 mb-1 min-w-[180px] rounded-ui border border-border bg-surface py-1 shadow-pop">
           {!creating ? (
             <>
               {orgs.map((org) => (
