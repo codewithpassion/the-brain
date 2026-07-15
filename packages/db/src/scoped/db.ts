@@ -21,7 +21,7 @@
  */
 import type { Principal } from "@brain/shared"
 import { CHUNK_DB_BATCH_SIZE, EMBEDDING_DIMS, EMBEDDING_MODEL } from "@brain/shared"
-import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
 import { alias, type BaseSQLiteDatabase } from "drizzle-orm/sqlite-core"
 import {
@@ -33,6 +33,7 @@ import {
   pages,
   tokenSpend,
 } from "../schema"
+import { sqlStartsWith } from "../sql-utils"
 import { type AuditSpec, batchWithAudit } from "./audit"
 import {
   notSoftExpired,
@@ -369,8 +370,13 @@ export class ScopedDB {
             breakGlass ? undefined : visibilityPredicate(this.p, visibilityCols.chunk),
             // path filter on the INNER-JOINed documents table:
             // exact match OR true child (e.g. /project matches /project/x but not /projectfoo).
+            // LIKE-free (`sqlStartsWith`): D1 caps LIKE patterns at 50 bytes, so `LIKE ${path}/%`
+            // throws on long paths.
             filter?.path !== undefined
-              ? sql`(${documents.path} = ${filter.path} OR ${documents.path} LIKE ${`${filter.path}/%`})`
+              ? or(
+                  eq(documents.path, filter.path),
+                  sqlStartsWith(documents.path, `${filter.path}/`),
+                )
               : undefined,
             // tag filter: document's JSON tags array contains this exact value (exact element match).
             filter?.tag !== undefined

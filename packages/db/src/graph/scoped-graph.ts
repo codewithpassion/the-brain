@@ -25,7 +25,7 @@ import {
   type GraphPath,
   type Principal,
 } from "@brain/shared"
-import { and, desc, eq, inArray, isNotNull, isNull, like, or, type SQL, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm"
 import { type AnySQLiteColumn, alias } from "drizzle-orm/sqlite-core"
 import {
   chunks,
@@ -45,6 +45,7 @@ import {
   scopePredicate,
   visibilityPredicate,
 } from "../scoped/predicates"
+import { sqlStartsWith } from "../sql-utils"
 
 /** A typed page→page edge after the gated read. */
 export interface DocLinkRow {
@@ -920,10 +921,11 @@ export class ScopedGraph {
     // and MUST be swept by the LIKE query below, or deleted content stays queryable (privacy leak).
 
     // Collect entity IDs from chunk-scoped mentions BEFORE clearing them, so we can GC after.
-    // Use LIKE '${documentId}:%' instead of inArray(currentChunkIds): a supersede that shrinks
-    // the chunk count hard-deletes old chunk rows first, so their mention rows are orphaned and
-    // never in currentChunkIds — the prefix query catches them too. documentId is a UUID, so it
-    // contains no LIKE wildcard characters (% or _) and is safe to interpolate directly.
+    // Match `${documentId}:` as a prefix instead of inArray(currentChunkIds): a supersede that
+    // shrinks the chunk count hard-deletes old chunk rows first, so their mention rows are orphaned
+    // and never in currentChunkIds — the prefix query catches them too. `sqlStartsWith` is LIKE-free
+    // (D1 caps LIKE patterns at 50 bytes; `<uuid>:%` is under that today, but the whole codebase
+    // uses the substr form so no prefix query can ever trip the cap).
     const potentialOrphans: string[] = []
     if (opts?.gcOrphanedEntities) {
       const rows = await this.db
@@ -933,7 +935,7 @@ export class ScopedGraph {
           and(
             eq(entityMentions.tenantId, this.p.tenantId),
             eq(entityMentions.sourceKind, "chunk"),
-            like(entityMentions.sourceId, `${source.sourceId}:%`),
+            sqlStartsWith(entityMentions.sourceId, `${source.sourceId}:`),
           ),
         )
       for (const row of rows) potentialOrphans.push(row.entityId)
@@ -947,7 +949,7 @@ export class ScopedGraph {
         and(
           eq(entityMentions.tenantId, this.p.tenantId),
           eq(entityMentions.sourceKind, "chunk"),
-          like(entityMentions.sourceId, `${source.sourceId}:%`),
+          sqlStartsWith(entityMentions.sourceId, `${source.sourceId}:`),
         ),
       )
 

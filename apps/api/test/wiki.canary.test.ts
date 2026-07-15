@@ -156,6 +156,33 @@ describe("wiki list — tree shape (childCount), includes memory pages", () => {
     expect(bySlug["ns/b"]?.childCount).toBe(0) // leaf
   })
 
+  test("long slugs (≥60 chars) list + count without tripping the D1 LIKE-pattern cap", async () => {
+    // REGRESSION (prod-only): Cloudflare D1 caps LIKE/GLOB patterns at 50 BYTES, so the old
+    // `child.slug LIKE ${slug}/%` childCount subquery + `slug LIKE ${prefix}/%` namespace filter
+    // threw `SQLITE_ERROR: LIKE or GLOB pattern too complex` for any slug ≳50 bytes. Local D1
+    // (workerd/miniflare) defaults to 50,000, so this can NOT be reproduced here — this test instead
+    // PINS the LIKE-free `substr(...)` semantics (list returns the long page + a correct childCount).
+    const w = wiki({ tenantId: "wlong", userId: "u1" })
+    const parent = "articles/langchain-nvidia-nemoclaw-deep-agents-blueprint" // 56 chars
+    const child = `${parent}/appendix-a-detailed-benchmark-methodology-and-results` // ~110 chars
+    expect(parent.length).toBeGreaterThanOrEqual(50)
+    await w.savePage({ slug: parent, type: "note", body: "parent" })
+    await w.savePage({ slug: child, type: "note", body: "child" })
+
+    // (a) unfiltered list surfaces the long-slug pages and counts the descendant correctly.
+    const all = Object.fromEntries((await w.listPages()).map((e) => [e.slug, e]))
+    expect(all[parent]).toBeDefined()
+    expect(all[parent]?.childCount).toBe(1)
+    expect(all[child]?.childCount).toBe(0)
+
+    // (b) a long namespacePrefix filter (≳50 bytes) returns the subtree without throwing.
+    const filtered = Object.fromEntries(
+      (await w.listPages({ namespacePrefix: parent })).map((e) => [e.slug, e]),
+    )
+    expect(filtered[parent]).toBeDefined()
+    expect(filtered[child]).toBeDefined()
+  })
+
   test("childCount excludes descendants the caller cannot see (no existence oracle via the number)", async () => {
     // u1 creates a WORLD parent + a PRIVATE child under it.
     const u1 = wiki({ tenantId: "wl2", userId: "u1" })

@@ -13,7 +13,7 @@
  * (W-i3), never the original creator.
  */
 import { DOC_GRAPH, type Principal } from "@brain/shared"
-import { and, asc, eq, inArray, isNull, like, ne, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import type { DocLinkRow, TimelineRow } from "../graph/scoped-graph"
 import { ScopedGraph } from "../graph/scoped-graph"
@@ -28,6 +28,7 @@ import {
 import { docLinks, pageRevisions, pages, tags } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import { sqlStartsWith } from "../sql-utils"
 import { EntityPageStore, type EntitySections } from "./entity-pages"
 import { INDEX_INGESTED_VIA } from "./index-pages"
 import {
@@ -455,7 +456,7 @@ export class WikiStore {
     const nsClause =
       opts.namespace !== undefined && opts.namespace.length > 0
         ? usePrefix
-          ? or(eq(pages.slug, opts.namespace), like(pages.slug, `${opts.namespace}/%`))
+          ? or(eq(pages.slug, opts.namespace), sqlStartsWith(pages.slug, `${opts.namespace}/`))
           : eq(pages.slug, opts.namespace)
         : undefined
 
@@ -654,7 +655,9 @@ export class WikiStore {
     // Alias the OUTER pages table (`wp`) so the correlated `childCount` subquery references the
     // outer slug UNAMBIGUOUSLY against its own inner `child` alias. NOTE: interpolating `wp.slug`
     // into a raw `sql` fragment renders it BARE (`"slug"`), which the inner subquery would bind to
-    // `child.slug` — so the outer slug is referenced via `sql.raw("<alias>"."slug")` instead.
+    // `child.slug` — so the outer slug is referenced via `sql.raw("<alias>"."slug")` instead. The
+    // descendant test below is a LIKE-free `substr(...)` compare, NOT `LIKE <slug>/%`: Cloudflare
+    // D1 caps LIKE/GLOB patterns at 50 bytes, so a long slug's `<slug>/%` pattern throws in prod.
     const OUTER = "wp"
     const wp = alias(pages, OUTER)
     const outerSlug = sql.raw(`"${OUTER}"."slug"`)
@@ -664,14 +667,16 @@ export class WikiStore {
       userId: wp.userId,
     } as const
     const prefixClause = opts.namespacePrefix
-      ? or(eq(wp.slug, opts.namespacePrefix), like(wp.slug, `${opts.namespacePrefix}/%`))
+      ? or(eq(wp.slug, opts.namespacePrefix), sqlStartsWith(wp.slug, `${opts.namespacePrefix}/`))
       : undefined
     const tagClause = opts.tag
       ? sql`EXISTS (SELECT 1 FROM ${tags} t WHERE t.tenant_id = ${this.p.tenantId} AND t.page_id = ${wp.id} AND t.tag = ${opts.tag})`
       : undefined
     // `childCount` as a correlated subquery — ONE statement, no per-row round-trips. The inner
     // `child` alias carries the SAME 3-tier visibility gate as the outer read, so a hidden descendant
-    // never inflates the count (no existence oracle via the number).
+    // never inflates the count (no existence oracle via the number). The `<slug>/` descendant test is
+    // `substr(child.slug, 1, length(<slug>) + 1) = <slug> || '/'` — the LIKE-free equivalent of
+    // `LIKE <slug>/%` (D1's 50-byte LIKE-pattern cap makes the pattern form throw on long slugs).
     const teamFrag =
       this.p.teamIds.length > 0
         ? sql` OR (child.visibility = 'team' AND child.team_id IN (${sql.join(
@@ -686,7 +691,7 @@ export class WikiStore {
             [...this.p.allowedScopes].map((s) => sql`${s}`),
             sql`, `,
           )})`
-    const childCount = sql<number>`(SELECT COUNT(*) FROM pages child WHERE child.tenant_id = ${this.p.tenantId} AND child.deleted_at IS NULL AND child.slug LIKE ${outerSlug} || '/%'${scopeFrag} AND (child.visibility = 'world'${teamFrag} OR (child.visibility = 'private' AND child.user_id = ${this.p.userId})))`
+    const childCount = sql<number>`(SELECT COUNT(*) FROM pages child WHERE child.tenant_id = ${this.p.tenantId} AND child.deleted_at IS NULL AND substr(child.slug, 1, length(${outerSlug}) + 1) = ${outerSlug} || '/'${scopeFrag} AND (child.visibility = 'world'${teamFrag} OR (child.visibility = 'private' AND child.user_id = ${this.p.userId})))`
 
     const rows = await this.db
       .select({

@@ -99,6 +99,24 @@ describe("memory load-by-path model", () => {
 
     expect((await store.listMemory({})).length).toBe(4)
   })
+
+  test("long paths (≥60 chars) list direct children + subtree without the D1 LIKE-pattern cap", async () => {
+    // REGRESSION (prod-only): Cloudflare D1 caps LIKE patterns at 50 BYTES, so the old
+    // `slug LIKE ${path}/%` (subtree) and `LIKE ${path}/%` + `NOT LIKE ${path}/%/%` (direct-child)
+    // filters threw for any path ≳50 bytes. bun:sqlite defaults to 50,000, so this can NOT reproduce
+    // here — it PINS the LIKE-free `sqlStartsWith`/`instr(substr(...))` semantics instead.
+    const { store } = build()
+    const base = "agent/very-long-namespace-segment-for-d1-like-cap-regression" // 59 chars
+    expect(base.length).toBeGreaterThanOrEqual(50)
+    await store.upsertMemory({ slug: `${base}/direct`, frontmatter: fm(), body: "1" })
+    await store.upsertMemory({ slug: `${base}/nested/grandchild`, frontmatter: fm(), body: "2" })
+
+    const direct = await store.listMemory({ path: base })
+    expect(direct.map((m) => m.slug)).toEqual([`${base}/direct`]) // NOT the grandchild
+
+    const subtree = await store.listMemory({ path: base, prefix: true })
+    expect(subtree.map((m) => m.slug)).toEqual([`${base}/direct`, `${base}/nested/grandchild`])
+  })
 })
 
 describe("memory_rollback — forward-only", () => {

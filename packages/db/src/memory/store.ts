@@ -16,11 +16,12 @@
  * the forward-only `revertMemory`.
  */
 import type { Principal } from "@brain/shared"
-import { and, desc, eq, isNull, like, notLike, or } from "drizzle-orm"
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm"
 import { type BatchStatement, contentHash, PageStore, parseFrontmatter } from "../pages/store"
 import { pageRevisions, pages } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
 import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import { sqlStartsWith } from "../sql-utils"
 
 /** Memory pages are tagged with this `ingested_via` so memory reads never pick up ingest pages. */
 export const MEMORY_INGESTED_VIA = "memory"
@@ -358,12 +359,18 @@ export class MemoryStore {
   ): Promise<MemoryRow[]> {
     // No path → all items. prefix=true → the whole subtree; prefix=false → the path itself plus
     // its DIRECT children (`path/x`, not `path/x/y`) — the "named items under a path" model.
+    // LIKE-free prefix tests (`sqlStartsWith` / `instr` on a substring): Cloudflare D1 caps LIKE
+    // patterns at 50 bytes, so a `slug LIKE ${path}/%` form throws in prod once the path is long.
     const pathClause = opts.path
       ? opts.prefix
-        ? or(eq(pages.slug, opts.path), like(pages.slug, `${opts.path}/%`))
+        ? or(eq(pages.slug, opts.path), sqlStartsWith(pages.slug, `${opts.path}/`))
         : or(
             eq(pages.slug, opts.path),
-            and(like(pages.slug, `${opts.path}/%`), notLike(pages.slug, `${opts.path}/%/%`)),
+            // Direct child only: under `${path}/` AND no further `/` in the remainder.
+            and(
+              sqlStartsWith(pages.slug, `${opts.path}/`),
+              sql`instr(substr(${pages.slug}, length(${opts.path}) + 2), '/') = 0`,
+            ),
           )
       : undefined
     const rows = await this.memorySelect()

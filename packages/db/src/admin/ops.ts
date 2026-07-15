@@ -23,7 +23,7 @@ import {
   scopeSatisfied,
   slugify,
 } from "@brain/shared"
-import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { z } from "zod"
 import { AuthError } from "../auth/errors"
@@ -44,6 +44,7 @@ import {
 import { type BrainDrizzle, ScopedDB } from "../scoped/db"
 import { liveEntityPredicate, notSoftExpired, scopePredicate } from "../scoped/predicates"
 import { monthlyWindow, USD_PER_NEURON } from "../search/ports"
+import { sqlStartsWith } from "../sql-utils"
 
 /** The per-request deps an admin handler builds from (`env` + the resolved `Principal`). */
 export interface AdminOpContext {
@@ -349,9 +350,10 @@ export const listDocumentsCore = async (
         input.tag !== undefined
           ? sql`EXISTS (SELECT 1 FROM json_each(${documents.tags}) WHERE value = ${input.tag})`
           : undefined,
-        // path filter: exact match OR true child (prefix + "/")
+        // path filter: exact match OR true child (prefix + "/"). LIKE-free (`sqlStartsWith`):
+        // Cloudflare D1 caps LIKE patterns at 50 bytes, so `path LIKE ${path}/%` throws on long paths.
         input.path !== undefined
-          ? sql`(${documents.path} = ${input.path} OR ${documents.path} LIKE ${`${input.path}/%`})`
+          ? or(eq(documents.path, input.path), sqlStartsWith(documents.path, `${input.path}/`))
           : undefined,
         // date range filters on created_at (ISO 8601 sorts lexicographically)
         input.since !== undefined ? sql`${documents.createdAt} >= ${input.since}` : undefined,

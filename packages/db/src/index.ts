@@ -39,6 +39,8 @@ export * from "./search"
 export type { ScopedServices, ScopedServicesOptions } from "./services"
 export { createScopedServices } from "./services"
 export * from "./sessions"
+// ── LIKE-free SQL prefix predicates (D1 50-byte LIKE-pattern cap) ──────────────
+export * from "./sql-utils"
 // ── Vault WebDAV credential store + ops (r2-facade-plan.md) ──────────────────
 export * from "./vault"
 // ── First-class wiki pages on the pages layer (v3/W1) ─────────────────────────

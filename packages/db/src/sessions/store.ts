@@ -18,19 +18,7 @@
  * `withBatch(drizzle(sqlite))` constructed directly — exactly like `scoped-write.test.ts`.
  */
 import type { Principal } from "@brain/shared"
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  like,
-  or,
-  type SQL,
-} from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm"
 import type { BatchItem } from "drizzle-orm/batch"
 import {
   brainSnapshots,
@@ -597,7 +585,9 @@ export class SessionStore {
       query.entitySlug ? eq(facts.entitySlug, query.entitySlug) : undefined,
       query.sessionId ? eq(facts.sourceSessionId, query.sessionId) : undefined,
       query.since ? gte(facts.createdAt, query.since) : undefined,
-      query.grep ? like(facts.fact, `%${query.grep}%`) : undefined,
+      // Substring filter, LIKE-free: D1 caps LIKE patterns at 50 bytes, so `LIKE %${grep}%` throws
+      // on a long needle. `instr(lower(fact), lower(grep)) > 0` preserves LIKE's ASCII case-insensitivity.
+      query.grep ? sql`instr(lower(${facts.fact}), lower(${query.grep})) > 0` : undefined,
     )
     return this.recallSelect()
       .where(where)
