@@ -7,7 +7,8 @@
  *    backlinks / entity sections / timeline / history panels;
  *  • a STUB (entity slug with no page yet: `stub:true`, empty `page.id`) → entity sections + a
  *    "Create this page" affordance. Never treats the empty id as a real page (no backlinks on "");
- *  • not found (`page:null`) → a not-found notice.
+ *  • not found (`page:null`) → if descendant pages exist under the slug, a NAMESPACE landing view
+ *    (child listing + a secondary "create a page here" link); otherwise the not-found + create card.
  */
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
@@ -18,8 +19,19 @@ import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { downloadBundle } from "../lib/download-bundle"
 import { diffLines } from "../lib/linediff"
-import { wikiExportBundle, wikiGetPage, wikiPageHistory, wikiSavePage } from "../server/fns"
-import type { WikiEntitySection, WikiPageDetail, WikiRevisionFull } from "../server/types"
+import {
+  wikiExportBundle,
+  wikiGetPage,
+  wikiListPages,
+  wikiPageHistory,
+  wikiSavePage,
+} from "../server/fns"
+import type {
+  WikiEntitySection,
+  WikiListEntry,
+  WikiPageDetail,
+  WikiRevisionFull,
+} from "../server/types"
 
 /** Editor initial state from an existing page's detail (edit mode). */
 const editInitial = (detail: WikiPageDetail): WikiEditorInitial => ({
@@ -67,15 +79,25 @@ export const Route = createFileRoute("/wiki/$")({
   validateSearch: (s: Record<string, unknown>): { new?: boolean } => ({
     new: s.new === true || s.new === "1" || s.new === 1,
   }),
-  loader: async ({ params }) => ({
-    result: await wikiGetPage({ data: { target: params._splat ?? "" } }),
-  }),
+  loader: async ({ params }) => {
+    const target = params._splat ?? ""
+    const result = await wikiGetPage({ data: { target } })
+    // Namespace-landing data: only when the slug resolves to NO page (page:null) do we probe the
+    // tree for descendant pages under `<slug>/`. Non-empty → render a namespace listing instead of
+    // the not-found/create state. (Skipped for real pages + the empty splat — no wasted API call.)
+    let descendants: WikiListEntry[] | null = null
+    if (result.ok && result.data.page === null && target !== "") {
+      const listed = await wikiListPages({ data: { namespacePrefix: target } })
+      if (listed.ok) descendants = listed.data.pages
+    }
+    return { result, descendants }
+  },
   component: WikiPageView,
 })
 
 function WikiPageView() {
   const slug = Route.useParams()._splat ?? ""
-  const { result } = Route.useLoaderData()
+  const { result, descendants } = Route.useLoaderData()
   const search = Route.useSearch()
   const [mode, setMode] = useState<"view" | "edit" | "create">(search.new ? "create" : "view")
 
@@ -132,6 +154,13 @@ function WikiPageView() {
 
   // ── View modes ──
   if (detail === null) {
+    // A namespace-only node (no page of its own, but descendant pages exist) → landing listing,
+    // not the not-found state. A truly empty slug keeps the not-found + create card unchanged.
+    if (descendants !== null && descendants.length > 0) {
+      return (
+        <NamespaceView slug={slug} descendants={descendants} onCreate={() => setMode("create")} />
+      )
+    }
     return (
       <div className="flex flex-col gap-4">
         <Breadcrumbs slug={slug} />
@@ -304,6 +333,125 @@ function EntityMintNote() {
       Entity pages are authored via the entity-mint path — inheriting the entity's tier and graph
       linkage. Creating one here would produce a mis-scoped, unlinked page.
     </p>
+  )
+}
+
+// ── Namespace landing (no page at the slug, but descendants exist) ─────────────────────────
+
+/** One DIRECT child under a namespace slug — a page, a sub-namespace, or a page that also nests. */
+interface NamespaceChild {
+  /** Full slug to link to (`<base>/<segment>`). */
+  slug: string
+  label: string
+  /** Something sits deeper than `<base>/<segment>` (renders another namespace landing when opened). */
+  isNamespace: boolean
+  /** The page entry when a page exists exactly at `slug`; null for a pure sub-namespace. */
+  entry: WikiListEntry | null
+}
+
+/**
+ * Reduce the flat subtree listing (`wiki_list_pages` with `namespacePrefix=base` → every descendant
+ * under `<base>/`) to its DIRECT children, grouped by the first path segment under `base`. A group is
+ * a page when a descendant's slug equals `<base>/<seg>`, a namespace when anything sits deeper — it
+ * can be both (a page that also nests). Mirrors the sidebar's namespaces-first, then alpha ordering.
+ */
+const directChildren = (base: string, descendants: WikiListEntry[]): NamespaceChild[] => {
+  const prefix = `${base}/`
+  const byKey = new Map<string, NamespaceChild>()
+  for (const d of descendants) {
+    if (!d.slug.startsWith(prefix)) continue // defensive: skip the base row / unrelated slugs
+    const seg = d.slug.slice(prefix.length).split("/")[0] ?? ""
+    if (seg === "") continue
+    const childSlug = `${base}/${seg}`
+    const isDirectPage = d.slug === childSlug
+    const existing = byKey.get(seg)
+    if (existing) {
+      if (isDirectPage) {
+        existing.entry = d
+        existing.label = d.title || seg
+      } else {
+        existing.isNamespace = true
+      }
+    } else {
+      byKey.set(seg, {
+        slug: childSlug,
+        label: isDirectPage ? d.title || seg : seg,
+        isNamespace: !isDirectPage,
+        entry: isDirectPage ? d : null,
+      })
+    }
+  }
+  return [...byKey.values()].sort((a, b) => {
+    const an = a.isNamespace ? 0 : 1
+    const bn = b.isNamespace ? 0 : 1
+    return an !== bn ? an - bn : a.label.localeCompare(b.label)
+  })
+}
+
+function NamespaceView({
+  slug,
+  descendants,
+  onCreate,
+}: {
+  slug: string
+  descendants: WikiListEntry[]
+  onCreate: () => void
+}) {
+  const items = directChildren(slug, descendants)
+  const name = slug.split("/").filter(Boolean).pop() ?? slug
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div>
+        <Breadcrumbs slug={slug} />
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <h1 className="font-semibold text-2xl tracking-tight">{name}</h1>
+          <Badge variant="outline">namespace</Badge>
+        </div>
+        <p className="mt-1 text-muted text-sm">
+          No page exists at this slug — it groups {items.length} child page
+          {items.length === 1 ? "" : "s"}.
+        </p>
+      </div>
+      <Card>
+        <CardContent className="py-1">
+          <ul className="flex flex-col divide-y divide-border">
+            {items.map((it) => (
+              <li key={it.slug}>
+                <Link
+                  to="/wiki/$"
+                  params={{ _splat: it.slug }}
+                  className="flex items-center gap-2 py-2 text-sm text-ink hover:text-accent"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {it.label}
+                    {it.isNamespace && <span className="text-faint"> /…</span>}
+                  </span>
+                  {it.entry ? (
+                    <Badge variant="secondary">{it.entry.type}</Badge>
+                  ) : (
+                    <Badge variant="outline">namespace</Badge>
+                  )}
+                  {it.entry && (
+                    <span className="hidden shrink-0 text-faint text-xs sm:inline">
+                      {it.entry.updatedAt.slice(0, 10)}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+      {!isEntitySlug(slug) && (
+        <button
+          type="button"
+          onClick={onCreate}
+          className="self-start text-muted text-sm hover:text-accent hover:underline"
+        >
+          + Create a page at <span className="font-mono">{slug}</span>
+        </button>
+      )}
+    </div>
   )
 }
 
