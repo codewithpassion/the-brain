@@ -426,6 +426,7 @@ function NamespaceView({
                     {it.label}
                     {it.isNamespace && <span className="text-faint"> /…</span>}
                   </span>
+                  {it.entry?.draft && <Badge variant="warning">draft</Badge>}
                   {it.entry ? (
                     <Badge variant="secondary">{it.entry.type}</Badge>
                   ) : (

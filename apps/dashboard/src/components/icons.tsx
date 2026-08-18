@@ -107,6 +107,16 @@ export const ICONS = {
   ),
   dreams: glyph(<path d="M13.25 9.5A5.75 5.75 0 1 1 6.5 2.75a4.5 4.5 0 0 0 6.75 6.75z" />),
   facts: glyph(<path d="M8 1.75 9.5 6 14 7.5 9.5 9 8 13.25 6.5 9 2 7.5 6.5 6z" />),
+  chevron: glyph(<path d="M6 3.5 10.5 8 6 12.5" />),
+  folder: glyph(
+    <path d="M2 4.25c0-.55.45-1 1-1h3l1.5 1.75H13c.55 0 1 .45 1 1v6c0 .55-.45 1-1 1H3c-.55 0-1-.45-1-1z" />,
+  ),
+  page: glyph(
+    <>
+      <path d="M4 1.75h5.5L12.5 5v9.25h-8.5z" />
+      <path d="M9.25 1.75V5h3.25" />
+    </>,
+  ),
 } as const
 
 export type IconName = keyof typeof ICONS
