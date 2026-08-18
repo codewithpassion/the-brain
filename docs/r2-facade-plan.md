@@ -5,7 +5,8 @@
 > an S3-compatible (or WebDAV) API, authenticates per-tenant, and proxies into R2 under a *forced*
 > `${tenantId}/vault/` prefix.
 >
-> **Status:** Design + feasibility. No code yet.
+> **Status:** SHIPPED — the WebDAV facade (`/dav/*`), `vault_credentials` ops, dashboard Vault Sync
+> page, and inline vault-events ingest hook are all live; this header was stale until 2026-08-18.
 
 ---
 

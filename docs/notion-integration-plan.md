@@ -4,7 +4,9 @@
 > get chunked / embedded / entity-extracted, and stay in sync, with the same per-tenant isolation and
 > the same ingest pipeline. Two-way write-back optional.
 >
-> **Status:** Design. No code yet. Companion to `docs/r2-facade-plan.md` (the Obsidian/WebDAV path).
+> **Status:** SHIPPED (v2 Phase 8) — OAuth connect/confirm/disconnect, cron poll sweep, webhook queue,
+> block→markdown importer all live; this header was stale until 2026-08-18. Phase 5 write-back remains
+> optional/unbuilt. Companion to `docs/r2-facade-plan.md` (the Obsidian/WebDAV path).
 
 ---
 
