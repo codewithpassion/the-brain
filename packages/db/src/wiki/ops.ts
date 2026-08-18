@@ -140,7 +140,11 @@ export const WIKI_SAVE_PAGE_OP = defineOp({
       .string()
       .min(1)
       .describe("OKF page type, required & non-empty, e.g. 'note' | 'guide' | 'concept'."),
-    body: z.string().describe("Markdown body. [[slug]] and [text](/slug) become links/red-links."),
+    body: z
+      .string()
+      .describe(
+        "Markdown body. [[slug]] and [text](/slug) become links/red-links; [[slug#heading]] deep-links to a heading.",
+      ),
     title: z.string().optional(),
     description: z.string().optional(),
     tags: z.array(z.string()).optional(),

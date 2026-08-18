@@ -10,6 +10,7 @@ import {
   normalizeLinkTarget,
   remarkWikiLinks,
   resolveWikiHref,
+  wikilinkAnchor,
   wikilinkLabel,
 } from "../src/lib/wikilink"
 
@@ -67,6 +68,27 @@ describe("normalizeLinkTarget (store parity)", () => {
   })
 })
 
+describe("wikilinkAnchor (heading fragment → rehype-slug id)", () => {
+  test("bare fragment passes through as a slug", () => {
+    expect(wikilinkAnchor("a#b")).toBe("b")
+  })
+  test("multi-word fragment is slugified (spaces → dashes, lowercased)", () => {
+    expect(wikilinkAnchor("a#Setup Steps")).toBe("setup-steps")
+  })
+  test("an already-slug fragment is idempotent", () => {
+    expect(wikilinkAnchor("a#setup-steps")).toBe("setup-steps")
+  })
+  test("label is split off BEFORE the fragment (| after # is not part of the anchor)", () => {
+    expect(wikilinkAnchor("a#b|Label")).toBe("b")
+  })
+  test("no fragment → null", () => {
+    expect(wikilinkAnchor("a")).toBeNull()
+  })
+  test("empty fragment (trailing #) → null", () => {
+    expect(wikilinkAnchor("a#")).toBeNull()
+  })
+})
+
 describe("wikilinkLabel", () => {
   test("uses label after | when present", () => {
     expect(wikilinkLabel("Charles Babbage|Babbage")).toBe("Babbage")
@@ -106,6 +128,32 @@ describe("remarkWikiLinks (mdast transform — the make-or-break)", () => {
     expect(second.children?.[0]?.value).toBe("Babbage")
     // code node must be untouched (not a `text` node — never visited)
     expect(inlineCode.value).toBe("[[not-a-link]]")
+  })
+
+  test("carries a #heading fragment into the /wiki/<slug>#<anchor> url", () => {
+    const tree: N = {
+      type: "root",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "text",
+              value: "jump [[a#b]] and [[a#Setup Steps|Setup]] and plain [[a]] here",
+            },
+          ],
+        },
+      ],
+    }
+    remarkWikiLinks()(tree)
+    const kids = tree.children?.[0]?.children ?? []
+    // text, link(a#b), text, link(a#setup-steps), text, link(a), text
+    const links = kids.filter((k) => k.type === "link")
+    expect(links[0]?.url).toBe("/wiki/a#b")
+    expect(links[0]?.children?.[0]?.value).toBe("a#b") // label = raw target (no pipe)
+    expect(links[1]?.url).toBe("/wiki/a#setup-steps")
+    expect(links[1]?.children?.[0]?.value).toBe("Setup") // label after |
+    expect(links[2]?.url).toBe("/wiki/a") // no anchor → no trailing '#'
   })
 
   test("text without [[ is left untouched", () => {
@@ -151,5 +199,25 @@ describe("resolveWikiHref (red-vs-resolved — the make-or-break decision)", () 
       href: "mailto:a@b.com",
     })
     expect(resolveWikiHref("#section", pending)).toEqual({ kind: "external", href: "#section" })
+  })
+  test("/wiki/<slug>#<anchor> resolves on the bare slug, carrying the hash", () => {
+    expect(resolveWikiHref("/wiki/a#b", pending)).toEqual({
+      kind: "resolved",
+      slug: "a",
+      hash: "b",
+    })
+  })
+  test("REGRESSION: /wiki/a#b detects a pending slug 'a' (hash no longer swallows the slug)", () => {
+    expect(resolveWikiHref("/wiki/a#b", new Set(["a"]))).toEqual({
+      kind: "pending",
+      slug: "a",
+      hash: "b",
+    })
+  })
+  test("a bare target with a fragment splits the anchor off the slug", () => {
+    expect(resolveWikiHref("a#b", pending)).toEqual({ kind: "resolved", slug: "a", hash: "b" })
+  })
+  test("an anchor-only href (#b) has no path → stays external", () => {
+    expect(resolveWikiHref("#b", pending)).toEqual({ kind: "external", href: "#b" })
   })
 })

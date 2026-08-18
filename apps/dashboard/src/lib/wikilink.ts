@@ -9,6 +9,7 @@
  * with the dashboard's DOM lib (see `src/server/brain.ts`), so it cannot be imported client-side.
  * `wikilink.test.ts` pins the parity cases — if the store rule changes, both must change together.
  */
+import GithubSlugger from "github-slugger"
 import { visit } from "unist-util-visit"
 
 /**
@@ -25,11 +26,26 @@ export const normalizeLinkTarget = (raw: string): string | null => {
     .trim()
 }
 
-/** The render decision for a link href: external (leave alone), or an internal wiki slug. */
+/**
+ * Slugify a wikilink's `#anchor` fragment to the id rehype-slug emits on the target heading, or null
+ * when there is no fragment. Label is split off FIRST (`[[slug#anchor|Label]]` → the anchor is
+ * `anchor`), then the text after the first `#` is slugified. A fresh `GithubSlugger` per call is
+ * REQUIRED: the class is stateful (it dedups across calls), so reusing one would corrupt results.
+ */
+export const wikilinkAnchor = (raw: string): string | null => {
+  const beforeLabel = raw.split("|")[0] ?? ""
+  const hashIndex = beforeLabel.indexOf("#")
+  if (hashIndex === -1) return null
+  const fragment = beforeLabel.slice(hashIndex + 1).trim()
+  if (fragment.length === 0) return null
+  return new GithubSlugger().slug(fragment)
+}
+
+/** The render decision for a link href: external (leave alone), or an internal wiki slug + anchor. */
 export type WikiHref =
   | { kind: "external"; href: string }
-  | { kind: "resolved"; slug: string }
-  | { kind: "pending"; slug: string }
+  | { kind: "resolved"; slug: string; hash?: string }
+  | { kind: "pending"; slug: string; hash?: string }
 
 /**
  * The make-or-break resolution: turn a link href + the page's pending-slug set into the render
@@ -40,9 +56,16 @@ export type WikiHref =
  */
 export const resolveWikiHref = (rawHref: string, pending: ReadonlySet<string>): WikiHref => {
   const raw = rawHref ?? ""
-  const slug = raw.startsWith("/wiki/") ? raw.slice("/wiki/".length) : normalizeLinkTarget(raw)
+  // Split the `#anchor` off FIRST — before the `/wiki/` short-circuit — so `/wiki/a#b` resolves on
+  // the bare slug `a` (restoring pending/red-link detection), and an anchor-only `#x` (empty path)
+  // stays external. The path part is then resolved exactly as before.
+  const hashIndex = raw.indexOf("#")
+  const path = hashIndex === -1 ? raw : raw.slice(0, hashIndex)
+  const hash = hashIndex === -1 ? "" : raw.slice(hashIndex + 1)
+  const slug = path.startsWith("/wiki/") ? path.slice("/wiki/".length) : normalizeLinkTarget(path)
   if (slug === null || slug === "") return { kind: "external", href: raw }
-  return pending.has(slug) ? { kind: "pending", slug } : { kind: "resolved", slug }
+  if (pending.has(slug)) return { kind: "pending", slug, ...(hash !== "" ? { hash } : {}) }
+  return { kind: "resolved", slug, ...(hash !== "" ? { hash } : {}) }
 }
 
 /** The human-visible label for a `[[target|label]]` (the part after `|`, else the raw target). */
@@ -99,9 +122,13 @@ export const remarkWikiLinks = () => (tree: unknown) => {
       // store-parity `normalizeLinkTarget`, so `resolveWikiHref` recovers the exact slug + red state.
       const rawTarget = inner.split("|")[0]?.trim() ?? inner
       const slug = normalizeLinkTarget(rawTarget)
+      // Carry a `#heading` fragment through as the rehype-slug id, so `[[slug#Heading]]` deep-links.
+      const anchor = wikilinkAnchor(rawTarget)
+      const url =
+        slug !== null ? (anchor !== null ? `/wiki/${slug}#${anchor}` : `/wiki/${slug}`) : rawTarget
       out.push({
         type: "link",
-        url: slug !== null ? `/wiki/${slug}` : rawTarget,
+        url,
         title: null,
         data: { hProperties: { "data-wikilink": "1" } },
         children: [{ type: "text", value: wikilinkLabel(inner) }],

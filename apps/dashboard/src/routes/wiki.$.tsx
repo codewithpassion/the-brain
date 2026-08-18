@@ -10,8 +10,8 @@
  *  • not found (`page:null`) → if descendant pages exist under the slug, a NAMESPACE landing view
  *    (child listing + a secondary "create a page here" link); otherwise the not-found + create card.
  */
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router"
-import { useState } from "react"
+import { createFileRoute, Link, useLocation, useRouter } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 import { WikiEditor, type WikiEditorInitial } from "../components/editor/WikiEditor"
 import { Markdown } from "../components/Markdown"
 import { Badge } from "../components/ui/badge"
@@ -198,6 +198,26 @@ function PageView({
   onEdit: () => void
 }) {
   const { page, body, tags, backlinks, timeline, revisions, links, entity } = detail
+  // Re-correct the scroll to a `#heading` deep link after the markdown (Mermaid/hljs/images) has
+  // settled — the router scrolls on navigation, but async layout shift can leave the target off. A
+  // double rAF waits past the paint that follows enhancer mount. `hash` has no leading `#`.
+  const hash = useLocation({ select: (l) => l.hash })
+  // `slug` is a deliberate dep: navigating to a DIFFERENT page carrying the SAME #hash reuses this
+  // route component, so keying on `hash` alone wouldn't re-fire and the new page wouldn't scroll.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: slug is an intentional re-run trigger
+  useEffect(() => {
+    if (hash === "") return
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        document.getElementById(decodeURIComponent(hash))?.scrollIntoView()
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [slug, hash])
   // Only wiki-lane pages are editable here (memory pages edit via the Memory screen).
   const editable = page.ingestedVia === "wiki" || page.ingestedVia === "entity"
   // Snapshot of the current metadata so a rollback re-save preserves title/tags/draft/description.

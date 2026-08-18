@@ -264,6 +264,15 @@ h4 {
 .wiki-prose h4 {
   font-size: 1rem;
 }
+/* Offset in-page anchor scrolling so a deep-linked heading isn't hidden under sticky chrome. */
+.wiki-prose h1,
+.wiki-prose h2,
+.wiki-prose h3,
+.wiki-prose h4,
+.wiki-prose h5,
+.wiki-prose h6 {
+  scroll-margin-top: 5rem;
+}
 .wiki-prose p {
   margin: 0.8em 0;
 }
