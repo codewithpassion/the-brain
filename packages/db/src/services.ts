@@ -63,6 +63,15 @@ export interface ScopedServicesOptions {
   openaiConfig?: OpenAiCompatConfig
 }
 
+/**
+ * Blobs-only factory for surfaces that need R2 and nothing else (vault-dav). Lives here so
+ * `packages/db` stays the ONE module that names the raw `BODIES` binding (invariant 2).
+ */
+export const createScopedBlobs = (
+  env: Pick<BrainBindings, "BODIES">,
+  principal: Principal,
+): ScopedR2 => new ScopedR2(env.BODIES, principal)
+
 export const createScopedServices = (
   env: BrainBindings,
   principal: Principal,

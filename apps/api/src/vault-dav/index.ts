@@ -10,7 +10,7 @@
  * Prefix:  R2 key is always `vault/<sanitized relpath>`; ScopedR2 prepends `${tenantId}/`.
  * Ingest:  PUT/DELETE outside `vault/Brain/` → `VAULT_EVENTS_QUEUE.send` (fire-and-forget).
  */
-import { resolveVaultCredentialFromEnv, ScopedR2 } from "@brain/db"
+import { createScopedBlobs, resolveVaultCredentialFromEnv, type ScopedR2 } from "@brain/db"
 import type { Principal } from "@brain/shared"
 import type { Hono } from "hono"
 import type { ApiBindings } from "../bindings"
@@ -253,7 +253,7 @@ export const mountVaultDav = (app: Hono<AppEnv>): void => {
       capabilities: ["read", "write"],
       readOnly: false,
     }
-    const r2 = new ScopedR2(env.BODIES, vaultPrincipal)
+    const r2 = createScopedBlobs(env, vaultPrincipal)
 
     // ── Extract and sanitize the vault-relative path ──────────────────────────
     // `c.req.path` is ALREADY URL-decoded by Hono. Decoding again would corrupt note

@@ -37,7 +37,7 @@ export * from "./scoped"
 // ── Hybrid-search + cited-synthesis (`think`) pipeline (Phase 2) ───────────────
 export * from "./search"
 export type { ScopedServices, ScopedServicesOptions } from "./services"
-export { createScopedServices } from "./services"
+export { createScopedBlobs, createScopedServices } from "./services"
 export * from "./sessions"
 // ── LIKE-free SQL prefix predicates (D1 50-byte LIKE-pattern cap) ──────────────
 export * from "./sql-utils"
