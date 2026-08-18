@@ -85,6 +85,9 @@ each get a real page, connected by \`[[wikilinks]]\` + backlinks. Read: \`wiki_g
   \`wiki_list_pages\` over a large wiki.
 - **Entity/idea pages are agent-maintained.** The dream engine keeps \`entities/<kind>/<name>\` pages
   and idea pages current; you can read and extend them like any page.
+- **Images:** \`wiki_upload_image\` (png/jpeg/gif/webp, base64) stores an image and returns a
+  \`![alt](/wiki-media/<id>)\` snippet — embed that returned markdown in a \`wiki_save_page\` body to
+  display the image on the page.
 - **Sharing:** \`wiki_export_bundle\` packages a namespace as an OKF bundle (zip); \`wiki_import_bundle\`
   ingests one under \`imported/<namespace>/…\` as **private drafts, kept out of search** until a human
   reviews + publishes them (imported content is untrusted).

@@ -11,6 +11,13 @@ export type {
 } from "./entity-pages"
 export { EntityPageStore, entityPageSlug } from "./entity-pages"
 export { mintInsightPage } from "./insight-pages"
+export type { PreparedWikiImage, WikiImageInput } from "./media"
+export {
+  isValidWikiMediaId,
+  prepareWikiImage,
+  WIKI_IMAGE_CONTENT_TYPES,
+  WikiImageError,
+} from "./media"
 export {
   deleteWikiPage,
   exportWikiBundle,
@@ -30,6 +37,7 @@ export {
   WIKI_OPS,
   WIKI_PAGE_HISTORY_OP,
   WIKI_SAVE_PAGE_OP,
+  WIKI_UPLOAD_IMAGE_OP,
 } from "./ops"
 export type {
   WikiListEntry,

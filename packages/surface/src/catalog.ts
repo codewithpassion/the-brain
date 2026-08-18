@@ -79,6 +79,7 @@ import {
   OKF_EXPORT_OP,
   OKF_IMPORT_OP,
   PROPOSE_CORRECTIONS_OP,
+  prepareWikiImage,
   queryOp,
   RECALL_OP,
   REPROCESS_DOCUMENT_OP,
@@ -113,6 +114,7 @@ import {
   WIKI_MOVE_PAGE_OP,
   WIKI_PAGE_HISTORY_OP,
   WIKI_SAVE_PAGE_OP,
+  WIKI_UPLOAD_IMAGE_OP,
   type WikiSavePageInput,
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
@@ -563,6 +565,36 @@ const wikiDeletePageSurfaceOp: SurfaceOp = {
       )
     }
     return result
+  },
+}
+
+/**
+ * `wiki_upload_image` — validate + shape the image (pure `prepareWikiImage`), then write the bytes to
+ * the body store via `ScopedR2` (contentType in httpMetadata). R2-only, so — like `vault_writeback` —
+ * there is no in-batch D1 audit (the wiki ops' audit is a WikiStore property; this op has no D1 row).
+ * Returns the `![alt](/wiki-media/<id>)` snippet for the caller to embed in a page body.
+ */
+const wikiUploadImageSurfaceOp: SurfaceOp = {
+  def: WIKI_UPLOAD_IMAGE_OP,
+  invoke: async (ctx, input) => {
+    const parsed = WIKI_UPLOAD_IMAGE_OP.input.parse(input) as {
+      filename: string
+      data: string
+      alt?: string
+      contentType?: string
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const prepared = prepareWikiImage(parsed)
+    await services.blobs.put(prepared.key, prepared.bytes, {
+      httpMetadata: { contentType: prepared.contentType },
+    })
+    return {
+      id: prepared.id,
+      key: prepared.key,
+      markdown: prepared.markdown,
+      contentType: prepared.contentType,
+      bytes: prepared.bytes.byteLength,
+    }
   },
 }
 
@@ -1294,6 +1326,7 @@ export const buildCatalog = (): readonly SurfaceOp[] =>
     wikiListPagesSurfaceOp,
     wikiMovePageSurfaceOp,
     wikiDeletePageSurfaceOp,
+    wikiUploadImageSurfaceOp,
     memoryReviewSurfaceOp,
     breakGlassReadSurfaceOp,
     auditExportSurfaceOp,

@@ -67,6 +67,17 @@ const SLASH_COMMANDS: SlashItem[] = [
     hint: "horizontal rule",
     run: (e, r) => e.chain().focus().deleteRange(r).setHorizontalRule().run(),
   },
+  {
+    id: "image",
+    label: "Image",
+    hint: "upload an image",
+    // Drop the "/image" query, then open the editor's hidden file input (wired by Editor.tsx via
+    // the ImageUpload extension storage). The chosen file uploads + inserts asynchronously.
+    run: (e, r) => {
+      e.chain().focus().deleteRange(r).run()
+      ;(e.storage as unknown as { imageUpload?: { open?: () => void } }).imageUpload?.open?.()
+    },
+  },
 ]
 
 export const SlashMenu = Extension.create({

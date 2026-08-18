@@ -22,6 +22,7 @@ import {
   GatewayBudgetError,
   GRAPH_OPS,
   type GraphOpDeps,
+  isValidWikiMediaId,
   MEMORY_REVIEW_OP,
   monthlyWindow,
   normalizePath,
@@ -588,6 +589,26 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
 
     const result = await runBatchIngest(services, ingestParams)
     return c.json({ ...result, slug })
+  })
+
+  // ── GET /wiki/media/:id — stream a wiki image from the body store (bearer-authed). ──
+  //    New tenant-boundary surface: `services.blobs` (ScopedR2) prefixes the tenant, so tenant B can
+  //    never read tenant A's media (a missing key → 404). The id is validated to a minted
+  //    `<uuid>.<ext>` shape (no slashes / traversal). Long immutable cache — ids are content-stable.
+  app.get("/wiki/media/:id", async (c) => {
+    const principal = c.get("principal")
+    const id = c.req.param("id")
+    if (!isValidWikiMediaId(id)) throw new HttpError(400, "invalid media id")
+    const services = makeServices(c.env, principal)
+    const obj = await services.blobs.get(`wiki/media/${id}`)
+    if (obj === null) return new Response("not found", { status: 404 })
+    return new Response(obj.body, {
+      status: 200,
+      headers: {
+        "content-type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    })
   })
 
   // ── POST /think — hybrid search + token-budget-guarded cited synthesis. ──

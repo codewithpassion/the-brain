@@ -7,9 +7,10 @@
  * expressed as typed scalars (`type` required — OKF), NOT a free-form object, so every input stays
  * within the closed JSON-schema set the surface generators support (no `z.record` / no `.refine`).
  */
-import { type AnyOpDef, defineOp, type OpRegistry } from "@brain/shared"
+import { type AnyOpDef, defineOp, MAX_BODY_BYTES, type OpRegistry } from "@brain/shared"
 import { z } from "zod"
 import type { OkfExportResult, OkfImportResult } from "../memory/okf"
+import { WIKI_IMAGE_CONTENT_TYPES } from "./media"
 import { IMPORT_CAPS } from "./okf-bundle"
 import type {
   WikiListEntry,
@@ -324,6 +325,57 @@ export const WIKI_DELETE_PAGE_OP = defineOp({
   output: z.object({ slug: z.string(), deleted: z.boolean(), pageId: z.string().nullable() }),
 })
 
+/**
+ * `wiki_upload_image` — store an image in the body store and return a stable markdown snippet to
+ * embed in a page. Base64 in (like the dashboard upload transport), bytes land at
+ * `wiki/media/<uuid>.<ext>` under `ScopedR2` (contentType in httpMetadata); the returned
+ * `![alt](/wiki-media/<id>)` carries a stable root-relative URL served by the bearer-authed API GET
+ * route. Same write capability as `wiki_save_page`; mcp+rest only (binary uploads have no CLI flag).
+ */
+// Coarse Zod bound on the base64 string so an oversized payload is rejected before decode; the
+// authoritative cap is on the DECODED byte length in `prepareWikiImage` (MAX_BODY_BYTES). Base64 is
+// ~4/3 the byte length, so this only trips egregiously large inputs early.
+const MAX_IMAGE_B64_CHARS = Math.ceil(MAX_BODY_BYTES / 3) * 4 + 16
+export const WIKI_UPLOAD_IMAGE_OP = defineOp({
+  name: "wiki_upload_image",
+  description:
+    "Upload an image to the wiki body store and get back a markdown snippet to embed in a page. " +
+    "Returns `![alt](/wiki-media/<id>)` — paste that into a wiki_save_page body to display the image. " +
+    "Accepts png/jpeg/gif/webp (base64), up to 8 MiB; the type is inferred from the filename when " +
+    "contentType is omitted. Media is tenant-scoped and served to signed-in tenant members.",
+  capability: "write",
+  readOnly: false,
+  surfaces: ["mcp", "rest"],
+  input: z.object({
+    filename: z
+      .string()
+      .min(1)
+      .describe(
+        "Original filename, e.g. 'diagram.png' — used to infer the type and as the alt fallback.",
+      ),
+    data: z
+      .string()
+      .min(1)
+      .max(MAX_IMAGE_B64_CHARS)
+      .describe("The image bytes, base64-encoded (a leading `data:` URI prefix is tolerated)."),
+    alt: z
+      .string()
+      .optional()
+      .describe("Alt text for the embedded image (defaults to the filename)."),
+    contentType: z
+      .enum(WIKI_IMAGE_CONTENT_TYPES)
+      .optional()
+      .describe("Image MIME type; inferred from the filename extension when omitted."),
+  }),
+  output: z.object({
+    id: z.string(),
+    key: z.string(),
+    markdown: z.string(),
+    contentType: z.string(),
+    bytes: z.number().int(),
+  }),
+})
+
 /** Every wiki op CONTRACT (registered handler-free, mirroring `MEMORY_OPS`). */
 export const WIKI_OPS: readonly AnyOpDef[] = [
   WIKI_SAVE_PAGE_OP,
@@ -334,6 +386,7 @@ export const WIKI_OPS: readonly AnyOpDef[] = [
   WIKI_IMPORT_BUNDLE_OP,
   WIKI_MOVE_PAGE_OP,
   WIKI_DELETE_PAGE_OP,
+  WIKI_UPLOAD_IMAGE_OP,
 ]
 
 /** Register the wiki op contracts into a shared `OpRegistry` (handlers bind in the Worker). */

@@ -8,13 +8,21 @@
  * here would vanish on save; the view renderer still renders tables that arrive via markdown).
  */
 
+import type { Editor as CoreEditor } from "@tiptap/core"
+import Image from "@tiptap/extension-image"
 import { Markdown } from "@tiptap/markdown"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
-import { forwardRef, useImperativeHandle } from "react"
+import { forwardRef, useImperativeHandle, useRef } from "react"
 import { unescapeWikilinks } from "../../lib/md-escape"
 import { EditorToolbar } from "./EditorToolbar"
 import { MentionEntities, SlashMenu } from "./editor-extensions"
+import {
+  ImageUpload,
+  type ImageUploadStorage,
+  isSupportedImage,
+  uploadAndInsertImage,
+} from "./image"
 import { WikiLinkSuggest } from "./WikiLinkNode"
 
 export interface EditorHandle {
@@ -28,15 +36,59 @@ export interface EditorProps {
 }
 
 const Editor = forwardRef<EditorHandle, EditorProps>(({ initialMarkdown, onChange }, ref) => {
+  // A live editor handle for the paste/drop handlers (whose closures are built inside `useEditor`)
+  // and the hidden file input; populated in `onCreate`.
+  const liveEditor = useRef<CoreEditor | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const uploadFiles = (files: FileList | null): void => {
+    const ed = liveEditor.current
+    if (ed === null || files === null) return
+    for (const file of Array.from(files)) {
+      if (isSupportedImage(file)) void uploadAndInsertImage(ed, file)
+    }
+  }
+
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [StarterKit, Markdown, WikiLinkSuggest, SlashMenu, MentionEntities],
+    extensions: [
+      StarterKit,
+      Markdown,
+      Image,
+      ImageUpload,
+      WikiLinkSuggest,
+      SlashMenu,
+      MentionEntities,
+    ],
     content: initialMarkdown,
     contentType: "markdown",
     editorProps: {
       attributes: {
         class: "wiki-prose min-h-[24rem] focus:outline-none",
       },
+      // Paste/drop of image files upload through the op, then insert the /wiki-media/<id> node.
+      // Return true SYNCHRONOUSLY (and preventDefault) so the default insertion doesn't also fire.
+      handlePaste: (_view, event) => {
+        const imgs = Array.from(event.clipboardData?.files ?? []).filter(isSupportedImage)
+        if (imgs.length === 0) return false
+        event.preventDefault()
+        uploadFiles(event.clipboardData?.files ?? null)
+        return true
+      },
+      handleDrop: (_view, event) => {
+        const dt = (event as DragEvent).dataTransfer
+        const imgs = Array.from(dt?.files ?? []).filter(isSupportedImage)
+        if (imgs.length === 0) return false
+        event.preventDefault()
+        uploadFiles(dt?.files ?? null)
+        return true
+      },
+    },
+    onCreate: ({ editor }) => {
+      liveEditor.current = editor
+      // Let the slash-menu "Image" command open the hidden file input.
+      ;(editor.storage as unknown as { imageUpload: ImageUploadStorage }).imageUpload.open = () =>
+        fileInputRef.current?.click()
     },
     onUpdate: ({ editor }) => onChange?.(unescapeWikilinks(editor.getMarkdown())),
   })
@@ -57,6 +109,16 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ initialMarkdown, onChang
       <div className="px-4 py-3">
         <EditorContent editor={editor} />
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          uploadFiles(e.target.files)
+          e.target.value = "" // allow re-selecting the same file
+        }}
+      />
     </div>
   )
 })

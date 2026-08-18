@@ -472,6 +472,36 @@ export const ingestDocument = createServerFn({ method: "POST" })
     }
   })
 
+/** Result of a wiki image upload — the stored id + the `![alt](/wiki-media/<id>)` embed snippet. */
+export interface WikiUploadImageResult {
+  id: string
+  key: string
+  markdown: string
+  contentType: string
+  bytes: number
+}
+
+/**
+ * `wiki_upload_image` — upload an image (base64 like `ingestDocument`) to the wiki body store and get
+ * back a `/wiki-media/<id>` markdown snippet. The editor inserts the returned src; the `/wiki-media/$id`
+ * server route serves the bytes.
+ */
+export const wikiUploadImage = createServerFn({ method: "POST" })
+  .validator((d: { filename: string; data: string; alt?: string; contentType?: string }) => d)
+  .handler(async ({ data }): Promise<Result<WikiUploadImageResult>> => {
+    try {
+      const out = await brainCall<WikiUploadImageResult>("wiki_upload_image", false, {
+        filename: data.filename,
+        data: data.data,
+        ...(data.alt ? { alt: data.alt } : {}),
+        ...(data.contentType ? { contentType: data.contentType } : {}),
+      })
+      return { ok: true, data: out }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
 /**
  * `add_thought` — capture a quick thought as a small note under `brain/thoughts/<yyyy-mm>`
  * (tag `thought`). Runs through the same ingest spine as `ingest_document`, so the result
