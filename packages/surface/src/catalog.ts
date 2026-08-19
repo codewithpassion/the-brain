@@ -1240,8 +1240,14 @@ export const decorateWithUrls = (name: string, out: unknown, links: BrainDeepLin
       return { ...o, documents: o.documents.map((d) => withUrl(d, links.document(d.id))) }
     }
     case "wiki_get_page": {
-      const o = out as { page: ({ page: { slug: string } } & object) | null }
-      return o.page === null ? o : { ...o, page: withUrl(o.page, links.wikiPage(o.page.page.slug)) }
+      const o = out as {
+        page: ({ page: { slug: string }; headings: { id: string }[] } & object) | null
+      }
+      if (o.page === null) return o
+      const slug = o.page.page.slug
+      // Each heading gains its own `#id` deep link; the page itself keeps its top-level url.
+      const headings = o.page.headings.map((h) => withUrl(h, links.wikiHeading(slug, h.id)))
+      return { ...o, page: withUrl({ ...o.page, headings }, links.wikiPage(slug)) }
     }
     case "wiki_list_pages": {
       const o = out as { pages: { slug: string }[] }

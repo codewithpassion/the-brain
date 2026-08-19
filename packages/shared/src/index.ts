@@ -53,6 +53,9 @@ export {
 export type { EdgeSpec, GraphNode, GraphPath } from "./graph"
 // ── Graph contracts (two-graph model + generalized EdgeSpec) ─────────────────
 export { DOC_GRAPH, ENTITY_GRAPH } from "./graph"
+export type { MarkdownHeading } from "./heading-anchors"
+// ── Wiki heading anchors (client-safe rehype-slug parity for MCP deep links) ──
+export { extractHeadings, headingAnchor } from "./heading-anchors"
 // ── Ingestion params ─────────────────────────────────────────────────────────
 export type { IngestionParams } from "./ingest"
 // ── Truncation-salvage JSON parsing (shared by KG extractor + Dream judge) ───

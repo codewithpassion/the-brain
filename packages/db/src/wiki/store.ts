@@ -12,7 +12,7 @@
  * SHARED scope + visibility gate (invariant W-i5); the author on every revision is the principal
  * (W-i3), never the original creator.
  */
-import { DOC_GRAPH, type Principal } from "@brain/shared"
+import { DOC_GRAPH, extractHeadings, type MarkdownHeading, type Principal } from "@brain/shared"
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import type { DocLinkRow, TimelineRow } from "../graph/scoped-graph"
@@ -90,6 +90,13 @@ export interface WikiPageDetail {
     updatedAt: string
   }
   body: string
+  /**
+   * Every heading in `body` with the `id` rehype-slug assigns it at render time — the AUTHORITATIVE
+   * anchor ids for `#` deep links (a client rewriting links can't compute these, and a wrong guess
+   * fails silently). Non-optional: an entity-page stub or a heading-free body yields `[]`, never
+   * `undefined`. Derived via `extractHeadings` (the one client-safe home for the slug rule).
+   */
+  headings: MarkdownHeading[]
   frontmatter: Record<string, unknown>
   backlinks: DocLinkRow[]
   tags: string[]
@@ -412,6 +419,7 @@ export class WikiStore {
         updatedAt: row.updatedAt,
       },
       body: row.body,
+      headings: extractHeadings(row.body),
       frontmatter: parseFrontmatter(row.frontmatter),
       backlinks,
       tags: pageTags,
@@ -633,6 +641,7 @@ export class WikiStore {
         updatedAt: "",
       },
       body: "",
+      headings: [], // an un-minted stub has no body → no headings (field is non-optional)
       frontmatter: { type: "entity", title: ent.canonicalName, entity_kind: ent.kind },
       backlinks: [],
       tags: [],

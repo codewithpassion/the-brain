@@ -56,6 +56,16 @@ const WikiPageDetailSchema = z.object({
     updatedAt: z.string(),
   }),
   body: z.string(),
+  // Authoritative anchor ids for `#` deep links — each heading's `url` is decorated (present when
+  // DASHBOARD_URL is set), same optional-`url` rationale as the sibling `url` fields on this schema.
+  headings: z.array(
+    z.object({
+      level: z.number().int(),
+      text: z.string(),
+      id: z.string(),
+      url: z.string().optional(),
+    }),
+  ),
   frontmatter: z.record(z.unknown()),
   backlinks: z.array(DocLinkSchema),
   tags: z.array(z.string()),
@@ -143,7 +153,12 @@ export const WIKI_SAVE_PAGE_OP = defineOp({
     body: z
       .string()
       .describe(
-        "Markdown body. [[slug]] and [text](/slug) become links/red-links; [[slug#heading]] deep-links to a heading.",
+        "Markdown body. [[slug]] and [text](/slug) become links/red-links. " +
+          "Heading deep-links: in [[slug#heading]] write the heading text VERBATIM — it is slugified " +
+          "for you, so you need not know the generated anchor id. Caveat: wikilinks split on the first " +
+          "|, so a heading containing | can't be reached by its text (nor via [[…|Label]]) — use its " +
+          "literal id from wiki_get_page's headings[]. The [text](/wiki/slug#id) form or an absolute " +
+          "shared URL also need the literal id — read it from headings[].",
       ),
     title: z.string().optional(),
     description: z.string().optional(),
@@ -170,6 +185,9 @@ export const WIKI_GET_PAGE_OP = defineOp({
   description:
     "Load a wiki page in full by slug or id: body, frontmatter, backlinks, tags, timeline, revision " +
     "history, and outbound links (resolved + pending red links). Surfaces memory-provenance pages too. " +
+    "`headings[]` is the AUTHORITATIVE source of anchor ids (as wiki_save_page's body note directs): each " +
+    "entry's `id` is exactly what a `#` deep link needs — for [[slug#heading]] whose heading contains |, " +
+    "the [text](/wiki/slug#id) form, or an absolute URL shared elsewhere. Never guess the slug; read it here. " +
     "For an ENTITY page, also returns live `entity` sections (mentions + relations → other entity pages). " +
     "For an 'entities/<kind>/<name>' slug with no page yet, returns a `stub:true` result with the entity " +
     "sections and an EMPTY page.id — treat that as 'create this entity page', never as a real page id.",

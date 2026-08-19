@@ -101,7 +101,11 @@
         "@types/react": "^19.2.0",
         "@types/react-dom": "^19.2.0",
         "@vitejs/plugin-react": "^6.0.1",
+        "mdast-util-to-string": "^4.0.0",
+        "remark-parse": "^11.0.0",
+        "remark-rehype": "^11.1.2",
         "tailwindcss": "^4.1.18",
+        "unified": "^11.0.5",
         "vite": "^8.0.0",
         "wrangler": "^4.105.0",
       },
@@ -146,6 +150,11 @@
       "name": "@brain/shared",
       "version": "0.0.0",
       "dependencies": {
+        "github-slugger": "^2.0.0",
+        "mdast-util-to-string": "^4.0.0",
+        "remark-gfm": "^4.0.1",
+        "remark-parse": "^11.0.0",
+        "unified": "^11.0.5",
         "zod": "^3.25.76",
       },
       "devDependencies": {

@@ -14,6 +14,8 @@ import { entityPageSlug } from "./slug"
 
 export interface BrainDeepLinks {
   wikiPage(slug: string): string | undefined
+  /** Deep link to a heading WITHIN a wiki page (`/wiki/<slug>#<id>`), for `wiki_get_page` headings[]. */
+  wikiHeading(slug: string, id: string): string | undefined
   document(id: string): string | undefined
   memory(slug: string): string | undefined
   session(id: string): string | undefined
@@ -25,6 +27,7 @@ export const brainDeepLinks = (base: string | undefined): BrainDeepLinks => {
   const link = (path: string): string | undefined => (root === "" ? undefined : `${root}${path}`)
   return {
     wikiPage: (slug) => link(`/wiki/${slug}`),
+    wikiHeading: (slug, id) => link(`/wiki/${slug}#${id}`),
     document: (id) => link(`/documents/${id}`),
     memory: (slug) => link(`/memory/${slug}`),
     session: (id) => link(`/sessions/${id}`),

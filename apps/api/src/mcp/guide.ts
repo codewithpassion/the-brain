@@ -79,6 +79,10 @@ each get a real page, connected by \`[[wikilinks]]\` + backlinks. Read: \`wiki_g
   conversation — how a system fits together, a decision and its rationale, a concept worth a
   canonical explanation — \`wiki_save_page\` it and \`[[link]]\` the related concepts. (Verbatim
   preferences/instructions still go to \`memory_set\`; the wiki is for explained, linked knowledge.)
+- **Heading deep-links: write the heading text verbatim.** In \`[[slug#heading]]\` the fragment is
+  slugified for you — no need to know the generated anchor id. Two cases need the literal id (read it
+  from \`wiki_get_page\`'s \`headings[]\`): a heading containing \`|\` (wikilinks split on the first
+  \`|\`, so its text can't be matched), and the \`[text](/wiki/slug#id)\` or absolute-URL forms.
 - **Progressive disclosure — don't list everything.** Auto-maintained \`index\` pages give you two
   layers: \`wiki_get_page('index')\` is the root (namespaces + top-level pages); each \`<ns>/index\`
   lists that section. Read the index, then drill into the pages you need — cheaper than

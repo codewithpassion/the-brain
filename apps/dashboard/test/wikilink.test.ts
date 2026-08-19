@@ -220,4 +220,27 @@ describe("resolveWikiHref (red-vs-resolved — the make-or-break decision)", () 
   test("an anchor-only href (#b) has no path → stays external", () => {
     expect(resolveWikiHref("#b", pending)).toEqual({ kind: "external", href: "#b" })
   })
+  // Prong C: the markdown-link form's `#hash` is slugified through `headingAnchor`, so it deep-links
+  // exactly like the `[[a#Setup Steps]]` wikilink form (which arrives pre-slugged from remarkWikiLinks).
+  test("a raw-text hash is normalized to the rehype-slug id", () => {
+    expect(resolveWikiHref("/wiki/a#Setup Steps", pending)).toEqual({
+      kind: "resolved",
+      slug: "a",
+      hash: "setup-steps",
+    })
+  })
+  test("an already-correct id round-trips unchanged (headingAnchor is idempotent)", () => {
+    expect(resolveWikiHref("/wiki/a#setup-steps-1", pending)).toEqual({
+      kind: "resolved",
+      slug: "a",
+      hash: "setup-steps-1",
+    })
+  })
+  test("normalized hash keeps pending/red-link detection on the bare slug", () => {
+    expect(resolveWikiHref("/wiki/missing-page#Setup Steps", pending)).toEqual({
+      kind: "pending",
+      slug: "missing-page",
+      hash: "setup-steps",
+    })
+  })
 })

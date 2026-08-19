@@ -9,7 +9,7 @@
  * with the dashboard's DOM lib (see `src/server/brain.ts`), so it cannot be imported client-side.
  * `wikilink.test.ts` pins the parity cases — if the store rule changes, both must change together.
  */
-import GithubSlugger from "github-slugger"
+import { headingAnchor } from "@brain/shared"
 import { visit } from "unist-util-visit"
 
 /**
@@ -28,9 +28,10 @@ export const normalizeLinkTarget = (raw: string): string | null => {
 
 /**
  * Slugify a wikilink's `#anchor` fragment to the id rehype-slug emits on the target heading, or null
- * when there is no fragment. Label is split off FIRST (`[[slug#anchor|Label]]` → the anchor is
- * `anchor`), then the text after the first `#` is slugified. A fresh `GithubSlugger` per call is
- * REQUIRED: the class is stateful (it dedups across calls), so reusing one would corrupt results.
+ * when there is no fragment. This function owns the wikilink-specific splitting: the label is split
+ * off FIRST (`[[slug#anchor|Label]]` → the anchor is `anchor`), then the text after the first `#`.
+ * The slugging itself DELEGATES to `@brain/shared`'s `headingAnchor` so the slug rule has ONE home
+ * (shared with `extractHeadings`, pinned by `heading-anchors.parity.test.ts`).
  */
 export const wikilinkAnchor = (raw: string): string | null => {
   const beforeLabel = raw.split("|")[0] ?? ""
@@ -38,7 +39,7 @@ export const wikilinkAnchor = (raw: string): string | null => {
   if (hashIndex === -1) return null
   const fragment = beforeLabel.slice(hashIndex + 1).trim()
   if (fragment.length === 0) return null
-  return new GithubSlugger().slug(fragment)
+  return headingAnchor(fragment)
 }
 
 /** The render decision for a link href: external (leave alone), or an internal wiki slug + anchor. */
@@ -61,7 +62,13 @@ export const resolveWikiHref = (rawHref: string, pending: ReadonlySet<string>): 
   // stays external. The path part is then resolved exactly as before.
   const hashIndex = raw.indexOf("#")
   const path = hashIndex === -1 ? raw : raw.slice(0, hashIndex)
-  const hash = hashIndex === -1 ? "" : raw.slice(hashIndex + 1)
+  // Normalize the `#hash` through the SAME `headingAnchor` slug rule here — the render chokepoint —
+  // so the markdown-link form `[x](/wiki/a#Setup Steps)` deep-links exactly like the wikilink form
+  // `[[a#Setup Steps]]`. This is the only caller of `resolveWikiHref` (Markdown.tsx's `a`), and the
+  // `[[…]]` form already arrives pre-slugged from `remarkWikiLinks` → `headingAnchor` is idempotent
+  // on its own output (`slug("setup-steps-1") === "setup-steps-1"`), so re-normalizing it is a no-op.
+  const rawHash = hashIndex === -1 ? "" : raw.slice(hashIndex + 1)
+  const hash = rawHash === "" ? "" : headingAnchor(rawHash)
   const slug = path.startsWith("/wiki/") ? path.slice("/wiki/".length) : normalizeLinkTarget(path)
   if (slug === null || slug === "") return { kind: "external", href: raw }
   if (pending.has(slug)) return { kind: "pending", slug, ...(hash !== "" ? { hash } : {}) }

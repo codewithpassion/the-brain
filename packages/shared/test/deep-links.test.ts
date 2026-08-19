@@ -11,6 +11,7 @@ describe("brainDeepLinks", () => {
   test("undefined base → every builder returns undefined", () => {
     const l = brainDeepLinks(undefined)
     expect(l.wikiPage("a")).toBeUndefined()
+    expect(l.wikiHeading("a", "intro")).toBeUndefined()
     expect(l.document("d")).toBeUndefined()
     expect(l.memory("m")).toBeUndefined()
     expect(l.session("s")).toBeUndefined()
@@ -24,6 +25,9 @@ describe("brainDeepLinks", () => {
   test("builds the frontend routes from a normalized base", () => {
     const l = brainDeepLinks("https://brain.example.dev")
     expect(l.wikiPage("guides/intro")).toBe("https://brain.example.dev/wiki/guides/intro")
+    expect(l.wikiHeading("guides/intro", "setup-steps-1")).toBe(
+      "https://brain.example.dev/wiki/guides/intro#setup-steps-1",
+    )
     expect(l.document("doc-123")).toBe("https://brain.example.dev/documents/doc-123")
     expect(l.memory("agent/planner/prefs")).toBe(
       "https://brain.example.dev/memory/agent/planner/prefs",

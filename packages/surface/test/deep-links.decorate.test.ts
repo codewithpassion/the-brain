@@ -48,13 +48,19 @@ describe("decorateWithUrls — one assertion per decorated family", () => {
     expect(out.documents[0]?.url).toBe(`${B}/documents/d4`)
   })
 
-  test("wiki_get_page: page → wiki url (slug is nested at page.page.slug)", () => {
+  test("wiki_get_page: page → wiki url + each heading → #id url (slug nested at page.page.slug)", () => {
     const out = decorateWithUrls(
       "wiki_get_page",
-      { page: { page: { slug: "guides/x" } } },
+      {
+        page: {
+          page: { slug: "guides/x" },
+          headings: [{ level: 2, text: "Setup Steps", id: "setup-steps-1" }],
+        },
+      },
       links,
-    ) as { page: { url?: string } }
+    ) as { page: { url?: string; headings: { url?: string }[] } }
     expect(out.page.url).toBe(`${B}/wiki/guides/x`)
+    expect(out.page.headings[0]?.url).toBe(`${B}/wiki/guides/x#setup-steps-1`)
   })
 
   test("wiki_get_page: null page passes through (no throw, no url)", () => {
@@ -133,6 +139,21 @@ describe("decorateWithUrls — pass-through cases", () => {
     ) as { citations: Record<string, unknown>[] }
     expect(out.citations[0]?.documentId).toBe("d")
     expect("url" in (out.citations[0] ?? {})).toBe(false)
+  })
+
+  test("wiki_get_page headings keep their fields but gain no url when base is absent", () => {
+    const out = decorateWithUrls(
+      "wiki_get_page",
+      {
+        page: {
+          page: { slug: "guides/x" },
+          headings: [{ level: 2, text: "Setup Steps", id: "setup-steps" }],
+        },
+      },
+      brainDeepLinks(undefined),
+    ) as { page: { headings: Record<string, unknown>[] } }
+    expect(out.page.headings[0]?.id).toBe("setup-steps")
+    expect("url" in (out.page.headings[0] ?? {})).toBe(false)
   })
 
   test("unknown / non-retrieval op → output returned unchanged", () => {
