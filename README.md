@@ -57,6 +57,19 @@ bun check        # biome (strict) + tsc (strict) + all tests + boundary-lint, ac
   GitHub Actions CI (W0.1), the scheduled real-AI gate (W0.2), and the model-deprecation
   tripwire (W0.3) — `bun check` stays a local convention until these land.
 
+## Install the `brain` CLI
+
+Compile a standalone binary and drop it in `~/.local/bin`:
+
+```bash
+cd apps/cli && bun run install:local   # builds dist/brain, installs ~/.local/bin/brain
+bun run build:bin                      # build only, leaves it at apps/cli/dist/brain
+```
+
+The binary embeds the Bun runtime (~95 MB), so it runs anywhere on PATH with no `bun`, no
+`node_modules`, and no repo checkout. It does not track source: re-run `install:local` after
+changing the CLI or the op-registry it generates commands from.
+
 ## Session context injection + Claude Code hooks (W2)
 
 The Dream engine keeps a per-tenant **session-context snapshot** — curated, world-visibility markdown

@@ -9,6 +9,8 @@
   "main": "./src/index.ts",
   "scripts": {
     "brain": "bun run ./src/index.ts",
+    "build:bin": "bun build ./src/index.ts --compile --minify --outfile dist/brain",
+    "install:local": "bun run build:bin && mkdir -p $HOME/.local/bin && install -m 755 dist/brain $HOME/.local/bin/brain",
     "check": "biome check . && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
