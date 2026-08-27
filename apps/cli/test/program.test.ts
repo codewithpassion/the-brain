@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { buildCliCommandSpecs, buildRegistry } from "@brain/surface"
 import type { Command } from "commander"
 import type { CliDeps } from "../src/deps"
@@ -179,5 +182,129 @@ describe("output hygiene (invariant 17)", () => {
     expect(output).toContain("error:")
     expect(output).toContain("upstream 401")
     expect(output).not.toContain("supersecret")
+  })
+})
+
+/**
+ * The CLI-only `--<arg>-file <path>` companion. Linux caps one argv string at 128 KiB, so a long
+ * document can only arrive by path — but the op input is unchanged, so these assert the value lands
+ * on the wire exactly as if it had been typed, and that the two flags refuse to be combined.
+ */
+describe("--<arg>-file (client-side file marshalling)", () => {
+  const capture = (): { seen?: { input: unknown }; deps: CliDeps } => {
+    const box: { seen?: { input: unknown }; deps: CliDeps } = {
+      deps: fakeDeps({
+        env: { BRAIN_TOKEN: "bk_x" },
+        createClient: () => ({
+          call: async (_name, _readOnly, input) => {
+            box.seen = { input }
+            return {}
+          },
+        }),
+      }),
+    }
+    return box
+  }
+
+  test("every string arg gains a --<arg>-file; non-string args do not", () => {
+    const program = buildProgram(fakeDeps())
+    const ingest = program.commands.find((command) => command.name() === "ingest_document")
+    const flags = ingest?.options.map((option) => option.long)
+    expect(flags).toContain("--content-file") // content: string
+    expect(flags).toContain("--title-file") // title: string
+    expect(flags).not.toContain("--tags-file") // tags: array
+  })
+
+  test("--content-file satisfies the MANDATORY --content and passes the file's text through", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "brain-file-arg-"))
+    const path = join(dir, "transcript.txt")
+    const text = "x".repeat(300_000) // far past the 128 KiB argv ceiling
+    writeFileSync(path, text)
+    const box = capture()
+    await buildProgram(box.deps).parseAsync([
+      "node",
+      "brain",
+      "ingest_document",
+      "--content-file",
+      path,
+      "--title",
+      "transcript",
+    ])
+    expect(box.seen?.input).toMatchObject({ content: text, title: "transcript" })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("--<arg>-file works for a non-mandatory arg too (wiki_save_page --body-file)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "brain-file-arg-"))
+    const path = join(dir, "page.md")
+    writeFileSync(path, "# hello\n")
+    const box = capture()
+    await buildProgram(box.deps).parseAsync([
+      "node",
+      "brain",
+      "wiki_save_page",
+      "--slug",
+      "notes/hello",
+      "--type",
+      "note",
+      "--body-file",
+      path,
+    ])
+    expect(box.seen?.input).toMatchObject({ slug: "notes/hello", body: "# hello\n" })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("passing BOTH --content and --content-file is a user error naming both flags", async () => {
+    const lines: string[] = []
+    const program = buildProgram(
+      fakeDeps({ env: { BRAIN_TOKEN: "bk_x" }, err: (l) => lines.push(l) }),
+    )
+    await program.parseAsync([
+      "node",
+      "brain",
+      "ingest_document",
+      "--content",
+      "typed",
+      "--content-file",
+      "/tmp/whatever",
+    ])
+    expect(lines.join("\n")).toContain("--content and --content-file are mutually exclusive")
+    expect(process.exitCode).toBe(1)
+  })
+
+  test("both flags are caught in EITHER order (--content-file first)", async () => {
+    const lines: string[] = []
+    const program = buildProgram(
+      fakeDeps({ env: { BRAIN_TOKEN: "bk_x" }, err: (l) => lines.push(l) }),
+    )
+    await program.parseAsync([
+      "node",
+      "brain",
+      "ingest_document",
+      "--content-file",
+      "/tmp/whatever",
+      "--content",
+      "typed",
+    ])
+    expect(lines.join("\n")).toContain("--content and --content-file are mutually exclusive")
+    expect(process.exitCode).toBe(1)
+  })
+
+  test("an unreadable path prints ENOENT through the printer (not an unhandled rejection)", async () => {
+    const lines: string[] = []
+    const program = buildProgram(
+      fakeDeps({ env: { BRAIN_TOKEN: "bk_x" }, err: (l) => lines.push(l) }),
+    )
+    await program.parseAsync([
+      "node",
+      "brain",
+      "ingest_document",
+      "--content-file",
+      join(tmpdir(), "brain-no-such-file-1a2b3c"),
+    ])
+    const output = lines.join("\n")
+    expect(output).toContain("error:")
+    expect(output).toContain("ENOENT")
+    expect(process.exitCode).toBe(1)
   })
 })
