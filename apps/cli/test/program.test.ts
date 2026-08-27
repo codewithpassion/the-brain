@@ -206,13 +206,48 @@ describe("--<arg>-file (client-side file marshalling)", () => {
     return box
   }
 
-  test("every string arg gains a --<arg>-file; non-string args do not", () => {
+  test("every free-form string arg gains a --<arg>-file; other arg types do not", () => {
     const program = buildProgram(fakeDeps())
     const ingest = program.commands.find((command) => command.name() === "ingest_document")
     const flags = ingest?.options.map((option) => option.long)
     expect(flags).toContain("--content-file") // content: string
     expect(flags).toContain("--title-file") // title: string
     expect(flags).not.toContain("--tags-file") // tags: array
+  })
+
+  test("an ENUM string arg gets no file companion (a fixed token never needs one)", () => {
+    const program = buildProgram(fakeDeps())
+    const save = program.commands.find((command) => command.name() === "wiki_save_page")
+    const flags = save?.options.map((option) => option.long)
+    expect(flags).toContain("--body-file") // body: free-form string
+    expect(flags).not.toContain("--visibility-file") // visibility: enum
+    // The enum arg itself is untouched — still choice-constrained.
+    const visibility = save?.options.find((option) => option.long === "--visibility")
+    expect(visibility?.argChoices).toBeDefined()
+  })
+
+  test("two args asking for stdin is refused before either is read (no silent empty value)", async () => {
+    const lines: string[] = []
+    const program = buildProgram(
+      fakeDeps({ env: { BRAIN_TOKEN: "bk_x" }, err: (line) => lines.push(line) }),
+    )
+    await program.parseAsync([
+      "node",
+      "brain",
+      "wiki_save_page",
+      "--slug",
+      "notes/x",
+      "--type",
+      "note",
+      "--body-file",
+      "-",
+      "--title-file",
+      "-",
+    ])
+    expect(lines.join("\n")).toContain(
+      "--body-file and --title-file each read stdin — '-' works for one arg only",
+    )
+    expect(process.exitCode).toBe(1)
   })
 
   test("--content-file satisfies the MANDATORY --content and passes the file's text through", async () => {

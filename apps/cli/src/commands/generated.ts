@@ -6,7 +6,7 @@
  * against that SAME schema, then dispatched through the typed tRPC client as a query (readOnly) or
  * mutation. Commands are flat (trivial parity) and only GROUPED for `--help` via `helpGroup`.
  *
- * Every string arg additionally gets a CLI-ONLY `--<arg>-file <path>` companion (see below). It is
+ * Every free-form string arg additionally gets a CLI-ONLY `--<arg>-file <path>` companion. It is
  * pure client-side marshalling — the op input is untouched and still goes through `validateInput` —
  * exactly like the hand-written `brain wiki import <path>`, so it adds no drift and no trust surface.
  */
@@ -51,7 +51,8 @@ const optionFor = (arg: CliArgSpec): Option => {
  * The file companion for a string arg. Linux caps ONE argv string at 128 KiB, so a long document
  * (a 5-hour transcript is ~390 KB) can never reach `--content` — it dies as E2BIG in the shell,
  * before `brain` even starts. This flag is the way in, and `-` means stdin so a pipe needs no
- * temp file. String args only: nothing else gets near the limit.
+ * temp file. Free-form strings only: nothing else gets near the limit, and an ENUM value is a fixed
+ * short token, so `--visibility-file` could only ever end in a rejection — no flag is kinder.
  */
 const fileOptionFor = (arg: CliArgSpec): Option =>
   new Option(
@@ -78,12 +79,21 @@ const parkFilePath = (command: Command, arg: CliArgSpec): void => {
  * Swap each parked path for the file's bytes. Called INSIDE the action's try/catch so an unreadable
  * path surfaces through the same printer as every other error (ENOENT from `readFileSync`, matching
  * `wiki import`), and returns a copy so the command's own option values stay as parsed.
+ *
+ * Stdin drains, so it can fill exactly ONE arg: a second `-` would silently hand that arg an empty
+ * string, which is data loss you only notice once it is already saved. Refused UP FRONT, before any
+ * read, so the diagnosis never depends on which arg the spec happened to order first.
  */
 const resolveFileArgs = (
   args: readonly CliArgSpec[],
   command: Command,
 ): Record<string, unknown> => {
   const opts: Record<string, unknown> = { ...command.opts() }
+  const fromStdin = args.filter((arg) => opts[fileKey(arg.name)] === "-")
+  if (fromStdin.length > 1)
+    throw new Error(
+      `${fromStdin.map((arg) => `--${arg.name}${FILE_SUFFIX}`).join(" and ")} each read stdin — '-' works for one arg only`,
+    )
   for (const arg of args) {
     const path = opts[fileKey(arg.name)]
     if (typeof path !== "string") continue
@@ -108,7 +118,7 @@ export const buildGeneratedCommand = (
   addGlobalFlags(command)
   for (const arg of spec.args) {
     command.addOption(optionFor(arg))
-    if (arg.type !== "string") continue
+    if (arg.type !== "string" || arg.enumValues) continue
     command.addOption(fileOptionFor(arg))
     parkFilePath(command, arg)
   }
