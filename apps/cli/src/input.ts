@@ -21,12 +21,27 @@ export const coerceArg = (arg: CliArgSpec, raw: unknown): unknown => {
     }
     case "boolean":
       return raw === true || raw === "true"
-    case "array":
-      if (Array.isArray(raw)) return raw
-      return String(raw)
-        .split(",")
-        .map((part) => part.trim())
-        .filter((part) => part.length > 0)
+    case "array": {
+      const parts = Array.isArray(raw)
+        ? raw
+        : String(raw)
+            .split(",")
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0)
+      // Object items (apply_corrections --changes, replace_in_document --replacements) travel as
+      // one JSON object per value: `--replacements '{"find":"a","replaceWith":"b"}' '{...}'`.
+      if (arg.itemType !== "object") return parts
+      return parts.map((part) => {
+        if (typeof part !== "string") return part
+        try {
+          return JSON.parse(part) as unknown
+        } catch {
+          throw new Error(
+            `--${arg.name}: each value must be a JSON object (got "${part.slice(0, 60)}")`,
+          )
+        }
+      })
+    }
     default:
       return raw
   }

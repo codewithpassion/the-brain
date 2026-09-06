@@ -108,6 +108,21 @@ describe("input coercion (string flags → typed op input)", () => {
     ).toThrow("must be a number")
   })
 
+  test("array args with object items parse each value as JSON", () => {
+    const spec = {
+      name: "changes",
+      type: "array",
+      required: true,
+      description: "",
+      itemType: "object",
+    }
+    expect(coerceArg(spec, ['{"before":"a","after":"b"}', '{"before":"c","after":"d"}'])).toEqual([
+      { before: "a", after: "b" },
+      { before: "c", after: "d" },
+    ])
+    expect(() => coerceArg(spec, ["not json"])).toThrow(/must be a JSON object/)
+  })
+
   test("boolean flag presence coerces to true; array splits on comma", () => {
     expect(
       coerceArg({ name: "readOnly", type: "boolean", required: false, description: "" }, true),

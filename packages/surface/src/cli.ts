@@ -22,6 +22,8 @@ export interface CliArgSpec {
   default?: unknown
   /** Allowed values when the property is an enum. */
   enumValues?: string[]
+  /** For `array` args: the JSON-Schema type of each item (`object` items are passed as JSON). */
+  itemType?: string
 }
 
 /** One declarative CLI command generated from an `OpDef`. */
@@ -42,6 +44,13 @@ interface JsonSchemaObject {
 const argFrom = (name: string, prop: Record<string, unknown>, required: boolean): CliArgSpec => {
   const type = typeof prop.type === "string" ? prop.type : "string"
   const description = typeof prop.description === "string" ? prop.description : ""
+  const items = prop.items
+  const itemType =
+    items !== null &&
+    typeof items === "object" &&
+    typeof (items as { type?: unknown }).type === "string"
+      ? String((items as { type: string }).type)
+      : undefined
   return {
     name,
     type,
@@ -49,6 +58,7 @@ const argFrom = (name: string, prop: Record<string, unknown>, required: boolean)
     description,
     ...(prop.default !== undefined ? { default: prop.default } : {}),
     ...(Array.isArray(prop.enum) ? { enumValues: prop.enum.map((value) => String(value)) } : {}),
+    ...(itemType !== undefined ? { itemType } : {}),
   }
 }
 
