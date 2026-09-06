@@ -16,7 +16,8 @@
       "!**/*.html",
       "!**/worker-configuration.d.ts",
       "!**/.wrangler",
-      "!**/drizzle/meta"
+      "!**/drizzle/meta",
+      "!apps/obsidian-plugin/main.js"
     ]
   },
   "formatter": {

@@ -88,7 +88,7 @@ export const runDreamEntityPages = async (
         systemAuthored: true,
         mintOnly: true,
       })
-      const minted = res !== null && res.changed
+      const minted = res?.changed
       // W3: a freshly-minted entity page gets a searchable backing doc (KG-skipped agent origin).
       if (minted && res?.pageId != null) {
         await syncBackingDoc(services, res.pageId, (params) =>
