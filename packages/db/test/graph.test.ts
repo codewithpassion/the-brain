@@ -294,6 +294,7 @@ describe("registerGraphOps — op registry wiring", () => {
         "add_link",
         "add_tag",
         "add_timeline_entry",
+        "delete_entity",
         "find_orphans",
         "get_backlinks",
         "get_links",
@@ -301,13 +302,21 @@ describe("registerGraphOps — op registry wiring", () => {
         "get_timeline",
         "list_entities",
         "list_entity_edges",
+        "merge_entities",
         "search_entities",
         "traverse_graph",
       ].sort(),
     )
-    expect(names.length).toBe(GRAPH_OPS.length)
-    // the read surface is read-only; the W4.4 mutating curation ops are the only write ops.
-    const writeOps = new Set(["add_link", "add_tag", "add_timeline_entry"])
+    // GRAPH_OPS binds the handlers here; delete_entity / merge_entities bind in the surface catalog.
+    expect(names.length).toBe(GRAPH_OPS.length + 2)
+    // the read surface is read-only; the curation ops are the only write ops.
+    const writeOps = new Set([
+      "add_link",
+      "add_tag",
+      "add_timeline_entry",
+      "delete_entity",
+      "merge_entities",
+    ])
     expect(registry.list().every((op) => op.readOnly === !writeOps.has(op.name))).toBe(true)
   })
 

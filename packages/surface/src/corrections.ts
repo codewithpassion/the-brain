@@ -33,6 +33,7 @@ export const PROPOSE_CORRECTIONS_SYSTEM = [
   'Shape: {"changes":[{"before":"<verbatim snippet>","after":"<replacement>","reason":"<short why>"}]}.',
   "Rules:",
   "- 'before' MUST be copied VERBATIM from the provided text (exact characters, case and punctuation) and long enough to occur EXACTLY ONCE.",
+  "- If the snippet to change repeats elsewhere, extend 'before' with the surrounding words of that one occurrence until it is unique.",
   "- Only include a change you are confident matches the instruction. When unsure, omit it.",
   "- Never invent text absent from the source. 'after' is the corrected replacement for 'before'.",
   "- Do not change anything the instruction says to leave alone.",
@@ -124,4 +125,37 @@ export const applyAnchoredChanges = (
     applied++
   }
   return { body: work, applied }
+}
+
+/** Does `raw` (or its salvage slice) parse as a `{changes: [...]}` object at all? */
+const parsesAsChangesObject = (raw: string): boolean =>
+  extractJsonCandidates(raw).some((candidate) => {
+    try {
+      return Array.isArray((JSON.parse(candidate) as { changes?: unknown }).changes)
+    } catch {
+      return false
+    }
+  })
+
+/**
+ * Why a proposal came back EMPTY — `null` when it legitimately has changes/skips. An empty result
+ * used to be silent; a caller could not tell "nothing to change" from "the model's JSON was cut off
+ * by the output cap" (35 anchored changes on a 9 KB page plausibly overrun it).
+ */
+export const emptyProposalNote = (
+  raw: string | null,
+  proposed: readonly AnchoredChange[],
+  validated: { changes: readonly unknown[]; skipped: readonly unknown[] },
+): string | null => {
+  if (validated.changes.length > 0 || validated.skipped.length > 0) return null
+  if (raw === null)
+    return "the model call failed or returned nothing — retry, or narrow the instruction"
+  if (proposed.length === 0 && !parsesAsChangesObject(raw)) {
+    return (
+      `the model returned ${raw.length} chars that could not be parsed as a changes JSON object ` +
+      "(likely truncated by the output cap) — narrow the instruction to fewer changes, or for text that " +
+      "repeats many times use replace_in_document"
+    )
+  }
+  return "the model proposed no changes it was confident in"
 }

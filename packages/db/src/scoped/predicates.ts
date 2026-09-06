@@ -52,18 +52,22 @@ export const visibilityPredicate = (p: Principal, t: VisibilityColumns): SQL => 
 
 /**
  * The single "LIVE entity" gate (Dream-dedup D4): an `entities` row that has NOT been soft-deleted
- * into a winner (`merged_into IS NULL`). ONE definition every entity read shares, so a merged loser
- * is uniformly hidden from search/list/traverse/orphans/stats/reflection while its row survives
- * (D-i5 reversible). `liveEntityPredicate` is the Drizzle form (pass the `merged_into` column, works
- * on aliased tables too); `liveEntitySql` is the raw-SQL twin for hand-written joins (`entity_fts`).
+ * into a winner (`merged_into IS NULL`) nor soft-deleted by `delete_entity` (`deleted_at IS NULL`).
+ * ONE definition every entity read shares, so a merged loser / deleted entity is uniformly hidden
+ * from search/list/traverse/orphans/stats/reflection while its row survives (D-i5 reversible).
+ * `liveEntityPredicate` is the Drizzle form (pass the table or alias's two columns); `liveEntitySql`
+ * is the raw-SQL twin for hand-written joins (`entity_fts`).
  * Deliberately NOT applied by `findEntityByKey` / `getEntityForMerge`, which must SEE losers (to
  * redirect a re-extracted key to its winner, and to drive the merge).
  */
-export const liveEntityPredicate = (mergedIntoColumn: AnySQLiteColumn): SQL =>
-  isNull(mergedIntoColumn)
+export const liveEntityPredicate = (cols: {
+  mergedInto: AnySQLiteColumn
+  deletedAt: AnySQLiteColumn
+}): SQL => sql`${isNull(cols.mergedInto)} AND ${isNull(cols.deletedAt)}`
 
-/** Raw-SQL twin of `liveEntityPredicate` for hand-written joins: `<alias>.merged_into IS NULL`. */
-export const liveEntitySql = (alias: string): SQL => sql`${sql.raw(alias)}.merged_into IS NULL`
+/** Raw-SQL twin of `liveEntityPredicate`: `<alias>.merged_into IS NULL AND <alias>.deleted_at IS NULL`. */
+export const liveEntitySql = (alias: string): SQL =>
+  sql`${sql.raw(alias)}.merged_into IS NULL AND ${sql.raw(alias)}.deleted_at IS NULL`
 
 /** The two lineage columns an "active fact" gate reads (`superseded_by` / `consolidated_into`). */
 export interface FactLineageColumns {

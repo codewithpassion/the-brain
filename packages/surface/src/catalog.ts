@@ -32,6 +32,7 @@ import {
   createSessionServices,
   createSnapshot,
   DELETE_DOCUMENT_OP,
+  DELETE_ENTITY_OP,
   DREAM_NOW_OP,
   deleteBackingDoc,
   deleteWikiPage,
@@ -69,6 +70,7 @@ import {
   MEMORY_REVIEW_OP,
   MEMORY_ROLLBACK_OP,
   MEMORY_SET_OP,
+  MERGE_ENTITIES_OP,
   type MemorySetRequest,
   makeBudgetPort,
   makeRecallSink,
@@ -82,6 +84,7 @@ import {
   prepareWikiImage,
   queryOp,
   RECALL_OP,
+  REPLACE_IN_DOCUMENT_OP,
   REPROCESS_DOCUMENT_OP,
   RESOLVE_CONTRADICTION_OP,
   REVIVE_FACT_OP,
@@ -95,6 +98,7 @@ import {
   runBatchIngestCore,
   runSessionPromote,
   type ScopedServices,
+  SET_SPEAKER_MAP_OP,
   type SearchDeps,
   saveWikiPage,
   searchOp,
@@ -124,10 +128,19 @@ import type { SurfaceContext } from "./context"
 import {
   applyAnchoredChanges,
   buildProposePrompt,
+  emptyProposalNote,
   PROPOSE_CORRECTIONS_SYSTEM,
   parseProposedChanges,
   validateProposedChanges,
 } from "./corrections"
+import { planReplacements } from "./replace"
+import {
+  applySpeakerMap,
+  meetingSlugIn,
+  type SpeakerMap,
+  speakerMapKey,
+  speakerMapSlug,
+} from "./speakers"
 
 /** One op exposed to the surface layer: its frozen contract + a surface-agnostic invoker. */
 export interface SurfaceOp {
@@ -207,6 +220,114 @@ const graphSurfaceOp = (op: ErasedGraphOp): SurfaceOp => ({
     )
   },
 })
+
+// ── Entity curation (delete_entity / merge_entities) ──────────────────────────
+
+/** A live, tenant-scoped entity or a teaching error naming the op. */
+const requireLiveEntity = async (
+  services: ScopedServices,
+  op: string,
+  entityId: string,
+): Promise<{ id: string; name: string; kind: string }> => {
+  const row = await services.graph.getEntityForMerge(entityId)
+  if (row === null) throw new Error(`${op}: entity ${entityId} not found`)
+  if (row.mergedInto !== null) {
+    throw new Error(`${op}: entity ${entityId} was already merged into ${row.mergedInto}`)
+  }
+  if (row.deletedAt !== null) throw new Error(`${op}: entity ${entityId} is already deleted`)
+  return { id: row.id, name: row.name, kind: row.kind }
+}
+
+/**
+ * `delete_entity` — soft (default) or hard. Order: drop the projected page (+ reap its backing doc
+ * off the read path, like `wiki_delete_page`), delete the graph rows, then the entity vector
+ * (best-effort — the D1 row is the gate and the Dream sweep reconciles stale vectors).
+ */
+const deleteEntitySurfaceOp: SurfaceOp = {
+  def: DELETE_ENTITY_OP,
+  invoke: async (ctx, input) => {
+    const { entityId, hard } = DELETE_ENTITY_OP.input.parse(input)
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const entity = await requireLiveEntity(services, "delete_entity", entityId)
+    const page = await services.wiki.deleteEntityPage(entityId)
+    if (page.pageId !== null) {
+      const pageId = page.pageId
+      ctx.waitUntil(
+        deleteBackingDoc(services, pageId).catch((err) => {
+          console.error("entity page backing-doc delete failed", pageId, err)
+        }),
+      )
+    }
+    const counts = hard
+      ? await services.graph.hardDeleteEntity(entityId)
+      : { ...(await services.graph.softDeleteEntity(entityId)), mentionsDropped: 0 }
+    try {
+      await services.entityVectors.deleteVectors([entityId])
+    } catch (err) {
+      console.error("entity vector delete failed", entityId, err)
+    }
+    return {
+      entityId,
+      canonicalName: entity.name,
+      deleted: true,
+      hard,
+      relationsDropped: counts.relationsDropped,
+      mentionsDropped: counts.mentionsDropped,
+      pageSlug: page.slug,
+    }
+  },
+}
+
+/**
+ * `merge_entities` — the audited Dream-dedup merge (`ScopedGraph.mergeEntities`) plus its three
+ * follow-ons, mirrored from `dream/dedup.ts`: redirect the loser's page to the winner's, reap the
+ * redirect stub's backing doc, and drop the loser's vector.
+ */
+const mergeEntitiesSurfaceOp: SurfaceOp = {
+  def: MERGE_ENTITIES_OP,
+  invoke: async (ctx, input) => {
+    const { fromEntityId, intoEntityId } = MERGE_ENTITIES_OP.input.parse(input)
+    if (fromEntityId === intoEntityId) {
+      throw new Error("merge_entities: fromEntityId and intoEntityId are the same entity")
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const loser = await requireLiveEntity(services, "merge_entities", fromEntityId)
+    const winner = await requireLiveEntity(services, "merge_entities", intoEntityId)
+    if (loser.kind !== winner.kind) {
+      throw new Error(
+        `merge_entities: kinds differ (${loser.kind} → ${winner.kind}); refusing to merge across kinds`,
+      )
+    }
+    await services.graph.mergeEntities(intoEntityId, fromEntityId)
+    let redirectedTo: string | null = null
+    try {
+      const rp = await services.wiki.repointEntityPage(fromEntityId, intoEntityId)
+      redirectedTo = rp.winnerSlug ?? null
+      if (rp.loserPageId !== undefined) {
+        const loserPageId = rp.loserPageId
+        ctx.waitUntil(
+          syncBackingDoc(services, loserPageId, runPageIngest(ctx, services)).catch((err) => {
+            console.error("merge_entities: loser page backing-doc sync failed", loserPageId, err)
+          }),
+        )
+      }
+    } catch (err) {
+      console.error("merge_entities: entity-page repoint failed", fromEntityId, intoEntityId, err)
+    }
+    try {
+      await services.entityVectors.deleteVectors([fromEntityId])
+    } catch (err) {
+      console.error("merge_entities: loser vector delete failed", fromEntityId, err)
+    }
+    return {
+      fromEntityId,
+      intoEntityId,
+      merged: true,
+      intoCanonicalName: winner.name,
+      redirectedTo,
+    }
+  },
+}
 
 // ── Session family (capture_turn / finalize / context / recall / forget) ──────
 const sessionServices = (ctx: SurfaceContext) => createSessionServices(ctx.env, ctx.principal)
@@ -1091,6 +1212,9 @@ const loadCorrectionBody = async (
   return obj === null ? "" : await obj.text()
 }
 
+/** Anchored changes are verbose (verbatim before + after per change); the 4 K default truncated them. */
+const PROPOSE_MAX_TOKENS = 8192
+
 /**
  * `propose_corrections` — DRY-RUN. One `genExtract` pass over the target body → anchored before/after
  * changes, validated so only anchors that occur EXACTLY ONCE are `applicable`; ambiguous/not-found
@@ -1106,9 +1230,12 @@ const proposeCorrectionsSurfaceOp: SurfaceOp = {
     const raw = await services.ai.genExtract(
       buildProposePrompt(instruction, body),
       PROPOSE_CORRECTIONS_SYSTEM,
+      { maxTokens: PROPOSE_MAX_TOKENS },
     )
-    const { changes, skipped } = validateProposedChanges(body, parseProposedChanges(raw))
-    return { targetType, target, changes, skipped }
+    const proposed = parseProposedChanges(raw)
+    const validated = validateProposedChanges(body, proposed)
+    const note = emptyProposalNote(raw, proposed, validated)
+    return { targetType, target, ...validated, ...(note !== null ? { note } : {}) }
   },
 }
 
@@ -1167,6 +1294,125 @@ const applyCorrectionsSurfaceOp: SurfaceOp = {
       doc.contentType === "voice" ? "text/markdown" : (doc.contentType ?? "text/markdown")
     const res = await reingestDocumentBody(ctx, services, doc, newBody, contentType, "correct")
     return { targetType, target, applied, status: res.status }
+  },
+}
+
+// ── Bulk replace / speaker map ────────────────────────────────────────────────
+
+/** Load a document + its full R2 body, throwing (with the op name) when either is absent. */
+const loadDocumentBody = async (
+  services: ScopedServices,
+  op: string,
+  documentId: string,
+): Promise<{
+  doc: NonNullable<Awaited<ReturnType<ScopedServices["db"]["getDocumentById"]>>>
+  body: string
+}> => {
+  const doc = await services.db.getDocumentById(documentId)
+  if (doc === null) throw new Error(`${op}: document ${documentId} not found`)
+  let body = ""
+  if (doc.bodyR2Key !== null) {
+    const obj = await services.blobs.get(doc.bodyR2Key)
+    if (obj !== null) body = await obj.text()
+  }
+  if (body.length === 0) throw new Error(`${op}: document ${documentId} has no body to edit`)
+  return { doc, body }
+}
+
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length
+
+/** Reingest a document body after a bulk edit, preserving a voice doc's markdown transcript. */
+const reingestEdited = (
+  ctx: SurfaceContext,
+  services: ScopedServices,
+  doc: Awaited<ReturnType<typeof loadDocumentBody>>["doc"],
+  body: string,
+  instancePrefix: string,
+): Promise<{ documentId: string; status: string }> => {
+  const contentType =
+    doc.contentType === "voice" ? "text/markdown" : (doc.contentType ?? "text/markdown")
+  return reingestDocumentBody(ctx, services, doc, body, contentType, instancePrefix)
+}
+
+/**
+ * `replace_in_document` — plan every rule against the ORIGINAL body in one pass (`planReplacements`
+ * throws with actual counts on any violation, before anything is written), then either return the
+ * dry-run preview or write + reprocess via the shared `reingestDocumentBody`.
+ */
+const replaceInDocumentSurfaceOp: SurfaceOp = {
+  def: REPLACE_IN_DOCUMENT_OP,
+  invoke: async (ctx, input) => {
+    const { documentId, replacements, dryRun } = REPLACE_IN_DOCUMENT_OP.input.parse(input)
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const { doc, body } = await loadDocumentBody(services, "replace_in_document", documentId)
+    const plan = planReplacements(body, replacements)
+    const base = {
+      documentId,
+      dryRun,
+      results: plan.results,
+      bytesBefore: utf8Bytes(body),
+      bytesAfter: utf8Bytes(plan.body),
+    }
+    if (dryRun) return { ...base, status: "dry-run", diff: plan.diff }
+    if (plan.body === body) return { ...base, status: "unchanged" }
+    const res = await reingestEdited(ctx, services, doc, plan.body, "replace")
+    return { ...base, status: res.status }
+  },
+}
+
+/**
+ * `set_speaker_map` — persist the label→person map as agent memory keyed by the recording (so the
+ * sync can resolve a re-ingest of the same audio without a human), then optionally relabel the body
+ * in place (+ the `## Speakers` block, once) and reprocess.
+ */
+const setSpeakerMapSurfaceOp: SurfaceOp = {
+  def: SET_SPEAKER_MAP_OP,
+  invoke: async (ctx, input) => {
+    const { documentId, speakers, applyToBody } = SET_SPEAKER_MAP_OP.input.parse(input) as {
+      documentId: string
+      speakers: SpeakerMap
+      applyToBody: boolean
+    }
+    const services = createScopedServices(ctx.env, ctx.principal)
+    const { doc, body } = await loadDocumentBody(services, "set_speaker_map", documentId)
+    const key = speakerMapKey(body, documentId)
+    const memorySlug = speakerMapSlug(key)
+    const resolvedOn = new Date().toISOString().slice(0, 10)
+    const meetingSlug = meetingSlugIn(body)
+    const record = {
+      source: key.startsWith("plaud-") ? "plaud" : "document",
+      fileId: key,
+      documentId,
+      ...(meetingSlug !== null ? { meetingSlug } : {}),
+      resolvedOn,
+      resolvedBy: ctx.principal.userId,
+      speakers,
+    }
+    await setMemory(
+      memoryStore(ctx),
+      {
+        slug: memorySlug,
+        type: "note",
+        title: `Speaker map: ${key}`,
+        description: `Who each diarised speaker label is in ${key}.`,
+        tags: ["meeting", "speaker-map"],
+        body: JSON.stringify(record, null, 2),
+      },
+      new Date().toISOString(),
+    )
+    const base = { documentId, memorySlug, key }
+    if (!applyToBody) {
+      return { ...base, results: [], skippedLabels: [], blockInserted: false, status: "stored" }
+    }
+    const applied = applySpeakerMap(body, speakers, resolvedOn)
+    const summary = {
+      results: applied.results,
+      skippedLabels: applied.skippedLabels,
+      blockInserted: applied.blockInserted,
+    }
+    if (applied.body === body) return { ...base, ...summary, status: "unchanged" }
+    const res = await reingestEdited(ctx, services, doc, applied.body, "speakers")
+    return { ...base, ...summary, status: res.status }
   },
 }
 
@@ -1305,6 +1551,8 @@ export const buildCatalog = (): readonly SurfaceOp[] =>
     searchSurfaceOp(queryOp),
     searchSurfaceOp(thinkOp),
     ...(GRAPH_OPS as unknown as readonly ErasedGraphOp[]).map(graphSurfaceOp),
+    deleteEntitySurfaceOp,
+    mergeEntitiesSurfaceOp,
     captureTurnSurfaceOp,
     finalizeSessionSurfaceOp,
     getSessionContextSurfaceOp,
@@ -1346,6 +1594,8 @@ export const buildCatalog = (): readonly SurfaceOp[] =>
     updateDocumentSurfaceOp,
     proposeCorrectionsSurfaceOp,
     applyCorrectionsSurfaceOp,
+    replaceInDocumentSurfaceOp,
+    setSpeakerMapSurfaceOp,
     vaultWritebackSurfaceOp,
     ...(ADMIN_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),
     ...(VAULT_OPS as unknown as readonly AdminBoundOp<unknown, unknown>[]).map(adminSurfaceOp),

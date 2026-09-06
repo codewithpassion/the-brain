@@ -26,7 +26,7 @@ import {
   sessions,
 } from "../schema"
 import type { BrainDrizzle } from "../scoped/db"
-import { scopePredicate, visibilityPredicate } from "../scoped/predicates"
+import { liveEntityPredicate, scopePredicate, visibilityPredicate } from "../scoped/predicates"
 
 /** Dream/system authorship marker (matches the cron `systemAdmin` principal's userId). */
 export const SYSTEM_AUTHOR = "system"
@@ -109,13 +109,14 @@ export class EntityPageStore {
         visibility: entities.visibility,
         teamId: entities.teamId,
         mergedInto: entities.mergedInto,
+        deletedAt: entities.deletedAt,
       })
       .from(entities)
       .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, entityId)))
       .limit(1)
     const row = rows[0]
-    if (row === undefined || row.mergedInto !== null) return null
-    const { mergedInto: _drop, ...entity } = row
+    if (row === undefined || row.mergedInto !== null || row.deletedAt !== null) return null
+    const { mergedInto: _drop, deletedAt: _drop2, ...entity } = row
     return entity
   }
 
@@ -176,7 +177,7 @@ export class EntityPageStore {
         and(
           eq(entities.tenantId, this.p.tenantId),
           sql`lower(${entities.kind}) = ${kindSeg}`, // narrows via idx_entities_kind (real kinds)
-          sql`${entities.mergedInto} IS NULL`,
+          liveEntityPredicate(entities),
           this.entityVisible(),
         ),
       )
@@ -318,7 +319,7 @@ export class EntityPageStore {
         and(
           eq(entities.tenantId, entityRelations.tenantId),
           sql`${entities.id} = CASE WHEN ${entityRelations.fromEntityId} = ${entity.id} THEN ${entityRelations.toEntityId} ELSE ${entityRelations.fromEntityId} END`,
-          sql`${entities.mergedInto} IS NULL`,
+          liveEntityPredicate(entities),
         ),
       )
       .where(
@@ -435,6 +436,40 @@ export class EntityPageStore {
    * winner page exists, else a pending red link). A best-effort follow-on write AFTER `mergeEntities`
    * (NOT folded into its entity-graph batch); a no-op when the loser has no page or shares the slug.
    */
+  /**
+   * Soft-delete the minted page of an entity being deleted (`delete_entity`), so `wiki_list_pages`
+   * stops listing it. Returns the page id (for the caller to reap the page's backing document) or
+   * null when the entity never had a minted page (the lazy stub disappears with the entity).
+   */
+  async softDeleteEntityPage(
+    entityId: string,
+  ): Promise<{ pageId: string | null; slug: string | null }> {
+    if (this.p.readOnly) throw new Error("entity page delete denied: read-only principal")
+    const rows = await this.db
+      .select({ id: pages.id, slug: pages.slug })
+      .from(pages)
+      .where(
+        and(
+          eq(pages.tenantId, this.p.tenantId),
+          eq(pages.entityId, entityId),
+          eq(pages.ingestedVia, ENTITY_INGESTED_VIA),
+          sql`${pages.deletedAt} IS NULL`,
+        ),
+      )
+      .limit(1)
+    const page = rows[0]
+    if (page === undefined) return { pageId: null, slug: null }
+    const stamp = new Date().toISOString()
+    await this.pages.commitBatch([
+      this.db
+        .update(pages)
+        .set({ deletedAt: stamp, updatedAt: stamp })
+        .where(and(eq(pages.id, page.id), eq(pages.tenantId, this.p.tenantId))),
+      this.pages.auditStatement("entity.page.delete", page.slug),
+    ])
+    return { pageId: page.id, slug: page.slug }
+  }
+
   async repointMergedPage(
     loserId: string,
     winnerId: string,

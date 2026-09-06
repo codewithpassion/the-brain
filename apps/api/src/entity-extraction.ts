@@ -26,7 +26,12 @@ import {
   upsertEntityWithVectorDedup,
 } from "@brain/db"
 import type { Principal } from "@brain/shared"
-import { EMBED_BATCH_SIZE, EMBEDDING_MODEL, KG_BATCH_SIZE } from "@brain/shared"
+import {
+  EMBED_BATCH_SIZE,
+  EMBEDDING_MODEL,
+  isPlaceholderEntityName,
+  KG_BATCH_SIZE,
+} from "@brain/shared"
 import type { ApiBindings } from "./bindings"
 
 export interface EntityExtractionResult {
@@ -93,7 +98,12 @@ const parseKgJson = (text: string): KgExtractionResult | null => {
   return null
 }
 
-/** Coerce a loosely-typed parsed object into a `KgExtractionResult` (defensive). */
+/**
+ * Coerce a loosely-typed parsed object into a `KgExtractionResult` (defensive). Diarisation
+ * placeholders (`Speaker 0`, `Them`, `Me (Dominik)`…) are DROPPED here — as entities and as
+ * aliases — so a transcript never mints fake people; a relationship naming a dropped entity then
+ * self-skips downstream (its `nameToId` lookup misses).
+ */
 const normalizeKg = (raw: Record<string, unknown>): KgExtractionResult => {
   const entities = Array.isArray(raw.entities) ? raw.entities : []
   const relationships = Array.isArray(raw.relationships) ? raw.relationships : []
@@ -105,10 +115,12 @@ const normalizeKg = (raw: Record<string, unknown>): KgExtractionResult => {
       .map((entry) => ({
         name: String(entry.name ?? "").trim(),
         kind: String(entry.kind ?? "other").trim() || "other",
-        aliases: Array.isArray(entry.aliases) ? entry.aliases.map(String) : [],
+        aliases: Array.isArray(entry.aliases)
+          ? entry.aliases.map(String).filter((alias) => !isPlaceholderEntityName(alias))
+          : [],
         description: typeof entry.description === "string" ? entry.description : "",
       }))
-      .filter((entry) => entry.name.length > 0),
+      .filter((entry) => entry.name.length > 0 && !isPlaceholderEntityName(entry.name)),
     relationships: relationships
       .filter(
         (entry): entry is Record<string, unknown> => entry !== null && typeof entry === "object",

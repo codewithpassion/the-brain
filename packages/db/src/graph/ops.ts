@@ -6,7 +6,8 @@
  * SCOPE: the read surface — `traverse_graph`, `get_links`, `get_backlinks`, `get_tags`,
  * `get_timeline`, `list_entities`, `find_orphans`, `search_entities` — plus the W4.4 mutating
  * curation surface `add_link` / `add_tag` / `add_timeline_entry` (each a `write` op routed
- * through `ScopedGraph` with an in-batch audit row). The remaining §6.5 surface
+ * through `ScopedGraph` with an in-batch audit row) and the entity-curation contracts
+ * `delete_entity` / `merge_entities` (handlers in the surface catalog). The remaining §6.5 surface
  * (`remove_link` / `get_versions` / `revert_version` / `get_entity` / `entity_relations`) stays
  * DEFERRED.
  */
@@ -171,13 +172,18 @@ export const LIST_ENTITIES_OP = defineOp({
       .string()
       .optional()
       .describe("Filter by entity kind, e.g. 'person', 'org', 'concept'. Omit for all kinds."),
+    nameMatch: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Case-insensitive substring filter on the canonical name, e.g. 'speaker'."),
     limit: z
       .number()
       .int()
       .min(1)
-      .max(200)
+      .max(500)
       .default(50)
-      .describe("Max entities to return (1–200, default 50)."),
+      .describe("Max entities to return (1–500, default 50)."),
   }),
   output: z.object({
     entities: z.array(
@@ -332,6 +338,69 @@ export const ADD_TIMELINE_ENTRY_OP = defineOp({
   }),
 })
 
+// ── Entity curation (delete / merge; capability: write; handlers in the surface catalog) ──
+
+/**
+ * `delete_entity` — remove a knowledge-graph entity (e.g. a placeholder person like `Speaker 0`)
+ * that the wiki lane cannot touch. Soft by default (hidden, edges dropped, mentions left orphaned,
+ * projected wiki page soft-deleted, vector removed); `hard` destroys the row + mentions too.
+ * Handler lives in the surface catalog (needs ScopedServices for pages + vectors + backing docs).
+ */
+export const DELETE_ENTITY_OP = defineOp({
+  name: "delete_entity",
+  description:
+    "Delete a knowledge-graph entity by id (from list_entities / search_entities). Soft-delete by " +
+    "default: the entity is hidden from every read, its relation edges are dropped, its projected " +
+    "wiki page (entities/<kind>/<name>) is removed, and its mentions are left orphaned (source chunks " +
+    "are never deleted). A later re-extraction of the same name revives it. hard:true also destroys " +
+    "the row and its mentions (irreversible). Use for placeholder people such as 'Speaker 0' or " +
+    "'Them'; use merge_entities for duplicates of a real person.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    entityId: z.string().min(1).describe("Entity id from list_entities / search_entities."),
+    hard: z.boolean().default(false).describe("true = destroy the row and its mentions too."),
+  }),
+  output: z.object({
+    entityId: z.string(),
+    canonicalName: z.string(),
+    deleted: z.boolean(),
+    hard: z.boolean(),
+    relationsDropped: z.number().int(),
+    mentionsDropped: z.number().int(),
+    /** Slug of the projected wiki page that was removed, when one had been minted. */
+    pageSlug: z.string().nullable(),
+  }),
+})
+
+/**
+ * `merge_entities` — fold a duplicate entity INTO its canonical twin (mentions + edges re-pointed,
+ * colliding edges deduplicated, loser soft-deleted with `merged_into`, its page redirected). Reuses
+ * the audited Dream-dedup merge; handler in the surface catalog.
+ */
+export const MERGE_ENTITIES_OP = defineOp({
+  name: "merge_entities",
+  description:
+    "Merge one entity into another: re-points every mention and relation edge from 'fromEntityId' " +
+    "to 'intoEntityId' (deduplicating edges that would collide), folds the loser's name into the " +
+    "winner's aliases, soft-deletes the loser (reversible, merged_into) and redirects its wiki page. " +
+    "Use for duplicate people such as 'Dom' → 'Dominik Fretz'. Both ids come from list_entities.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    fromEntityId: z.string().min(1).describe("The duplicate to fold away (loser)."),
+    intoEntityId: z.string().min(1).describe("The canonical entity to keep (winner)."),
+  }),
+  output: z.object({
+    fromEntityId: z.string(),
+    intoEntityId: z.string(),
+    merged: z.boolean(),
+    intoCanonicalName: z.string(),
+    /** The winner's page slug the loser page now redirects to (when the loser had a page). */
+    redirectedTo: z.string().nullable(),
+  }),
+})
+
 // ── Bound handlers ────────────────────────────────────────────────────────────
 
 const specOf = (graph: "doc" | "entity") => (graph === "entity" ? ENTITY_GRAPH : DOC_GRAPH)
@@ -373,16 +442,19 @@ export const getTimelineOp: BoundOp<{ target: string }, { entries: TimelineRow[]
   handler: async (ctx, input) => ({ entries: await ctx.deps.graph.getTimeline(input.target) }),
 }
 
-export const listEntitiesOp: BoundOp<{ kind?: string; limit: number }, { entities: EntityRow[] }> =
-  {
-    def: LIST_ENTITIES_OP,
-    handler: async (ctx, input) => ({
-      entities: await ctx.deps.graph.listEntities({
-        ...(input.kind !== undefined ? { kind: input.kind } : {}),
-        limit: input.limit,
-      }),
+export const listEntitiesOp: BoundOp<
+  { kind?: string; nameMatch?: string; limit: number },
+  { entities: EntityRow[] }
+> = {
+  def: LIST_ENTITIES_OP,
+  handler: async (ctx, input) => ({
+    entities: await ctx.deps.graph.listEntities({
+      ...(input.kind !== undefined ? { kind: input.kind } : {}),
+      ...(input.nameMatch !== undefined ? { nameMatch: input.nameMatch } : {}),
+      limit: input.limit,
     }),
-  }
+  }),
+}
 
 export const listEntityEdgesOp: BoundOp<
   { limit: number },
@@ -444,5 +516,8 @@ export const GRAPH_OPS = [
 /** Register the graph op CONTRACTS into a shared `OpRegistry` (handlers bind in the Worker). */
 export const registerGraphOps = (registry: OpRegistry): OpRegistry => {
   for (const op of GRAPH_OPS) registry.register(op.def)
+  // delete_entity / merge_entities: handlers live in the surface catalog (need ScopedServices).
+  registry.register(DELETE_ENTITY_OP)
+  registry.register(MERGE_ENTITIES_OP)
   return registry
 }

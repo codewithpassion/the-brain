@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   applyAnchoredChanges,
   countOccurrences,
+  emptyProposalNote,
   parseProposedChanges,
   validateProposedChanges,
 } from "../src/corrections"
@@ -97,5 +98,20 @@ describe("countOccurrences", () => {
   test("counts non-overlapping; empty needle → 0", () => {
     expect(countOccurrences("aXbXc", "X")).toBe(2)
     expect(countOccurrences("abc", "")).toBe(0)
+  })
+})
+
+describe("emptyProposalNote", () => {
+  test("silent when there are changes or skips", () => {
+    expect(emptyProposalNote("{}", [], { changes: [{}], skipped: [] })).toBeNull()
+    expect(emptyProposalNote("{}", [], { changes: [], skipped: [{}] })).toBeNull()
+  })
+  test("names a failed call, unparseable (truncated) output, and a confident no-op", () => {
+    const empty = { changes: [], skipped: [] }
+    expect(emptyProposalNote(null, [], empty)).toMatch(/model call failed/)
+    expect(emptyProposalNote('{"changes":[{"before":"a"', [], empty)).toMatch(
+      /could not be parsed.*truncated.*replace_in_document/,
+    )
+    expect(emptyProposalNote('{"changes":[]}', [], empty)).toMatch(/no changes it was confident in/)
   })
 })

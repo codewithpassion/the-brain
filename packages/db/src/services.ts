@@ -39,7 +39,11 @@ export interface ScopedServices {
     /** READ path — `null` ⇒ evidence-without-synthesis. */
     gen: (prompt: string, system?: string) => Promise<string | null>
     /** KG-extraction READ path over EXTRACT_MODEL — `null` ⇒ extraction degrades (non-fatal). */
-    genExtract: (prompt: string, system?: string) => Promise<string | null>
+    genExtract: (
+      prompt: string,
+      system?: string,
+      opts?: { maxTokens?: number },
+    ) => Promise<string | null>
     /** READ path — degrades to RRF/identity order. */
     rerank: (query: string, candidates: RerankCandidate[], topK: number) => Promise<RerankHit[]>
     /**
@@ -95,7 +99,7 @@ export const createScopedServices = (
       embed: (texts) => embed(aiDeps, texts),
       embedForIndex: (texts) => embedForIndex(aiDeps, texts),
       gen: (prompt, system) => gen(aiDeps, prompt, system),
-      genExtract: (prompt, system) => genExtract(aiDeps, prompt, system),
+      genExtract: (prompt, system, opts) => genExtract(aiDeps, prompt, system, opts),
       rerank: (query, candidates, topK) => rerank(aiDeps, query, candidates, topK),
       toMarkdown: async (name: string, buf: ArrayBuffer): Promise<string> => {
         const results = await env.AI.toMarkdown([

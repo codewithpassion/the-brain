@@ -99,6 +99,7 @@ describe("migrations apply cleanly", () => {
       "0011_dream_runs_entitypages.sql",
       "0012_pages_document_idx.sql",
       "0013_dream_runs_indexes.sql",
+      "0014_entities_deleted_at.sql",
     ])
   })
 

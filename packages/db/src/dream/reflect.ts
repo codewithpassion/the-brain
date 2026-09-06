@@ -173,7 +173,7 @@ export const selectReflectionTargets = async (
         notAgentOrigin(documents.origin),
         notAgentAuthoredPage(pages.ingestedVia),
         isNull(documents.deletedAt), // a NULL join (session/page source) keeps the mention
-        liveEntityPredicate(entities.mergedInto), // never reflect on a D4 dedup loser
+        liveEntityPredicate(entities), // never reflect on a D4 dedup loser
         scopePredicate(principal, entities.scope),
       ),
     )

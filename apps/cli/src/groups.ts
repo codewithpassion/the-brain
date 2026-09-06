@@ -29,6 +29,8 @@ const GROUP_BY_OP: Record<string, Group> = {
   reprocess_document: "search",
   propose_corrections: "search",
   apply_corrections: "search",
+  replace_in_document: "search",
+  set_speaker_map: "search",
   // graph
   traverse_graph: "graph",
   get_links: "graph",
@@ -42,6 +44,8 @@ const GROUP_BY_OP: Record<string, Group> = {
   add_link: "graph",
   add_tag: "graph",
   add_timeline_entry: "graph",
+  delete_entity: "graph",
+  merge_entities: "graph",
   // wiki (first-class pages)
   wiki_save_page: "wiki",
   wiki_get_page: "wiki",

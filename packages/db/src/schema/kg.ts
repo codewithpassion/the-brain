@@ -43,6 +43,9 @@ export const entities = sqliteTable(
     // Soft-delete marker for Dream dedup (v2 W1/D4): non-null = merged INTO that winner entity;
     // the row survives (reversible) but is hidden from every entity read (softDeleteCol below).
     mergedInto: text("merged_into"),
+    // Soft-delete marker for `delete_entity` (non-null = hidden from every entity read, row kept so
+    // the UNIQUE `idx_entities_key` slot survives; a re-extraction of the same key REVIVES it).
+    deletedAt: text("deleted_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(), // updated_at > embedded_at drives computeStale
   },

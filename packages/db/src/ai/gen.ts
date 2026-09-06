@@ -71,6 +71,9 @@ export const gen = async (
   }
 }
 
+/** Room for a full KG batch's entity list (the 256-token Workers AI default truncates mid-JSON). */
+const DEFAULT_EXTRACT_MAX_TOKENS = 4096
+
 /**
  * KG-extraction generation over llama-3.1-8b (`EXTRACT_MODEL`, PRD §6.2). Same never-throws
  * contract as `gen()` (invariant 14) — returns `null` on any failure so entity extraction
@@ -81,7 +84,9 @@ export const genExtract = async (
   deps: AiDeps,
   prompt: string,
   system?: string,
+  opts?: { maxTokens?: number },
 ): Promise<string | null> => {
+  const maxTokens = opts?.maxTokens ?? DEFAULT_EXTRACT_MAX_TOKENS
   const messages: { role: string; content: string }[] = system
     ? [
         { role: "system", content: system },
@@ -92,6 +97,7 @@ export const genExtract = async (
     const model = deps.openaiConfig.extractModel ?? EXTRACT_MODEL
     return runGenOpenAi(deps.openaiConfig, messages, model, {
       response_format: { type: "json_object" },
+      max_tokens: maxTokens,
     }).catch(() => null)
   }
   try {
@@ -103,8 +109,8 @@ export const genExtract = async (
       EXTRACT_MODEL,
       // `max_tokens` is REQUIRED here: Workers AI defaults to 256 tokens, which truncates the KG
       // JSON mid-entity → unparseable → 0 entities (the empty-graph bug). Give it room for a full
-      // batch's entity list.
-      { messages, max_tokens: 4096 },
+      // batch's entity list; callers with bigger payloads (propose_corrections) raise it.
+      { messages, max_tokens: maxTokens },
       aiGateway(deps.gatewayId, deps.tenantId),
     )) as LlamaGenOutput
     const out = res.response

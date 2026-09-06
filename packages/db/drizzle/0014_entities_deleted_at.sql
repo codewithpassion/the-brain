@@ -1,0 +1,1 @@
+ALTER TABLE `entities` ADD `deleted_at` text;

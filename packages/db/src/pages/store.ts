@@ -106,6 +106,8 @@ export interface ExistingPageRow {
   scope: string | null
   visibility: string
   ingestedVia: string | null
+  /** The KG entity this page projects (entity pages only). */
+  entityId: string | null
   contentHash: string | null
   deletedAt: string | null
   type: string
@@ -261,6 +263,7 @@ export class PageStore {
         scope: pages.scope,
         visibility: pages.visibility,
         ingestedVia: pages.ingestedVia,
+        entityId: pages.entityId,
         contentHash: pages.contentHash,
         deletedAt: pages.deletedAt,
         type: pages.type,

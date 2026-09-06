@@ -154,6 +154,12 @@ export class WikiStore {
     if (existing.ingestedVia === "memory") {
       throw new Error(`${op}: slug '${slug}' is agent memory; edit it via memory_set`)
     }
+    if (existing.ingestedVia === "entity") {
+      throw new Error(
+        `${op}: slug '${slug}' is an entity page projected from the knowledge graph (entityId ${existing.entityId ?? "unknown"}); ` +
+          "it cannot be edited or deleted as a wiki page — use delete_entity({ entityId }) or merge_entities",
+      )
+    }
     throw new Error(`${op}: slug '${slug}' is in use by a non-wiki page`)
   }
 
@@ -362,6 +368,19 @@ export class WikiStore {
     ])
 
     return { fromSlug, toSlug, pageId: from.id }
+  }
+
+  /** `delete_entity`: soft-delete an entity's minted page (delegates to `EntityPageStore`). */
+  deleteEntityPage(entityId: string): Promise<{ pageId: string | null; slug: string | null }> {
+    return this.entityPages.softDeleteEntityPage(entityId)
+  }
+
+  /** `merge_entities`: redirect a merged loser's page to the winner's (delegates to `EntityPageStore`). */
+  repointEntityPage(
+    loserId: string,
+    winnerId: string,
+  ): Promise<{ repointed: boolean; winnerSlug?: string; loserPageId?: string }> {
+    return this.entityPages.repointMergedPage(loserId, winnerId)
   }
 
   /** Soft-delete a wiki page. Wiki-provenance only; idempotent (absent/already-deleted → false). */

@@ -636,7 +636,7 @@ export const getStatsCore = async (
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(entities)
-      .where(and(eq(entities.tenantId, tid), liveEntityPredicate(entities.mergedInto))), // exclude D4 dedup losers
+      .where(and(eq(entities.tenantId, tid), liveEntityPredicate(entities))), // exclude D4 dedup losers
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(sessionsTable)
@@ -1632,7 +1632,9 @@ export const PROPOSE_CORRECTIONS_OP = defineOp({
     "Propose text corrections for a document or wiki page WITHOUT changing anything. Runs an LLM pass " +
     "over the body using your instruction and returns anchored before/after changes (each anchor is a " +
     "verbatim snippet that matches exactly once) plus a diff preview and a 'skipped' list for ambiguous " +
-    "anchors. Review the changes, then pass the approved subset to apply_corrections. Nothing is written.",
+    "anchors. Review the changes, then pass the approved subset to apply_corrections. Nothing is written. " +
+    "For text that repeats many times (relabelling speakers), use replace_in_document instead — every " +
+    "anchor here must be unique, so a bulk relabel does not fit.",
   capability: "read",
   readOnly: true,
   input: z.object({
@@ -1662,6 +1664,8 @@ export const PROPOSE_CORRECTIONS_OP = defineOp({
     skipped: z.array(
       z.object({ before: z.string(), after: z.string(), reason: z.string(), why: z.string() }),
     ),
+    /** Why an EMPTY result is empty (model failure / unparseable, likely truncated, output). */
+    note: z.string().optional(),
   }),
 })
 
@@ -1692,6 +1696,114 @@ export const APPLY_CORRECTIONS_OP = defineOp({
     targetType: CorrectionTargetSchema,
     target: z.string(),
     applied: z.number().int(),
+    status: z.string(),
+  }),
+})
+
+// ── REPLACE_IN_DOCUMENT_OP / SET_SPEAKER_MAP_OP ───────────────────────────────
+
+/**
+ * `replace_in_document` — bulk find/replace over a document body (the tool `apply_corrections`
+ * cannot be: its anchors must match exactly once). Every rule matches against the ORIGINAL body in
+ * one pass; a zero-match rule, an `expectedCount` mismatch, or overlapping matches abort the whole
+ * call with nothing written. `dryRun` returns counts + a diff preview. Handler in the catalog.
+ */
+export const REPLACE_IN_DOCUMENT_OP = defineOp({
+  name: "replace_in_document",
+  description:
+    "Bulk find/replace across a document body, then reprocess it. Use for relabelling text that " +
+    "repeats many times (e.g. '**Speaker 0**:' → '**Zoe Smith**:' 791 times) — apply_corrections " +
+    "cannot, since its anchors must match exactly once. Fail-closed and atomic: every rule is matched " +
+    "against the ORIGINAL body in a single pass (rule 2 never sees rule 1's output); a rule matching " +
+    "zero times, an expectedCount mismatch, or overlapping matches abort the call with nothing written " +
+    "and the actual counts in the error. Use dryRun:true first to discover counts and preview a diff.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    documentId: z.string().min(1).describe("Document id from list_documents / get_document."),
+    replacements: z
+      .array(
+        z.object({
+          find: z.string().min(1).describe("Literal text to find (or a regex when isRegex)."),
+          replaceWith: z
+            .string()
+            .describe("Replacement text. For regex rules $1 / $<name> / $& templates expand."),
+          isRegex: z
+            .boolean()
+            .default(false)
+            .describe("Treat 'find' as a JS regex (default literal)."),
+          flags: z
+            .string()
+            .optional()
+            .describe("Regex flags (default 'g'; 'g' is always forced). Only gimsuy allowed."),
+          expectedCount: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Abort unless the rule matches exactly this many times."),
+        }),
+      )
+      .min(1),
+    dryRun: z
+      .boolean()
+      .default(false)
+      .describe("true = write nothing; return match counts + a diff preview (≤200 lines)."),
+  }),
+  output: z.object({
+    documentId: z.string(),
+    dryRun: z.boolean(),
+    results: z.array(z.object({ find: z.string(), count: z.number().int() })),
+    bytesBefore: z.number().int(),
+    bytesAfter: z.number().int(),
+    /** 'dry-run' | 'unchanged' | ingest status ('pending' / 'processing' / …). */
+    status: z.string(),
+    /** Present on dryRun: the capped line diff preview. */
+    diff: z.string().optional(),
+  }),
+})
+
+const SpeakerEntrySchema = z.object({
+  name: z.string().min(1).describe("The person's full name, e.g. 'Zoe Smith'."),
+  note: z.string().optional().describe("Short context, e.g. 'majority owner, Acme'."),
+})
+
+/**
+ * `set_speaker_map` — record who each diarised label in a transcript is (durable agent memory at
+ * `agent/meetings/speaker-map/<plaud-file-id | documentId>`, so a future re-ingest of the same audio
+ * can be resolved without a human) and, by default, relabel the body in place via the
+ * `replace_in_document` planner + emit the `## Speakers` header block. Handler in the catalog.
+ */
+export const SET_SPEAKER_MAP_OP = defineOp({
+  name: "set_speaker_map",
+  description:
+    "Record who each diarised speaker label in a transcript document is ('Speaker 0' → 'Zoe Smith'), " +
+    "storing the map as durable agent memory keyed by the recording (agent/meetings/speaker-map/<id>) " +
+    "so a re-ingest of the same audio resolves automatically. With applyToBody (default true) the " +
+    "body is relabelled in place ('**Speaker 0**' → '**Zoe Smith**'), a '## Speakers' block is " +
+    "added once under the header, and the document is reprocessed. Labels absent from the body are " +
+    "reported in skippedLabels, not fatal. Use a bucket description (not one name) for labels that " +
+    "cover several people.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    documentId: z.string().min(1).describe("Transcript document id."),
+    speakers: z
+      .record(z.string().min(1), SpeakerEntrySchema)
+      .describe('Label → person, e.g. {"Speaker 0": {"name": "Zoe Smith", "note": "Acme"}}.'),
+    applyToBody: z
+      .boolean()
+      .default(true)
+      .describe("Rewrite the labels in the body and reprocess (default true); false = store only."),
+  }),
+  output: z.object({
+    documentId: z.string(),
+    memorySlug: z.string(),
+    key: z.string(),
+    results: z.array(z.object({ find: z.string(), count: z.number().int() })),
+    skippedLabels: z.array(z.string()),
+    blockInserted: z.boolean(),
+    /** 'stored' (applyToBody=false) | 'unchanged' | ingest status. */
     status: z.string(),
   }),
 })
@@ -1762,5 +1874,7 @@ export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   registry.register(UPDATE_DOCUMENT_OP)
   registry.register(PROPOSE_CORRECTIONS_OP)
   registry.register(APPLY_CORRECTIONS_OP)
+  registry.register(REPLACE_IN_DOCUMENT_OP)
+  registry.register(SET_SPEAKER_MAP_OP)
   return registry
 }

@@ -34,6 +34,8 @@ export {
 } from "./constants"
 // ── Dashboard deep-link builders (read-op results → URLs into the frontend) ──
 export { type BrainDeepLinks, brainDeepLinks } from "./deep-links"
+// ── Truncation-salvage JSON parsing (shared by KG extractor + Dream judge) ───
+export { isPlaceholderEntityName } from "./entity-placeholders"
 export type { Capability, EntityVisibility, Role, TrustGrade, Visibility } from "./enums"
 // ── Enums / unions (governance + identity axes) ──────────────────────────────
 export {
@@ -58,7 +60,6 @@ export type { MarkdownHeading } from "./heading-anchors"
 export { extractHeadings, headingAnchor } from "./heading-anchors"
 // ── Ingestion params ─────────────────────────────────────────────────────────
 export type { IngestionParams } from "./ingest"
-// ── Truncation-salvage JSON parsing (shared by KG extractor + Dream judge) ───
 export { clampConfidence, extractJsonCandidates } from "./json"
 export type { AnyOpDef, DefineOpInput, OpDef, OpSurface } from "./ops"
 // ── Op-registry (single source of truth for MCP + tRPC + CLI) ────────────────

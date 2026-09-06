@@ -14,6 +14,7 @@ export type {
 export { searchEntities } from "./entities"
 export type { BoundOp as GraphBoundOp, GraphOpContext, GraphOpDeps } from "./ops"
 export {
+  DELETE_ENTITY_OP,
   FIND_ORPHANS_OP,
   GET_BACKLINKS_OP,
   GET_LINKS_OP,
@@ -22,6 +23,7 @@ export {
   GRAPH_OPS,
   LIST_ENTITIES_OP,
   LIST_ENTITY_EDGES_OP,
+  MERGE_ENTITIES_OP,
   registerGraphOps,
   SEARCH_ENTITIES_OP,
   TRAVERSE_OP,

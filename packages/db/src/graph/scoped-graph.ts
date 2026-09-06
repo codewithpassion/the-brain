@@ -606,7 +606,12 @@ export class ScopedGraph {
   // ── ENTITY READS (KG graph; scoped + {world,team} visibility) ──────────────────
 
   /** List entities, optionally by `kind`, ordered by recency. Scoped + visibility-gated. */
-  async listEntities(opts?: { kind?: string; limit?: number }): Promise<EntityRow[]> {
+  async listEntities(opts?: {
+    kind?: string
+    limit?: number
+    /** Case-insensitive substring filter on canonical_name (instr, not LIKE — D1's 50-byte cap). */
+    nameMatch?: string
+  }): Promise<EntityRow[]> {
     const rows = await this.db
       .select({
         id: entities.id,
@@ -623,10 +628,13 @@ export class ScopedGraph {
       .where(
         and(
           eq(entities.tenantId, this.p.tenantId),
-          liveEntityPredicate(entities.mergedInto), // hide Dream-dedup losers (D4)
+          liveEntityPredicate(entities), // hide Dream-dedup losers (D4)
           scopePredicate(this.p, entities.scope),
           entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
           opts?.kind ? eq(entities.kind, opts.kind) : undefined,
+          opts?.nameMatch
+            ? sql`instr(lower(${entities.canonicalName}), lower(${opts.nameMatch})) > 0`
+            : undefined,
         ),
       )
       .orderBy(desc(entities.updatedAt))
@@ -675,8 +683,8 @@ export class ScopedGraph {
       .where(
         and(
           eq(entityRelations.tenantId, this.p.tenantId),
-          liveEntityPredicate(ef.mergedInto), // both endpoints must be live (D4 dedup losers)
-          liveEntityPredicate(et.mergedInto),
+          liveEntityPredicate(ef), // both endpoints must be live (D4 dedup losers)
+          liveEntityPredicate(et),
           scopePredicate(this.p, ef.scope),
           entityVisibility(this.p, { visibility: ef.visibility, teamId: ef.teamId }),
           scopePredicate(this.p, et.scope),
@@ -715,7 +723,7 @@ export class ScopedGraph {
           and(
             eq(entities.tenantId, this.p.tenantId),
             inArray(entities.id, batch),
-            liveEntityPredicate(entities.mergedInto), // hide Dream-dedup losers (D4)
+            liveEntityPredicate(entities), // hide Dream-dedup losers (D4)
             scopePredicate(this.p, entities.scope),
             entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
           ),
@@ -808,7 +816,7 @@ export class ScopedGraph {
   private async findEntityOrphans(): Promise<OrphanReport> {
     const gate = and(
       eq(entities.tenantId, this.p.tenantId),
-      liveEntityPredicate(entities.mergedInto), // a merged loser is hidden, not an orphan (D4)
+      liveEntityPredicate(entities), // a merged loser is hidden, not an orphan (D4)
       scopePredicate(this.p, entities.scope),
       entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
     )
@@ -1120,9 +1128,12 @@ export class ScopedGraph {
     visibility: string
     teamId: string | null
   } | null> {
-    // NOTE: no `merged_into IS NULL` filter here — a merged loser STILL holds the UNIQUE
-    // `idx_entities_key` slot, so it must match (otherwise `createEntity` collides on the index).
-    // We match the key, then REDIRECT a merged hit to its live winner (D4 anti-resurrection).
+    // NOTE: no `merged_into IS NULL` / `deleted_at IS NULL` filter here — a merged loser or a
+    // soft-deleted entity STILL holds the UNIQUE `idx_entities_key` slot, so it must match
+    // (otherwise `createEntity` collides on the index and the whole document's extraction fails).
+    // A merged hit is REDIRECTED to its live winner (D4 anti-resurrection); a deleted hit is
+    // returned as-is and REVIVED by `mergeEntityInto` (the extractor found it again, so it is back —
+    // placeholders never reach here because `isPlaceholderEntityName` drops them upstream).
     const rows = await this.db
       .select({
         id: entities.id,
@@ -1198,6 +1209,7 @@ export class ScopedGraph {
         mentionCount: sql`${entities.mentionCount} + ${input.chunkIds.length}`,
         visibility: tier.visibility,
         teamId: tier.teamId,
+        deletedAt: null, // a re-extracted key revives a soft-deleted entity
         updatedAt: now(),
       })
       .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, targetId)))
@@ -1329,7 +1341,7 @@ export class ScopedGraph {
       .where(
         and(
           eq(entities.tenantId, this.p.tenantId),
-          liveEntityPredicate(entities.mergedInto),
+          liveEntityPredicate(entities),
           cursor === null ? undefined : sql`${entities.id} > ${cursor}`,
           scopePredicate(this.p, entities.scope),
           entityVisibility(this.p, { visibility: entities.visibility, teamId: entities.teamId }),
@@ -1356,7 +1368,7 @@ export class ScopedGraph {
   /** One entity's dedup-relevant fields (winner selection + the staleness/merged guard). */
   async getEntityForMerge(
     id: string,
-  ): Promise<(DedupEntity & { mergedInto: string | null }) | null> {
+  ): Promise<(DedupEntity & { mergedInto: string | null; deletedAt: string | null }) | null> {
     const rows = await this.db
       .select({
         id: entities.id,
@@ -1369,11 +1381,107 @@ export class ScopedGraph {
         embeddedAt: entities.embeddedAt,
         updatedAt: entities.updatedAt,
         mergedInto: entities.mergedInto,
+        deletedAt: entities.deletedAt,
       })
       .from(entities)
       .where(and(eq(entities.tenantId, this.p.tenantId), eq(entities.id, id)))
       .limit(1)
     return rows[0] ?? null
+  }
+
+  /**
+   * `delete_entity` (soft): hide the entity from every read (`deleted_at`), DROP its relation edges
+   * (both directions), and leave its mentions in place (they point at source chunks that still
+   * exist; the entity is simply no longer projected). The row keeps its UNIQUE key slot, so a later
+   * re-extraction of the same name REVIVES it via `findEntityByKey` → `mergeEntityInto` rather than
+   * colliding. One audited batch; tenant-forced. Returns the dropped-relation count.
+   */
+  async softDeleteEntity(entityId: string): Promise<{ relationsDropped: number }> {
+    if (this.p.readOnly) throw new Error("delete_entity denied: read-only principal")
+    const t = this.p.tenantId
+    const stamp = now()
+    const relations = await this.db.all<{
+      id: string
+      fromEntityId: string
+      toEntityId: string
+      kind: string
+    }>(sql`
+      SELECT id, from_entity_id AS fromEntityId, to_entity_id AS toEntityId, kind
+      FROM entity_relations
+      WHERE tenant_id = ${t} AND (from_entity_id = ${entityId} OR to_entity_id = ${entityId})`)
+    const statements: BatchStatement[] = [
+      this.db
+        .delete(entityRelations)
+        .where(
+          and(
+            eq(entityRelations.tenantId, t),
+            or(
+              eq(entityRelations.fromEntityId, entityId),
+              eq(entityRelations.toEntityId, entityId),
+            ),
+          ),
+        ),
+      this.db
+        .update(entities)
+        .set({ deletedAt: stamp, updatedAt: stamp })
+        .where(and(eq(entities.tenantId, t), eq(entities.id, entityId))),
+    ]
+    await batchWithAudit(this.db, this.p, statements, {
+      action: "entity.delete",
+      targetId: entityId,
+      diff: JSON.stringify({ entityId, deletedRelations: relations }),
+    })
+    return { relationsDropped: relations.length }
+  }
+
+  /**
+   * `delete_entity` (hard): remove the entity row, its mentions and its relations outright. NOT
+   * reversible — the audit row records what was destroyed. Tenant-forced; one batch.
+   */
+  async hardDeleteEntity(
+    entityId: string,
+  ): Promise<{ relationsDropped: number; mentionsDropped: number }> {
+    if (this.p.readOnly) throw new Error("delete_entity denied: read-only principal")
+    const t = this.p.tenantId
+    const [relCount] = await this.db.all<{ n: number }>(sql`
+      SELECT COUNT(*) AS n FROM entity_relations
+      WHERE tenant_id = ${t} AND (from_entity_id = ${entityId} OR to_entity_id = ${entityId})`)
+    const [mentionCount] = await this.db.all<{ n: number }>(sql`
+      SELECT COUNT(*) AS n FROM entity_mentions WHERE tenant_id = ${t} AND entity_id = ${entityId}`)
+    const [row] = await this.db
+      .select({ canonicalName: entities.canonicalName, kind: entities.kind })
+      .from(entities)
+      .where(and(eq(entities.tenantId, t), eq(entities.id, entityId)))
+      .limit(1)
+    const statements: BatchStatement[] = [
+      this.db
+        .delete(entityRelations)
+        .where(
+          and(
+            eq(entityRelations.tenantId, t),
+            or(
+              eq(entityRelations.fromEntityId, entityId),
+              eq(entityRelations.toEntityId, entityId),
+            ),
+          ),
+        ),
+      this.db
+        .delete(entityMentions)
+        .where(and(eq(entityMentions.tenantId, t), eq(entityMentions.entityId, entityId))),
+      this.db.delete(entities).where(and(eq(entities.tenantId, t), eq(entities.id, entityId))),
+    ]
+    await batchWithAudit(this.db, this.p, statements, {
+      action: "entity.delete.hard",
+      targetId: entityId,
+      diff: JSON.stringify({
+        entityId,
+        canonicalName: row?.canonicalName ?? null,
+        kind: row?.kind ?? null,
+        relationsDropped: relCount?.n ?? 0,
+        mentionsDropped: mentionCount?.n ?? 0,
+      }),
+    })
+    return { relationsDropped: relCount?.n ?? 0, mentionsDropped: mentionCount?.n ?? 0 }
   }
 
   /**
