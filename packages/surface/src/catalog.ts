@@ -1397,6 +1397,9 @@ const setSpeakerMapSurfaceOp: SurfaceOp = {
         description: `Who each diarised speaker label is in ${key}.`,
         tags: ["meeting", "speaker-map"],
         body: JSON.stringify(record, null, 2),
+        // Tenant-wide on purpose: the map is read back by the meetings sync (an API-key principal)
+        // that is not the OAuth user who wrote it; a private map would silently never apply.
+        visibility: "world",
       },
       new Date().toISOString(),
     )
