@@ -371,7 +371,9 @@ export class WikiStore {
   }
 
   /** `delete_entity`: soft-delete an entity's minted page (delegates to `EntityPageStore`). */
-  deleteEntityPage(entityId: string): Promise<{ pageId: string | null; slug: string | null }> {
+  deleteEntityPage(
+    entityId: string,
+  ): Promise<{ pageId: string | null; slug: string | null; title: string | null }> {
     return this.entityPages.softDeleteEntityPage(entityId)
   }
 

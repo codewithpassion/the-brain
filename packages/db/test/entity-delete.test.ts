@@ -148,10 +148,14 @@ describe("delete_entity store contract", () => {
     )
     // The entity-side delete removes the minted page instead.
     const page = await wiki.deleteEntityPage("e-speaker0")
-    expect(page).toEqual({ pageId: "pg-e", slug: "entities/person/speaker-0" })
+    expect(page).toEqual({ pageId: "pg-e", slug: "entities/person/speaker-0", title: "Speaker 0" })
     expect(
       count(sqlite, `SELECT COUNT(*) n FROM pages WHERE id='pg-e' AND deleted_at IS NOT NULL`),
     ).toBe(1)
-    expect(await wiki.deleteEntityPage("e-speaker0")).toEqual({ pageId: null, slug: null })
+    expect(await wiki.deleteEntityPage("e-speaker0")).toEqual({
+      pageId: null,
+      slug: null,
+      title: null,
+    })
   })
 })

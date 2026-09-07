@@ -229,8 +229,19 @@ const requireLiveEntity = async (
   op: string,
   entityId: string,
 ): Promise<{ id: string; name: string; kind: string }> => {
+  const entity = await findLiveEntity(services, op, entityId)
+  if (entity === null) throw new Error(`${op}: entity ${entityId} not found`)
+  return entity
+}
+
+/** Null when the id is unknown (a merged or already-deleted entity still throws a teaching error). */
+const findLiveEntity = async (
+  services: ScopedServices,
+  op: string,
+  entityId: string,
+): Promise<{ id: string; name: string; kind: string } | null> => {
   const row = await services.graph.getEntityForMerge(entityId)
-  if (row === null) throw new Error(`${op}: entity ${entityId} not found`)
+  if (row === null) return null
   if (row.mergedInto !== null) {
     throw new Error(`${op}: entity ${entityId} was already merged into ${row.mergedInto}`)
   }
@@ -242,13 +253,18 @@ const requireLiveEntity = async (
  * `delete_entity` — soft (default) or hard. Order: drop the projected page (+ reap its backing doc
  * off the read path, like `wiki_delete_page`), delete the graph rows, then the entity vector
  * (best-effort — the D1 row is the gate and the Dream sweep reconciles stale vectors).
+ *
+ * DANGLING PAGE: the orphan GC in `clearPriorExtraction` hard-deletes entity rows but leaves their
+ * minted pages behind, so `entities/person/speaker-0` can outlive its entity. When the id is
+ * unknown but a page still points at it, the page (and its backing doc) is removed and that is
+ * reported as the deletion; only an id with neither entity nor page is "not found".
  */
 const deleteEntitySurfaceOp: SurfaceOp = {
   def: DELETE_ENTITY_OP,
   invoke: async (ctx, input) => {
     const { entityId, hard } = DELETE_ENTITY_OP.input.parse(input)
     const services = createScopedServices(ctx.env, ctx.principal)
-    const entity = await requireLiveEntity(services, "delete_entity", entityId)
+    const entity = await findLiveEntity(services, "delete_entity", entityId)
     const page = await services.wiki.deleteEntityPage(entityId)
     if (page.pageId !== null) {
       const pageId = page.pageId
@@ -257,6 +273,18 @@ const deleteEntitySurfaceOp: SurfaceOp = {
           console.error("entity page backing-doc delete failed", pageId, err)
         }),
       )
+    }
+    if (entity === null) {
+      if (page.pageId === null) throw new Error(`delete_entity: entity ${entityId} not found`)
+      return {
+        entityId,
+        canonicalName: page.title,
+        deleted: true,
+        hard,
+        relationsDropped: 0,
+        mentionsDropped: 0,
+        pageSlug: page.slug,
+      }
     }
     const counts = hard
       ? await services.graph.hardDeleteEntity(entityId)

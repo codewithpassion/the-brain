@@ -443,10 +443,10 @@ export class EntityPageStore {
    */
   async softDeleteEntityPage(
     entityId: string,
-  ): Promise<{ pageId: string | null; slug: string | null }> {
+  ): Promise<{ pageId: string | null; slug: string | null; title: string | null }> {
     if (this.p.readOnly) throw new Error("entity page delete denied: read-only principal")
     const rows = await this.db
-      .select({ id: pages.id, slug: pages.slug })
+      .select({ id: pages.id, slug: pages.slug, title: pages.title })
       .from(pages)
       .where(
         and(
@@ -458,7 +458,7 @@ export class EntityPageStore {
       )
       .limit(1)
     const page = rows[0]
-    if (page === undefined) return { pageId: null, slug: null }
+    if (page === undefined) return { pageId: null, slug: null, title: null }
     const stamp = new Date().toISOString()
     await this.pages.commitBatch([
       this.db
@@ -467,7 +467,7 @@ export class EntityPageStore {
         .where(and(eq(pages.id, page.id), eq(pages.tenantId, this.p.tenantId))),
       this.pages.auditStatement("entity.page.delete", page.slug),
     ])
-    return { pageId: page.id, slug: page.slug }
+    return { pageId: page.id, slug: page.slug, title: page.title }
   }
 
   async repointMergedPage(
