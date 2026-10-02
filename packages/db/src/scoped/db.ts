@@ -632,6 +632,7 @@ export class ScopedDB {
     status: string
     bodyR2Key: string | null
     deletedAt: string | null
+    updatedAt: string | null
   } | null> {
     const rows = await this.db
       .select({
@@ -640,6 +641,7 @@ export class ScopedDB {
         status: documents.status,
         bodyR2Key: documents.bodyR2Key,
         deletedAt: documents.deletedAt,
+        updatedAt: documents.updatedAt,
       })
       .from(documents)
       .where(and(eq(documents.tenantId, this.p.tenantId), eq(documents.id, documentId)))

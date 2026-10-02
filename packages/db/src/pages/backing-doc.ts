@@ -28,6 +28,8 @@ import type { ScopedServices } from "../services"
 const WIKI_VIA = "wiki"
 const ENTITY_VIA = "entity"
 const REDIRECT_TYPE = "redirect"
+/** How long a pending/processing backing doc at the current fingerprint counts as in flight. */
+const IN_FLIGHT_WINDOW_MS = 15 * 60 * 1000
 
 /** The backing-document namespace for a page slug (`/wiki/<slug>`). */
 const backingDocPath = (slug: string): string => normalizePath(`/wiki/${slug}`) ?? "/wiki"
@@ -96,6 +98,21 @@ export const syncBackingDoc = async (
     existing.deletedAt === null &&
     existing.fingerprint === fp &&
     existing.status === "indexed"
+  ) {
+    return { documentId: existing.id, changed: false, excluded: false }
+  }
+
+  // In flight: the same content is already queued/ingesting. Re-dispatching would hard-delete the
+  // chunks the running ingest is writing (supersede) and start a second one — the read-path self-heal
+  // hits this whenever a page is viewed right after a save. Past the window it is treated as stuck
+  // (a lost dispatch or a crashed run) and re-synced, which is what self-heal is for.
+  if (
+    existing !== null &&
+    existing.deletedAt === null &&
+    existing.fingerprint === fp &&
+    (existing.status === "pending" || existing.status === "processing") &&
+    existing.updatedAt !== null &&
+    Date.now() - Date.parse(existing.updatedAt) < IN_FLIGHT_WINDOW_MS
   ) {
     return { documentId: existing.id, changed: false, excluded: false }
   }

@@ -596,8 +596,13 @@ const runPageIngest =
   async (params: BatchIngestParams): Promise<void> => {
     const workflow = ctx.env.BATCH_INGEST
     if (workflow) {
+      // A nonce per dispatch, like reprocess/update_document: every edit re-ingests the SAME
+      // documentId, and Workflows rejects a reused instance id, which left edited pages unindexed.
+      const nonce = crypto.randomUUID()
       await workflow.create({
-        id: await workflowInstanceId(`wiki-bd-${ctx.principal.tenantId}-${params.documentId}`),
+        id: await workflowInstanceId(
+          `wiki-bd-${ctx.principal.tenantId}-${params.documentId}-${nonce}`,
+        ),
         params: { principal: ctx.principal, ingest: params },
       })
     } else {

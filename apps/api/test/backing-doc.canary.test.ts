@@ -527,3 +527,44 @@ describe("backing-doc anti-loop (W-i4) — human page feeds the graph, agent pag
     expect(targetsA.some((t) => t.label === "Gadgetron")).toBe(false)
   })
 })
+
+describe("backing-doc re-ingest on edit (workflow dispatch + in-flight gate)", () => {
+  test("in flight: a same-content pending doc is not re-dispatched until it goes stale", async () => {
+    const vz = fakeVectorize()
+    const services = buildServices("bdF", vz.index, "Ignored")
+    const saved = await services.wiki.savePage({
+      slug: "guides/inflight",
+      type: "note",
+      visibility: "world",
+      body: "Queued for ingest but not yet indexed.",
+    })
+    // First sync dispatches but the "workflow" never runs → the doc stays pending.
+    let dispatches = 0
+    const queueOnly = async () => {
+      dispatches++
+    }
+    await syncBackingDoc(services, saved.pageId, queueOnly)
+    expect(dispatches).toBe(1)
+
+    // A read-path self-heal moments later must NOT supersede the in-flight ingest.
+    const again = await syncBackingDoc(services, saved.pageId, queueOnly)
+    expect(again?.changed).toBe(false)
+    expect(dispatches).toBe(1)
+
+    // Past the in-flight window it counts as stuck and is re-synced (self-heal).
+    await env_.DB.prepare(
+      "UPDATE documents SET updated_at=? WHERE tenant_id='bdF' AND slug='guides/inflight'",
+    )
+      .bind(STAMP)
+      .run()
+    const healed = await syncBackingDoc(services, saved.pageId, (p) =>
+      runBatchIngest(services, p).then(() => {}),
+    )
+    expect(healed?.changed).toBe(true)
+    expect(
+      await count(
+        "SELECT count(*) AS n FROM documents WHERE tenant_id='bdF' AND slug='guides/inflight' AND status='indexed'",
+      ),
+    ).toBe(1)
+  })
+})
