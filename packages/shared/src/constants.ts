@@ -14,9 +14,10 @@ export const GENERATION_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as co
 /** Cross-encoder reranker. */
 export const RERANK_MODEL = "@cf/baai/bge-reranker-base" as const
 /** KG / fact extraction model. NOTE: @cf/meta/llama-3.1-8b-instruct was DEPRECATED by Cloudflare
- * on 2026-05-30 (AiError 5028), which silently broke KG extraction → an empty entity graph. Use the
- * current model that GENERATION_MODEL already proves working on Workers AI. */
-export const EXTRACT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as const
+ * on 2026-05-30 (AiError 5028), which silently broke KG extraction → an empty entity graph.
+ * DeepSeek-V4-Flash answers in the OpenAI chat shape (`choices[]`, no `response`) and reasons by
+ * default; `genExtract` reads both shapes and turns thinking off. */
+export const EXTRACT_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731" as const
 /**
  * Speech-to-text (voice memo transcription, W3.2) — behind the `transcribe()` chokepoint.
  * `whisper-large-v3-turbo` takes a BASE64 audio string (not the base model's `number[]` shape, which

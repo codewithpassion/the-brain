@@ -75,7 +75,7 @@ export const gen = async (
 const DEFAULT_EXTRACT_MAX_TOKENS = 4096
 
 /**
- * KG-extraction generation over llama-3.1-8b (`EXTRACT_MODEL`, PRD §6.2). Same never-throws
+ * KG-extraction generation over `EXTRACT_MODEL` (PRD §6.2). Same never-throws
  * contract as `gen()` (invariant 14) — returns `null` on any failure so entity extraction
  * stays NON-FATAL. Requests `response_format: { type: 'json_object' }` for the structured KG
  * payload; the caller still applies truncation-salvage parsing on top.
@@ -101,19 +101,23 @@ export const genExtract = async (
     }).catch(() => null)
   }
   try {
-    // NOTE: do NOT pass `response_format: { type: "json_object" }` here — Workers AI's
-    // `@cf/meta/llama-3.1-8b-instruct` rejects that param (the call throws → null → 0 entities,
-    // which is what silently broke KG extraction). The EXTRACT_SYSTEM prompt instructs JSON-only
-    // output and the caller's `parseKgJson` salvages it. (The openai-compat path above keeps it.)
     const res = (await deps.ai.run(
       EXTRACT_MODEL,
-      // `max_tokens` is REQUIRED here: Workers AI defaults to 256 tokens, which truncates the KG
-      // JSON mid-entity → unparseable → 0 entities (the empty-graph bug). Give it room for a full
-      // batch's entity list; callers with bigger payloads (propose_corrections) raise it.
-      { messages, max_tokens: maxTokens },
+      {
+        messages,
+        // `max_tokens` is REQUIRED here: Workers AI defaults to 256 tokens, which truncates the KG
+        // JSON mid-entity → unparseable → 0 entities (the empty-graph bug). Give it room for a full
+        // batch's entity list; callers with bigger payloads (propose_corrections) raise it.
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        // The model reasons by default; reasoning tokens would eat `max_tokens` and truncate the JSON.
+        reasoning_effort: "none",
+        chat_template_kwargs: { enable_thinking: false },
+      },
       aiGateway(deps.gatewayId, deps.tenantId),
-    )) as LlamaGenOutput
-    const out = res.response
+    )) as LlamaGenOutput & OpenAiChatResponse
+    // OpenAI chat shape for current models; `response` kept for Llama-shaped ones.
+    const out = res.choices?.[0]?.message?.content ?? res.response
     return typeof out === "string" && out.length > 0 ? out : null
   } catch (err) {
     console.error("genExtract failed", err)

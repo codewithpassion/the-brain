@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { MONTHLY_COST_CEILING_USD } from "@brain/shared"
+import { EXTRACT_MODEL, MONTHLY_COST_CEILING_USD } from "@brain/shared"
 import { embed, embedForIndex } from "../src/ai/embed"
 import {
   type AiDeps,
@@ -497,5 +497,32 @@ describe.skipIf(!RUN_AI_GATES)("reranker shape gate [RUN_AI_GATES=1 required, PR
     }
     const hits = remapRerank(3, withOutOfRange)
     expect(hits).toEqual([{ index: 0, score: 0.82 }])
+  })
+})
+
+// ── genExtract() — Workers AI path ───────────────────────────────────────────
+
+describe("genExtract() — Workers AI", () => {
+  test("asks EXTRACT_MODEL for JSON with thinking off, and reads the OpenAI chat shape", async () => {
+    let capturedModel = ""
+    let capturedInputs: Record<string, unknown> = {}
+    const d = deps(async (model, inputs) => {
+      capturedModel = model
+      capturedInputs = inputs
+      return { choices: [{ message: { content: '{"entities":[]}' } }] }
+    })
+    const out = await genExtract(d, "extract")
+    expect(capturedModel).toBe(EXTRACT_MODEL)
+    expect(capturedInputs).toMatchObject({
+      response_format: { type: "json_object" },
+      reasoning_effort: "none",
+      chat_template_kwargs: { enable_thinking: false },
+    })
+    expect(out).toBe('{"entities":[]}')
+  })
+
+  test("still reads a Llama-shaped `response`", async () => {
+    const d = deps(async () => ({ response: '{"entities":[]}' }))
+    expect(await genExtract(d, "extract")).toBe('{"entities":[]}')
   })
 })
