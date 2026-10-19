@@ -61,6 +61,8 @@ export const MAX_BODY_BYTES = 8 * 1024 * 1024
  * guard, and copy all import it), so it can be raised toward 16 MiB (~79 MB) in a single edit.
  */
 export const AUDIO_MAX_BYTES = 12 * 1024 * 1024
+/** Lifetime of a `request_upload` URL (15 min). The URL is a bearer in a path, so keep it short. */
+export const UPLOAD_TOKEN_TTL_SECONDS = 15 * 60
 /** Max raw body accepted by the `/ingest` webhook (256 KiB). */
 export const INGEST_WEBHOOK_MAX_BYTES = 256 * 1024
 /** Max length of the `markdown_preview` stored in D1 (bodies live in R2). */

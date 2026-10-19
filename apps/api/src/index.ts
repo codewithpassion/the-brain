@@ -84,6 +84,7 @@ import {
   type SessionBindings,
   sessionServicesFor,
 } from "./sessions"
+import { isUploadPath, mountUploads } from "./uploads"
 import { mountVaultDav } from "./vault-dav"
 import { handleVaultEventQueue, type R2EventMessage } from "./vault-events/consume"
 
@@ -290,7 +291,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       isNotionPublicPath(c.req.path) ||
       // WebDAV facade does its own Basic auth — exempt from Clerk/bearer principal resolution.
       c.req.path === "/dav" ||
-      c.req.path.startsWith("/dav/")
+      c.req.path.startsWith("/dav/") ||
+      // Upload URLs (from `request_upload`) carry their own signed token; no bearer is sent.
+      isUploadPath(c.req.path)
     )
       return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
@@ -321,6 +324,10 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   // ── WebDAV sync facade (/dav, /dav/*) — exempted from the main auth middleware above,
   //    performs its own HTTP Basic auth via per-tenant vault credentials.
   mountVaultDav(app)
+
+  // ── Signed-URL upload target for request_upload/complete_ingest (/uploads/:token) — exempted from
+  //    the main auth middleware above; the token is the authorization.
+  mountUploads(app)
 
   // ── Notion OAuth callback (/notion/callback) — public browser redirect; verifies its own nonce.
   mountNotion(app)

@@ -25,6 +25,7 @@ import {
   breakGlassRead,
   CAPTURE_TURN_OP,
   type CaptureTurnRequest,
+  COMPLETE_INGEST_OP,
   CREATE_SNAPSHOT_OP,
   captureTurn,
   createBreakGlassAuditSink,
@@ -78,6 +79,7 @@ import {
   moveWikiPage,
   NOTION_OPS,
   normalizePath,
+  nowSeconds,
   OKF_EXPORT_OP,
   OKF_IMPORT_OP,
   PROPOSE_CORRECTIONS_OP,
@@ -86,6 +88,7 @@ import {
   RECALL_OP,
   REPLACE_IN_DOCUMENT_OP,
   REPROCESS_DOCUMENT_OP,
+  REQUEST_UPLOAD_OP,
   RESOLVE_CONTRADICTION_OP,
   REVIVE_FACT_OP,
   type RecallRequest,
@@ -103,6 +106,8 @@ import {
   saveWikiPage,
   searchOp,
   setMemory,
+  signUploadToken,
+  stagedUploadKey,
   submitMemoryReview,
   syncBackingDoc,
   type ThinkResult,
@@ -123,7 +128,12 @@ import {
 } from "@brain/db"
 import { fingerprint, toMarkdown, workflowInstanceId } from "@brain/ingest"
 import type { AnyOpDef, Principal } from "@brain/shared"
-import { type BrainDeepLinks, brainDeepLinks } from "@brain/shared"
+import {
+  type BrainDeepLinks,
+  brainDeepLinks,
+  MAX_BODY_BYTES,
+  UPLOAD_TOKEN_TTL_SECONDS,
+} from "@brain/shared"
 import type { SurfaceContext } from "./context"
 import {
   applyAnchoredChanges,
@@ -888,84 +898,172 @@ const addThoughtSurfaceOp: SurfaceOp = {
   },
 }
 
+/** Result of an ingest call (shared by `ingest_document` and `complete_ingest`). */
+interface IngestOutcome {
+  documentId: string | null
+  slug: string
+  status: "accepted" | "indexed" | "duplicate"
+  chunkCount: number
+}
+
 /**
- * `ingest_document` — fingerprint → R2 → insertDocument → BATCH_INGEST workflow (or inline).
- * Accepts text/markdown and text/plain content. Normalizes path, stores tags as a JSON array,
- * and sets created_at via insertDocument's forced `now`. Mirrors the POST /documents REST route.
+ * The shared ingest tail: normalize → fingerprint → R2 → insertDocument → BATCH_INGEST workflow (or
+ * inline). Used by `ingest_document` (content from the tool call) and `complete_ingest` (content from a
+ * staged upload). A UNIQUE conflict returns the promised `{status:'duplicate'}`.
+ */
+const ingestTextDocument = async (
+  ctx: SurfaceContext,
+  opName: string,
+  parsed: {
+    content: string
+    contentType: "text/markdown" | "text/plain"
+    title?: string | undefined
+    path?: string | undefined
+    tags?: string[] | undefined
+  },
+): Promise<IngestOutcome> => {
+  const services = createScopedServices(ctx.env, ctx.principal)
+  const markdown = toMarkdown(parsed.content, parsed.contentType)
+  if (markdown.trim().length === 0) {
+    throw new Error(`${opName}: extracted markdown is empty — nothing to ingest`)
+  }
+  const fp = await fingerprint(markdown)
+  const slug = `doc-${fp.slice(0, 12)}`
+  const documentId = crypto.randomUUID()
+  const r2Key = `documents/${documentId}`
+
+  // Insert the documents row; catch the UNIQUE-constraint conflict → dedup response.
+  let docId: string
+  try {
+    docId = await services.db.insertDocument({
+      id: documentId,
+      slug,
+      fingerprint: fp,
+      contentType: "text/markdown",
+      bodyR2Key: r2Key,
+      status: "pending",
+      ...(parsed.title !== undefined ? { title: parsed.title } : {}),
+      ...(parsed.tags !== undefined ? { tags: parsed.tags } : {}),
+      ...(parsed.path !== undefined ? { path: normalizePath(parsed.path) } : {}),
+    })
+  } catch {
+    const existing = (await services.db.listDocuments()).find(
+      (doc) => doc.fingerprint === fp || doc.slug === slug,
+    )
+    return {
+      documentId: existing?.id ?? null,
+      slug: existing?.slug ?? slug,
+      status: "duplicate",
+      chunkCount: 0,
+    }
+  }
+
+  // Body (extracted markdown) → R2 before triggering the pipeline.
+  await services.blobs.put(r2Key, markdown)
+
+  const normalizedPath = parsed.path !== undefined ? normalizePath(parsed.path) : null
+  const ingestParams = {
+    documentId: docId,
+    r2Key,
+    contentType: "text/markdown",
+    scope: null,
+    ...(normalizedPath !== null ? { path: normalizedPath } : {}),
+  }
+
+  // Deploy: dispatch the durable BATCH_INGEST Workflow; local/test: run inline.
+  const workflow = ctx.env.BATCH_INGEST
+  if (workflow) {
+    await workflow.create({
+      id: await workflowInstanceId(`ingest-${ctx.principal.tenantId}-${fp}`),
+      params: { principal: ctx.principal, ingest: ingestParams },
+    })
+    return { documentId: docId, slug, status: "accepted", chunkCount: 0 }
+  }
+
+  const result = await runBatchIngestCore(services, ingestParams)
+  // runBatchIngestCore returns "indexed" | "failed"; both map to "indexed" in the surface
+  // contract (a "failed" result throws inside runBatchIngestCore before returning "failed").
+  return { documentId: docId, slug, status: "indexed", chunkCount: result.chunkCount }
+}
+
+/**
+ * `ingest_document` — accepts text/markdown and text/plain content. Normalizes path, stores tags as a
+ * JSON array, and sets created_at via insertDocument's forced `now`. Mirrors the POST /documents REST
+ * route.
  */
 const ingestDocumentSurfaceOp: SurfaceOp = {
   def: INGEST_DOCUMENT_OP,
+  invoke: (ctx, input) =>
+    ingestTextDocument(
+      ctx,
+      "ingest_document",
+      INGEST_DOCUMENT_OP.input.parse(input) as Parameters<typeof ingestTextDocument>[2],
+    ),
+}
+
+/**
+ * `request_upload` — mint a signed, short-lived PUT URL for ONE staged blob. Stateless: the token
+ * carries tenant/user/uploadId/contentType/exp, so nothing is written until the agent PUTs.
+ */
+const requestUploadSurfaceOp: SurfaceOp = {
+  def: REQUEST_UPLOAD_OP,
   invoke: async (ctx, input) => {
-    const parsed = INGEST_DOCUMENT_OP.input.parse(input) as {
-      content: string
+    const parsed = REQUEST_UPLOAD_OP.input.parse(input) as {
+      contentType: "text/markdown" | "text/plain"
+      filename?: string
+    }
+    const uploadId = crypto.randomUUID()
+    const exp = nowSeconds() + UPLOAD_TOKEN_TTL_SECONDS
+    const token = await signUploadToken(ctx.env.DEVICE_FLOW_SECRET, {
+      tenantId: ctx.principal.tenantId,
+      userId: ctx.principal.userId,
+      uploadId,
+      contentType: parsed.contentType,
+      exp,
+    })
+    const url = `${ctx.env.API_URL ?? ""}/uploads/${token}`
+    return {
+      uploadId,
+      url,
+      expiresAt: new Date(exp * 1000).toISOString(),
+      maxBytes: MAX_BODY_BYTES,
+      curl: `curl -fsS -X PUT --data-binary @${JSON.stringify(parsed.filename ?? "file")} '${url}'`,
+    }
+  },
+}
+
+/**
+ * `complete_ingest` — read the staged blob (ScopedR2 prefixes the tenant, so a foreign or unknown
+ * uploadId is a plain not-found), run the shared ingest tail, then drop the staged copy.
+ */
+const completeIngestSurfaceOp: SurfaceOp = {
+  def: COMPLETE_INGEST_OP,
+  invoke: async (ctx, input) => {
+    const parsed = COMPLETE_INGEST_OP.input.parse(input) as {
+      uploadId: string
       title?: string
       path?: string
       tags?: string[]
-      contentType: "text/markdown" | "text/plain"
     }
     const services = createScopedServices(ctx.env, ctx.principal)
-    const contentType = parsed.contentType
-    const markdown = toMarkdown(parsed.content, contentType)
-    if (markdown.trim().length === 0) {
-      throw new Error("ingest_document: extracted markdown is empty — nothing to ingest")
-    }
-    const fp = await fingerprint(markdown)
-    const slug = `doc-${fp.slice(0, 12)}`
-    const documentId = crypto.randomUUID()
-    const r2Key = `documents/${documentId}`
-
-    // Insert the documents row; catch the UNIQUE-constraint conflict → dedup response.
-    let docId: string
-    try {
-      docId = await services.db.insertDocument({
-        id: documentId,
-        slug,
-        fingerprint: fp,
-        contentType: "text/markdown",
-        bodyR2Key: r2Key,
-        status: "pending",
-        ...(parsed.title !== undefined ? { title: parsed.title } : {}),
-        ...(parsed.tags !== undefined ? { tags: parsed.tags } : {}),
-        ...(parsed.path !== undefined ? { path: normalizePath(parsed.path) } : {}),
-      })
-    } catch {
-      const existing = (await services.db.listDocuments()).find(
-        (doc) => doc.fingerprint === fp || doc.slug === slug,
+    const key = stagedUploadKey(parsed.uploadId)
+    const staged = await services.blobs.get(key)
+    if (staged === null) {
+      throw new Error(
+        "complete_ingest: upload not found — PUT the file to the request_upload url first (urls expire after 15 min and each upload can be completed once)",
       )
-      return {
-        documentId: existing?.id ?? null,
-        slug: existing?.slug ?? slug,
-        status: "duplicate",
-        chunkCount: 0,
-      }
     }
-
-    // Body (extracted markdown) → R2 before triggering the pipeline.
-    await services.blobs.put(r2Key, markdown)
-
-    const normalizedPath = parsed.path !== undefined ? normalizePath(parsed.path) : null
-    const ingestParams = {
-      documentId: docId,
-      r2Key,
-      contentType: "text/markdown",
-      scope: null,
-      ...(normalizedPath !== null ? { path: normalizedPath } : {}),
-    }
-
-    // Deploy: dispatch the durable BATCH_INGEST Workflow; local/test: run inline.
-    const workflow = ctx.env.BATCH_INGEST
-    if (workflow) {
-      await workflow.create({
-        id: await workflowInstanceId(`ingest-${ctx.principal.tenantId}-${fp}`),
-        params: { principal: ctx.principal, ingest: ingestParams },
-      })
-      return { documentId: docId, slug, status: "accepted", chunkCount: 0 }
-    }
-
-    const result = await runBatchIngestCore(services, ingestParams)
-    // runBatchIngestCore returns "indexed" | "failed"; both map to "indexed" in the surface
-    // contract (a "failed" result throws inside runBatchIngestCore before returning "failed").
-    return { documentId: docId, slug, status: "indexed" as const, chunkCount: result.chunkCount }
+    const contentType =
+      staged.httpMetadata?.contentType === "text/plain" ? "text/plain" : "text/markdown"
+    const outcome = await ingestTextDocument(ctx, "complete_ingest", {
+      content: await staged.text(),
+      contentType,
+      title: parsed.title,
+      path: parsed.path,
+      tags: parsed.tags,
+    })
+    await services.blobs.delete(key)
+    return outcome
   },
 }
 
@@ -1623,6 +1721,8 @@ export const buildCatalog = (): readonly SurfaceOp[] =>
     listPendingReviewsSurfaceOp,
     resolveContradictionSurfaceOp,
     ingestDocumentSurfaceOp,
+    requestUploadSurfaceOp,
+    completeIngestSurfaceOp,
     addThoughtSurfaceOp,
     deleteDocumentSurfaceOp,
     getDocumentSurfaceOp,

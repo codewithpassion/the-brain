@@ -21,6 +21,7 @@ FIVE MEMORY LAYERS, addressed differently:
 CHOOSING A TOOL:
 - Remember a preference/decision/instruction verbatim → memory_set (NOT ingest_document).
 - Store reference content to find later → ingest_document.
+- Ingest a FILE on disk (or anything big) without reading it into context → request_upload, then \`curl\` the returned command, then complete_ingest(uploadId).
 - Quick one-liner capture (a passing thought, no title/path) → add_thought.
 - "What do I know about X?" → recall and/or traverse_graph.
 - "What do the documents say about X?" → think (answer) or search (passages).
@@ -45,7 +46,7 @@ The Brain is a persistent, multi-tenant memory platform. You reach it over MCP; 
 
 | Layer | Read with | Write with | Use when |
 |---|---|---|---|
-| **Content** (semantic) | \`search\` (passages), \`think\` (cited answer) | \`ingest_document\` | you want what *the documents* say |
+| **Content** (semantic) | \`search\` (passages), \`think\` (cited answer) | \`ingest_document\`, or \`request_upload\` + \`complete_ingest\` for files | you want what *the documents* say |
 | **Facts** (hot memory) | \`recall\` | (auto from sessions), \`forget_fact\` to retract | "what do I know about X / the user" |
 | **Agent memory** (addressable) | \`memory_get\`, \`memory_list\` | \`memory_set\`, \`memory_rollback\`, \`memory_forget\` | a preference/decision/instruction to recall verbatim |
 | **Wiki** (linked knowledge) | \`wiki_get_page\` (start at \`index\`), \`wiki_list_pages\`, \`get_backlinks\` | \`wiki_save_page\` | durable, explained knowledge you \`[[link]]\` and browse |
@@ -55,6 +56,7 @@ The Brain is a persistent, multi-tenant memory platform. You reach it over MCP; 
 The distinction that matters most: **memory vs content vs facts.**
 - **memory_set** = something you wrote on purpose and will re-read *exactly* (it is markdown + frontmatter, addressed by slug). It is **not** searched semantically — you load it by path.
 - **ingest_document** = reference content you'll later find by *meaning* (chunked + embedded → search/think).
+- **Files without context cost:** \`ingest_document\` makes you pass the whole text as a tool argument. If the content is a file on disk, call \`request_upload\` (returns a signed URL + a ready-made \`curl\` command, valid 15 min, max 8 MiB, text/markdown or text/plain), run the curl from a shell (no auth header), then call \`complete_ingest\` with the \`uploadId\` (plus optional title/path/tags). The bytes never pass through your context. Needs a shell with outbound HTTPS; without one, use \`ingest_document\`.
 - **facts** = small, time-stamped things learned in passing; you *recall* them, you don't address them.
 
 ## Agent memory in depth

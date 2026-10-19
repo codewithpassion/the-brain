@@ -40,11 +40,13 @@ export {
 } from "./principal"
 export type { ResolvePrincipalOptions } from "./resolve"
 export { activeTenant, resolvePrincipal } from "./resolve"
-export type { MachineTokenClaims } from "./tokens"
+export type { MachineTokenClaims, UploadTokenClaims } from "./tokens"
 export {
   nowSeconds,
   randomToken,
   sha256Hex,
   signMachineToken,
+  signUploadToken,
   verifyMachineToken,
+  verifyUploadToken,
 } from "./tokens"

@@ -107,3 +107,65 @@ export const verifyMachineToken = async (
     return null
   }
 }
+
+/** Claims of an upload token: just enough to write ONE staged blob into ONE tenant (not a credential). */
+export interface UploadTokenClaims {
+  tenantId: string
+  userId: string
+  uploadId: string
+  /** Baked in at mint time so the PUT route never trusts the request's Content-Type. */
+  contentType: string
+  /** Expiry, seconds. */
+  exp: number
+}
+
+// The MAC covers `upload.v1.` + body, so an upload token can never verify as a `bdev_` token
+// (whose MAC covers the bare body) even though both use DEVICE_FLOW_SECRET.
+const UPLOAD_MAC_DOMAIN = "upload.v1."
+
+/** Sign claims into a `bupl_${body}.${mac}` token. */
+export const signUploadToken = async (
+  secret: string,
+  claims: UploadTokenClaims,
+): Promise<string> => {
+  const body = toBase64Url(encoder.encode(JSON.stringify(claims)))
+  const key = await importHmacKey(secret)
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(UPLOAD_MAC_DOMAIN + body))
+  return `bupl_${body}.${toBase64Url(new Uint8Array(signature))}`
+}
+
+/** Verify a `bupl_` token; returns its claims, or `null` on any failure (bad MAC, malformed, expired). */
+export const verifyUploadToken = async (
+  secret: string,
+  token: string,
+  now: number,
+): Promise<UploadTokenClaims | null> => {
+  if (!token.startsWith("bupl_")) return null
+  const rest = token.slice("bupl_".length)
+  const dot = rest.indexOf(".")
+  if (dot < 0) return null
+  const body = rest.slice(0, dot)
+  try {
+    const key = await importHmacKey(secret)
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      fromBase64Url(rest.slice(dot + 1)),
+      encoder.encode(UPLOAD_MAC_DOMAIN + body),
+    )
+    if (!valid) return null
+    const claims = JSON.parse(decoder.decode(fromBase64Url(body))) as UploadTokenClaims
+    if (
+      typeof claims.tenantId !== "string" ||
+      typeof claims.userId !== "string" ||
+      typeof claims.uploadId !== "string" ||
+      typeof claims.contentType !== "string" ||
+      typeof claims.exp !== "number" ||
+      claims.exp <= now
+    )
+      return null
+    return claims
+  } catch {
+    return null
+  }
+}

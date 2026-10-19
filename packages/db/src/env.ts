@@ -52,6 +52,11 @@ export interface BrainBindings {
    */
   DASHBOARD_URL: string
   /**
+   * Public origin of this API Worker (no trailing slash). `request_upload` builds the absolute
+   * `PUT /uploads/<token>` URL from it. Optional: absent (tests) ⇒ the op returns a path-only URL.
+   */
+  API_URL?: string
+  /**
    * Clerk Backend API secret key (`sk_live_…` / `sk_test_…`). Used by `search_user_by_email` to
    * resolve a Clerk user from their email address via `GET /v1/users?email_address=`. Set via
    * `wrangler secret put CLERK_SECRET_KEY`; absent in the local test harness (tests stub the fetch).

@@ -1439,7 +1439,8 @@ export const INGEST_DOCUMENT_OP = defineOp({
   name: "ingest_document",
   description:
     "Ingest a text or markdown document into the searchable knowledge base. Returns 'accepted' (async workflow) or 'indexed' (inline) status. " +
-    "Use to add content that search/think can retrieve. Not for durable agent memory (use memory_set) or transient observations (those become facts).",
+    "Use to add content that search/think can retrieve. Not for durable agent memory (use memory_set) or transient observations (those become facts). " +
+    "This call carries the whole text through your context: for a file on disk or anything large, use request_upload + complete_ingest instead (upload the file with curl, no content in context).",
   capability: "write",
   readOnly: false,
   input: z.object({
@@ -1465,6 +1466,64 @@ export const INGEST_DOCUMENT_OP = defineOp({
     status: z.enum(["accepted", "indexed", "duplicate"]),
     chunkCount: z.number().int(),
   }),
+})
+
+// ── REQUEST_UPLOAD_OP / COMPLETE_INGEST_OP (ingest a file without loading it into context) ──────
+
+/**
+ * `request_upload` + `complete_ingest` — a two-step ingest for content an agent holds as a FILE:
+ * `request_upload` mints a short-lived, signed `PUT` URL; the agent uploads the file with `curl -T`
+ * (bytes go disk → Worker → R2, never through the model); `complete_ingest` then runs the normal ingest
+ * pipeline over the staged blob. Handlers live in the surface catalog (need ScopedServices).
+ */
+export const REQUEST_UPLOAD_OP = defineOp({
+  name: "request_upload",
+  description:
+    "Step 1 of 2 to ingest a FILE without loading it into your context. Returns a one-time PUT url (valid 15 min, max 8 MiB) and a ready-to-run curl command; " +
+    "run the curl from a shell (no auth header needed), then call complete_ingest with the returned uploadId. " +
+    "Use instead of ingest_document for files on disk or large text. Text/markdown only.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    contentType: z
+      .enum(["text/markdown", "text/plain"])
+      .optional()
+      .default("text/markdown")
+      .describe("Type of the file you will upload."),
+    filename: z
+      .string()
+      .optional()
+      .describe("Local file name; only used to fill the curl command (default 'file')."),
+  }),
+  output: z.object({
+    uploadId: z.string(),
+    url: z.string().describe("PUT target. Treat as a secret until used; expires at expiresAt."),
+    expiresAt: z.string().describe("ISO-8601 expiry of the url."),
+    maxBytes: z.number().int(),
+    curl: z.string().describe("Shell command that uploads the file to url."),
+  }),
+})
+
+/** R2 key (tenant-relative) of a staged upload; shared by the `PUT /uploads` route and `complete_ingest`. */
+export const stagedUploadKey = (uploadId: string): string => `uploads/${uploadId}`
+
+export const COMPLETE_INGEST_OP = defineOp({
+  name: "complete_ingest",
+  description:
+    "Step 2 of 2 (after request_upload and the curl PUT): ingest the uploaded file into the searchable knowledge base. " +
+    "Same result as ingest_document ('accepted' | 'indexed' | 'duplicate'). Fails with 'upload not found' if the PUT has not happened, the upload expired, or it was already completed.",
+  capability: "write",
+  readOnly: false,
+  input: z.object({
+    uploadId: z.string().min(1).describe("The uploadId returned by request_upload."),
+    title: z.string().optional(),
+    path: z
+      .string()
+      .optional()
+      .describe("Optional namespace path, e.g. '/project/x'. Used for filtering."),
+    tags: z.array(z.string()).optional().describe("Tags to attach for filtering."),
+  }),
+  output: INGEST_DOCUMENT_OP.output,
 })
 
 // ── ADD_THOUGHT_OP (W3.3 — quick thoughts) ────────────────────────────────────
@@ -1866,6 +1925,8 @@ export const registerAdminOps = (registry: OpRegistry): OpRegistry => {
   // update_document: registered separately; handlers live in the surface catalog (need
   // ScopedServices for blobs/vectors/db/workflow).
   registry.register(INGEST_DOCUMENT_OP)
+  registry.register(REQUEST_UPLOAD_OP)
+  registry.register(COMPLETE_INGEST_OP)
   registry.register(ADD_THOUGHT_OP)
   registry.register(DELETE_DOCUMENT_OP)
   registry.register(VAULT_WRITEBACK_OP)
