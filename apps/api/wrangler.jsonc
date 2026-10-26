@@ -191,6 +191,48 @@
   // `controller.cron`. (No local cron emulation in the test harness.)
   "triggers": {
     "crons": ["*/5 * * * *", "0 3 * * *"]
+  },
+
+  // ── Staging (workers.dev only; separate resources, never shares prod data) ───
+  // env blocks do not inherit bindings, so every binding the ingest path needs is repeated with
+  // `-staging` resource names. Deploy with `bun run deploy:staging`. Left out on purpose:
+  //   - Workflows (BATCH_INGEST etc.): /ingest/meet falls back to the inline `runBatchIngest`.
+  //   - Queues (backfill, reembed, vault-events, notion-events): producers are guarded with `?.`.
+  //   - Cron triggers and the Dream workflow: nothing to sweep on an empty staging DB.
+  // The BrainMCP Durable Object is kept because `createOAuthWorker` resolves it for /mcp.
+  "env": {
+    "staging": {
+      "name": "brain-api-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "the-brain-staging",
+          "database_id": "bea1a27f-8815-45ab-9c00-5e1ada124be3",
+          "migrations_dir": "../../packages/db/drizzle"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "fc04b1fd751b491bb7578a0d645e318f" }],
+      "r2_buckets": [{ "binding": "BODIES", "bucket_name": "the-brain-bodies-staging" }],
+      "ai": { "binding": "AI" },
+      "vectorize": [
+        { "binding": "CHUNK_INDEX", "index_name": "brain-chunks-staging" },
+        { "binding": "ENTITY_INDEX", "index_name": "brain-entities-staging" }
+      ],
+      "vars": {
+        "CLERK_FRONTEND_API": "electric-bonefish-70.clerk.accounts.dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_ZWxlY3RyaWMtYm9uZWZpc2gtNzAuY2xlcmsuYWNjb3VudHMuZGV2JA",
+        "AI_GATEWAY_ID": "default",
+        "AI_PROVIDER": "@cf",
+        "DASHBOARD_URL": "https://brain-dashboard.dominik-fretz.workers.dev",
+        "API_URL": "https://brain-api-staging.dominik-fretz.workers.dev",
+        "MEET_INGEST_TENANT_ID": "14b850b8-c903-4e28-9e7a-b2f2309f6be1"
+      },
+      "durable_objects": {
+        "bindings": [{ "name": "BRAIN_MCP", "class_name": "BrainMCP" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BrainMCP"] }],
+      "triggers": { "crons": [] }
+    }
   }
 
   // ── Deploy-only / FAKED-in-tests bindings (deliberately NOT declared here) ────

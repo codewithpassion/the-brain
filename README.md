@@ -127,6 +127,10 @@ bucket. The Brain mints a per-tenant WebDAV credential; every key is forced unde
 - The reserved `Brain/` folder is write-back only (Brain → vault) and is never re-ingested (no loop).
 - Revoking a credential in **Vault Sync** blocks all further syncs with that username immediately.
 
+## Staging
+
+`brain-api-staging` (workers.dev only) has its own D1, R2, KV and Vectorize indexes, all named `*-staging`. It has no Workflows, queues or crons, so `/ingest/meet` runs the inline ingest path. Deploy with `bun run --cwd apps/api deploy:staging`, check that the output says `brain-api-staging`, and never run it with prod secrets. Apply migrations with `wrangler d1 migrations apply DB --env staging --remote`. `MEET_INGEST_TOKEN` is a staging-only secret, and the `orgs` row for `MEET_INGEST_TENANT_ID` was inserted with SQL.
+
 ## Layout
 
 ```
