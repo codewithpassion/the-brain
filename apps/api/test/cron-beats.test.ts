@@ -26,7 +26,7 @@ async function runCron(cron: string, extra: Record<string, string>) {
     e: unknown,
     x: ExecutionContext,
   ) => Promise<void>
-  await run({ cron }, { ...env, ...extra }, ctx)
+  await run({ cron }, { ...env, HB_SERVICE: undefined, ...extra }, ctx)
   await Promise.allSettled(pending)
   return urls.filter((u) => u.includes("/hb/"))
 }

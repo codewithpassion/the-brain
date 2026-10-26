@@ -36,6 +36,25 @@ describe("beat", () => {
     expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe("Bearer t")
   })
 
+  test("uses the HB_SERVICE binding instead of global fetch when present", async () => {
+    const globalCalls = stubFetch(() => Promise.resolve(new Response(null, { status: 202 })))
+    const requests: Request[] = []
+    const HB_SERVICE = {
+      fetch: (request: Request) => {
+        requests.push(request)
+        return Promise.resolve(new Response(null, { status: 202 }))
+      },
+    }
+    const { ctx, settle } = makeCtx()
+    beat({ ...env, HB_SERVICE }, ctx, "my-job", "success")
+    await settle()
+    expect(globalCalls).toHaveLength(0)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.url).toBe("https://hb.example/hb/my-job/success")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer t")
+  })
+
   test("is off without HB_URL or HB_TOKEN", async () => {
     const calls = stubFetch(() => Promise.resolve(new Response(null, { status: 202 })))
     const { ctx, settle } = makeCtx()

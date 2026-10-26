@@ -34,7 +34,12 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       // RUN_AI_GATES plumbs the host env var INTO workerd (process.env is not visible inside
       // the worker) so the reranker live-shape gate can opt in; defaults off → visible skip.
-      miniflare: { bindings: { MIGRATIONS, RUN_AI_GATES: process.env.RUN_AI_GATES ?? "0" } },
+      // HB_SERVICE points at the control-plane engine, which does not exist in the test runtime.
+      // A stub keeps workerd booting.
+      miniflare: {
+        bindings: { MIGRATIONS, RUN_AI_GATES: process.env.RUN_AI_GATES ?? "0" },
+        serviceBindings: { HB_SERVICE: () => new Response(null, { status: 202 }) },
+      },
     }),
   ],
   test: {

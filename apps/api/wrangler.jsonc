@@ -66,6 +66,8 @@
     "API_URL": "https://brain-api.dominik-fretz.workers.dev",
     "HB_URL": "https://controlplane-engine.rockyshoreslabs.io"
   },
+  // Heartbeats go through a service binding: a Worker cannot fetch another Worker custom domain in the same zone.
+  "services": [{ "binding": "HB_SERVICE", "service": "control-plane-engine-production" }],
 
   // ── Workflows ────────────────────────────────────────────────────────────────
   // The durable Workflows, each backed by a `WorkflowEntrypoint` class exported from
@@ -233,6 +235,7 @@
         "bindings": [{ "name": "BRAIN_MCP", "class_name": "BrainMCP" }]
       },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BrainMCP"] }],
+      "services": [{ "binding": "HB_SERVICE", "service": "control-plane-engine-staging" }],
       "triggers": { "crons": [] }
     }
   }

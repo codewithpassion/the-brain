@@ -1,9 +1,12 @@
 /**
  * Control-plane job heartbeat. Copied into each repo, keep the copies identical.
- * Beats are off when HB_URL or HB_TOKEN is missing. A beat never throws and
- * never waits longer than 3 s, so monitoring cannot change a job's outcome.
+ * Beats are off when HB_URL or HB_TOKEN is missing. With an HB_SERVICE binding they
+ * go through it, because a Worker cannot fetch another Worker's custom domain in
+ * the same zone. A beat never throws and never waits longer than 3 s, so monitoring
+ * cannot change a job's outcome. redirect is "manual" because workerd rejects "error".
  */
 export interface BeatEnv {
+  HB_SERVICE?: { fetch: (request: Request) => Promise<Response> }
   HB_TOKEN?: string
   HB_URL?: string
 }
@@ -24,19 +27,20 @@ async function send(
   message: string | undefined,
 ): Promise<void> {
   try {
-    const response = await fetch(
-      `${(env.HB_URL ?? "").replace(TRAILING_SLASHES, "")}/hb/${systemId}/${phase}`,
-      {
-        body: JSON.stringify(message ? { message: message.slice(0, 500) } : {}),
-        headers: {
-          Authorization: `Bearer ${env.HB_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        redirect: "error",
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+    const url = `${(env.HB_URL ?? "").replace(TRAILING_SLASHES, "")}/hb/${systemId}/${phase}`
+    const init: RequestInit = {
+      body: JSON.stringify(message ? { message: message.slice(0, 500) } : {}),
+      headers: {
+        Authorization: `Bearer ${env.HB_TOKEN}`,
+        "Content-Type": "application/json",
       },
-    )
+      method: "POST",
+      redirect: "manual",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }
+    const response = env.HB_SERVICE
+      ? await env.HB_SERVICE.fetch(new Request(url, init))
+      : await fetch(url, init)
     await response.body?.cancel()
   } catch {
     // Swallowed on purpose. Fetch errors can carry request details.
