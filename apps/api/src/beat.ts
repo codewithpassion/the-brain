@@ -17,7 +17,7 @@ export interface BeatContext {
 
 export type BeatPhase = "start" | "success" | "fail"
 
-const TIMEOUT_MS = 3000
+const TIMEOUT_MS = 15_000
 const TRAILING_SLASHES = /\/+$/
 
 async function send(
