@@ -58,6 +58,7 @@ import {
   type ReembedMessage,
   runReembedSweep,
 } from "./backfill"
+import { type BeatEnv, withBeat } from "./beat"
 import type { ApiBindings } from "./bindings"
 import { isDeviceFlowPath, mountDeviceFlow } from "./device-flow/routes"
 import { type DreamBindings, runNightlyDreamSweep, runSessionContextRefreshSweep } from "./dream"
@@ -785,7 +786,7 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
  * The full deployed Worker env: the frozen `ApiBindings` plus the deploy-only Workflows/Queues
  * the P3/P5 cron + queue handlers reach (all OPTIONAL — absent in the local test harness).
  */
-type WorkerBindings = ApiBindings & SessionBindings & BackfillBindings & DreamBindings
+type WorkerBindings = ApiBindings & SessionBindings & BackfillBindings & DreamBindings & BeatEnv
 
 /**
  * `scheduled()` (every 5 minutes): the P5 idle-promotion + audit-export sweeps and the P3
@@ -801,28 +802,30 @@ const scheduled = async (
 ): Promise<void> => {
   // Nightly (03:00 UTC): the Dream engine consolidation sweep, one dispatch per tenant.
   if (controller.cron === "0 3 * * *") {
-    ctx.waitUntil(runNightlyDreamSweep(env))
+    ctx.waitUntil(withBeat(env, ctx, "brain-dream-nightly", () => runNightlyDreamSweep(env)))
     return
   }
   // Every 5 minutes: the P5 idle-promotion + audit-export sweeps and the P3 re-embed sweep.
   const cursors = createAuditExportCursorStore(env)
   ctx.waitUntil(
-    Promise.all([
-      runIdlePromotionSweep(env),
-      runAuditExportSweep(env, cursors),
-      runReembedSweep(env, {
-        enqueue: async (message) => {
-          await env.REEMBED_QUEUE?.send(message)
-        },
-      }),
-      runSessionContextRefreshSweep(env), // W2.2: cheap staleness-gated session-context refresh
-      // W3.1: Notion cron poll — enqueue changed pages onto the existing brain-backfill queue.
-      runNotionPollSweep(env, {
-        enqueue: async (message) => {
-          await env.BACKFILL_QUEUE?.send(message)
-        },
-      }),
-    ]),
+    withBeat(env, ctx, "brain-sweep", () =>
+      Promise.all([
+        runIdlePromotionSweep(env),
+        runAuditExportSweep(env, cursors),
+        runReembedSweep(env, {
+          enqueue: async (message) => {
+            await env.REEMBED_QUEUE?.send(message)
+          },
+        }),
+        runSessionContextRefreshSweep(env), // W2.2: cheap staleness-gated session-context refresh
+        // W3.1: Notion cron poll — enqueue changed pages onto the existing brain-backfill queue.
+        runNotionPollSweep(env, {
+          enqueue: async (message) => {
+            await env.BACKFILL_QUEUE?.send(message)
+          },
+        }),
+      ]),
+    ),
   )
 }
 

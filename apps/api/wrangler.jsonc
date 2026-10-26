@@ -63,7 +63,8 @@
     "AI_PROVIDER": "@cf",
     "DASHBOARD_URL": "https://brain-dashboard.dominik-fretz.workers.dev",
     // Public origin of this Worker; `request_upload` builds absolute upload URLs from it.
-    "API_URL": "https://brain-api.dominik-fretz.workers.dev"
+    "API_URL": "https://brain-api.dominik-fretz.workers.dev",
+    "HB_URL": "https://controlplane-engine.rockyshoreslabs.io"
   },
 
   // ── Workflows ────────────────────────────────────────────────────────────────
@@ -225,6 +226,7 @@
         "AI_PROVIDER": "@cf",
         "DASHBOARD_URL": "https://brain-dashboard.dominik-fretz.workers.dev",
         "API_URL": "https://brain-api-staging.dominik-fretz.workers.dev",
+        "HB_URL": "https://controlplane-engine-staging.rockyshoreslabs.io",
         "MEET_INGEST_TENANT_ID": "14b850b8-c903-4e28-9e7a-b2f2309f6be1"
       },
       "durable_objects": {
