@@ -83,4 +83,11 @@ export interface BrainBindings {
    * one-time handshake and set here. When unset the webhook endpoint no-ops (fail-closed).
    */
   NOTION_WEBHOOK_TOKEN?: string
+  /**
+   * Static bearer secret for `POST /ingest/meet` (gdrive-watcher). Secret: `.env` locally,
+   * `wrangler secret put MEET_INGEST_TOKEN` in prod. Unset ⇒ the route answers 503.
+   */
+  MEET_INGEST_TOKEN?: string
+  /** Tenant id `POST /ingest/meet` writes into (never caller-chosen). Unset ⇒ 503. */
+  MEET_INGEST_TENANT_ID?: string
 }

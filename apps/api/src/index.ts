@@ -65,6 +65,7 @@ import { HttpError } from "./http"
 import { type BatchIngestParams, runBatchIngest } from "./ingest"
 import { mcpApiHandler } from "./mcp/oauth-handler"
 import { isMcpPath, mountMcp } from "./mcp/routes"
+import { isMeetPath, mountMeet } from "./meet/routes"
 import { isNotionPublicPath, mountNotion } from "./notion/routes"
 import { runNotionPollSweep } from "./notion/sweep"
 import { handleNotionEventQueue, type NotionEventMessage } from "./notion-events/consume"
@@ -293,7 +294,9 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
       c.req.path === "/dav" ||
       c.req.path.startsWith("/dav/") ||
       // Upload URLs (from `request_upload`) carry their own signed token; no bearer is sent.
-      isUploadPath(c.req.path)
+      isUploadPath(c.req.path) ||
+      // gdrive-watcher dispatches carry a static bearer (MEET_INGEST_TOKEN) checked by the route.
+      isMeetPath(c.req.path)
     )
       return next()
     const principal = await resolvePrincipal(c.env, c.req.raw, {
@@ -328,6 +331,29 @@ export const createApp = (options: CreateAppOptions = {}): Hono<AppEnv> => {
   // ── Signed-URL upload target for request_upload/complete_ingest (/uploads/:token) — exempted from
   //    the main auth middleware above; the token is the authorization.
   mountUploads(app)
+
+  // ── gdrive-watcher receiver (/ingest/meet) — exempted above; own static-bearer auth + env tenant.
+  mountMeet(app, {
+    makeServices,
+    ingest: async (env, services, principal, params, fp) => {
+      const ingestParams: BatchIngestParams = {
+        documentId: params.documentId,
+        r2Key: params.r2Key,
+        contentType: "text/markdown",
+        scope: null,
+        ...(params.path !== null ? { path: params.path } : {}),
+      }
+      const workflow = options.inlineIngest ? undefined : env.BATCH_INGEST
+      if (workflow) {
+        await workflow.create({
+          id: await workflowInstanceId(`ingest-${principal.tenantId}-${fp}`),
+          params: { principal, ingest: ingestParams },
+        })
+        return { status: "accepted" as const, chunkCount: 0 }
+      }
+      return { ...(await runBatchIngest(services, ingestParams)) }
+    },
+  })
 
   // ── Notion OAuth callback (/notion/callback) — public browser redirect; verifies its own nonce.
   mountNotion(app)
